@@ -2,21 +2,12 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
 
   "functions": {
-    "api/index.js": {
-      "memory": 512,
-      "maxDuration": 15,
-      "includeFiles": "{index.html,assets/**,app-assets/**,server/**}"
-    },
-    "api/cron.js": {
-      "memory": 512,
-      "maxDuration": 60,
-      "includeFiles": "server/**"
-    }
+    "api/index.js": { "memory": 512, "maxDuration": 15 },
+    "api/cron.js":  { "memory": 512, "maxDuration": 60 }
   },
 
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/(.*)", "destination": "/api/index" }
+    { "source": "/((?!api/).*)", "destination": "/api/index" }
   ],
 
   "crons": [
