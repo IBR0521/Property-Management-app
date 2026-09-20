@@ -53,9 +53,8 @@ const server = createServer(async (req, res) => {
     /* --- static ---------------------------------------------------------- */
     if (req.method === "GET") {
       if (path === "/") {
-        // The marketing page is not part of this repository. When it is absent
-        // — a fresh clone, or a deployment that only runs the app — the root
-        // goes to the app rather than a bare 404.
+        // Marketing page at the root. If it is not deployed — an app-only
+        // install — the root goes to /app rather than a bare 404.
         if (serveFromRoot(res, "index.html")) return;
         return redirect(res, "/app");
       }

@@ -18,11 +18,22 @@ Full documentation, architecture and the pre-deployment checklist:
 ## What is in this repository
 
 ```
-server/               the application
+index.html            public marketing site, served at /
+assets/               its stylesheet and script
+                      (assets/css/styles.css is also the app's design system)
 app-assets/app.css    back-office layout
-assets/css/styles.css shared design tokens and components
+server/               the application
 ```
 
-The public marketing site is **not** tracked here — it is generated and owned
-separately. The server serves it at `/` when the file is present and redirects
-to `/app` when it is not, so this repository runs standalone.
+One server, one origin:
+
+| | |
+|---|---|
+| `/` | marketing site |
+| `/report` `/t/:token` | tenant repair intake and status — no account |
+| `/apply` `/a/:token` | rental application and document upload |
+| `/o/a/:token` `/o/s/:token` | owner approval and monthly statement |
+| `/app/*` | back office, staff session required |
+
+The runtime database in `data/` is not tracked — it is the system of record,
+so back it up rather than committing it.
