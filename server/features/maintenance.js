@@ -21,7 +21,7 @@ import { html, attr, raw } from "../lib/render.js";
 import { appPage, publicPage, notice, empty, tabs, PROPERTY_TABS } from "../views/layout.js";
 import { icons } from "../views/icons.js";
 import { navCounts } from "../lib/counts.js";
-import { storeMany } from "../lib/files.js";
+import { storeMany, fileUrl } from "../lib/files.js";
 import { CATEGORIES, category, assess } from "../lib/triage.js";
 
 const STATUS_TONE = {
@@ -35,11 +35,11 @@ export function registerMaintenance(router) {
      Public: tenant intake
      ====================================================================== */
 
-  router.get("/report", (ctx) => {
-    const company = get("SELECT * FROM company LIMIT 1");
+  router.get("/report", async (ctx) => {
+    const company = await get("SELECT * FROM company LIMIT 1");
     if (!company) return sendHtml(ctx.res, "Not configured", 500);
 
-    const units = unitOptions(company.id);
+    const units = await unitOptions(company.id);
     const chosenUnit = ctx.query.unit && units.find((u) => u.id === ctx.query.unit);
     const chosenCat = category(ctx.query.category);
 
@@ -60,10 +60,10 @@ export function registerMaintenance(router) {
     }));
   });
 
-  router.post("/report", (ctx) => {
-    const company = one("SELECT * FROM company LIMIT 1");
+  router.post("/report", async (ctx) => {
+    const company = await one("SELECT * FROM company LIMIT 1");
     const f = ctx.fields;
-    const unit = get(
+    const unit = await get(
       `SELECT u.*, p.line1, p.city, p.owner_id FROM unit u JOIN property p ON p.id = u.property_id
         WHERE u.id = ? AND u.company_id = ?`, String(f.unit_id || ""), company.id);
     const cat = category(String(f.category || ""));
@@ -85,16 +85,16 @@ export function registerMaintenance(router) {
     if (!choice) {
       return redirect(ctx.res, `${back}&e=${encodeURIComponent("Pick the line that's closest to the problem.")}`);
     }
-    const lease = get(
+    const lease = await get(
       "SELECT * FROM lease WHERE unit_id = ? AND status = 'active' ORDER BY start_date DESC LIMIT 1", unit.id);
 
-    const { stored, problems } = storeMany(ctx.files, "photos");
+    const { stored, problems } = await storeMany(ctx.files, "photos");
     const woId = id();
     const publicToken = token();
     const reference = ref("WO");
 
-    tx(() => {
-      insert("work_order", {
+    await tx(async () => {
+      await insert("work_order", {
         id: woId, company_id: company.id, unit_id: unit.id, lease_id: lease ? lease.id : null,
         reference, category: cat.key, severity, summary,
         detail: null,
@@ -107,23 +107,23 @@ export function registerMaintenance(router) {
       });
 
       for (const s of stored) {
-        insert("work_order_photo", {
+        await insert("work_order_photo", {
           id: id(), work_order_id: woId, path: s.path, phase: "report",
           mime: s.mime, bytes: s.bytes, created_at: stamp(),
         });
       }
 
-      event(woId, "tenant", "reported",
+      await event(woId, "tenant", "reported",
         `${cat.label} · ${severity}${stored.length ? ` · ${stored.length} photo(s)` : ""}`);
 
       if (severity === "emergency") {
         // Escalate, loudly, to the people who can act — and do not pretend to
         // the tenant that a queue entry is a response.
-        event(woId, "system", "escalated",
+        await event(woId, "system", "escalated",
           `Emergency at intake: ${reasons.join(" / ")}. Tenant directed to call ${company.emergency_phone || company.phone}.`);
         const to = company.emergency_phone || company.phone;
         if (to) {
-          insert("outbox", {
+          await insert("outbox", {
             id: id(), company_id: company.id, channel: "sms", to_contact: to,
             subject: `EMERGENCY ${reference}`,
             body: `${reference} ${cat.label} EMERGENCY at ${unit.line1}${unit.label ? " unit " + unit.label : ""}. `
@@ -131,8 +131,8 @@ export function registerMaintenance(router) {
             about_type: "work_order_emergency", about_id: woId, status: "queued", queued_at: stamp(),
           });
         }
-        for (const s of all("SELECT email FROM staff WHERE company_id = ? AND active = 1", company.id)) {
-          insert("outbox", {
+        for (const s of await all("SELECT email FROM staff WHERE company_id = ? AND active = 1", company.id)) {
+          await insert("outbox", {
             id: id(), company_id: company.id, channel: "email", to_contact: s.email,
             subject: `EMERGENCY ${reference} — ${unit.line1}`,
             body: `${reasons.join("\n")}\n\nTenant: ${f.name || "unknown"} ${phone}\nSummary: ${summary}`,
@@ -140,7 +140,7 @@ export function registerMaintenance(router) {
           });
         }
       } else {
-        autoRoute({ company, woId, cat, unit, severity });
+        await autoRoute({ company, woId, cat, unit, severity });
       }
     });
 
@@ -171,8 +171,8 @@ export function registerMaintenance(router) {
 
   /* Tenant status page. The tokenised URL is the credential, which is why the
      token is 32 bytes and the page shows no other tenant's data. */
-  router.get("/t/:tok", (ctx) => {
-    const wo = get(
+  router.get("/t/:tok", async (ctx) => {
+    const wo = await get(
       `SELECT w.*, u.label, p.line1, p.city, c.name AS company_name, c.phone AS company_phone,
               c.emergency_phone, v.name AS vendor_name, v.trade AS vendor_trade
          FROM work_order w
@@ -183,9 +183,9 @@ export function registerMaintenance(router) {
         WHERE w.public_token = ?`, ctx.params.tok);
     if (!wo) return sendHtml(ctx.res, "Not found", 404);
 
-    const events = all(
+    const events = await all(
       `SELECT * FROM work_order_event WHERE work_order_id = ? AND tenant_visible = 1 ORDER BY at`, wo.id);
-    const photos = all("SELECT * FROM work_order_photo WHERE work_order_id = ? ORDER BY created_at", wo.id);
+    const photos = await all("SELECT * FROM work_order_photo WHERE work_order_id = ? ORDER BY created_at", wo.id);
     const company = { name: wo.company_name, phone: wo.company_phone };
 
     sendHtml(ctx.res, publicPage({
@@ -230,7 +230,7 @@ export function registerMaintenance(router) {
           ? html`<div class="panel">
               <div class="panel__head"><h2>Photos on file</h2></div>
               <div class="panel__body"><div class="thumbs">
-                ${photos.map((p) => html`<a href="/uploads/${p.path}" target="_blank"><img src="/uploads/${p.path}" alt="" loading="lazy" /></a>`)}
+                ${photos.map((p) => html`<a href="${fileUrl(p.path)}" target="_blank"><img src="${fileUrl(p.path)}" alt="" loading="lazy" /></a>`)}
               </div></div>
             </div>`
           : ""}`,
@@ -242,7 +242,7 @@ export function registerMaintenance(router) {
      App: queue
      ====================================================================== */
 
-  router.get("/app/maintenance", (ctx) => {
+  router.get("/app/maintenance", async (ctx) => {
     const cid = ctx.staff.company_id;
     const filter = ctx.query.severity;
     const show = ctx.query.show || "open";
@@ -253,7 +253,7 @@ export function registerMaintenance(router) {
     if (show === "complete") where.push("w.status = 'complete'");
     if (filter === "emergency") where.push("w.severity = 'emergency'");
 
-    const rows = all(
+    const rows = await all(
       `SELECT w.*, u.label, p.line1, v.name AS vendor_name,
               (SELECT COUNT(*) FROM work_order_photo ph WHERE ph.work_order_id = w.id) AS photos
          FROM work_order w
@@ -265,7 +265,7 @@ export function registerMaintenance(router) {
       ...args);
 
     sendHtml(ctx.res, appPage({
-      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: navCounts(cid),
+      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
       title: "Maintenance",
       subtitle: `${rows.length} ${show === "open" ? "open" : show} request${rows.length === 1 ? "" : "s"}`,
       actions: html`
@@ -308,11 +308,11 @@ export function registerMaintenance(router) {
 
   /* --- staff-entered request (phone-reported) ---------------------------- */
 
-  router.get("/app/maintenance/new", (ctx) => {
+  router.get("/app/maintenance/new", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const units = unitOptions(cid);
+    const units = await unitOptions(cid);
     sendHtml(ctx.res, appPage({
-      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: navCounts(cid),
+      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
       title: "Log a request",
       subtitle: "For a repair a tenant phoned in, or something staff spotted",
       body: html`
@@ -379,21 +379,21 @@ export function registerMaintenance(router) {
     }));
   });
 
-  router.post("/app/maintenance/new", (ctx) => {
+  router.post("/app/maintenance/new", async (ctx) => {
     const cid = ctx.staff.company_id;
     const f = ctx.fields;
-    const unit = one(
+    const unit = await one(
       `SELECT u.*, p.line1, p.owner_id FROM unit u JOIN property p ON p.id = u.property_id
         WHERE u.id = ? AND u.company_id = ?`, String(f.unit_id || ""), cid);
     const cat = category(String(f.category || "")) || category("other");
     const severity = ["normal", "urgent", "emergency"].includes(f.severity) ? f.severity : "normal";
-    const lease = get("SELECT * FROM lease WHERE unit_id = ? AND status = 'active' LIMIT 1", unit.id);
+    const lease = await get("SELECT * FROM lease WHERE unit_id = ? AND status = 'active' LIMIT 1", unit.id);
     const woId = id();
     const reference = ref("WO");
-    const company = one("SELECT * FROM company WHERE id = ?", cid);
+    const company = await one("SELECT * FROM company WHERE id = ?", cid);
 
-    tx(() => {
-      insert("work_order", {
+    await tx(async () => {
+      await insert("work_order", {
         id: woId, company_id: cid, unit_id: unit.id, lease_id: lease ? lease.id : null,
         reference, category: cat.key, severity,
         summary: String(f.summary || "").trim() || "Reported by staff",
@@ -403,8 +403,8 @@ export function registerMaintenance(router) {
         reported_channel: "staff", status: "new",
         public_token: token(), created_at: stamp(),
       });
-      event(woId, ctx.staff.name, "reported", `Logged by staff · ${cat.label} · ${severity}`);
-      if (severity !== "emergency") autoRoute({ company, woId, cat, unit, severity });
+      await event(woId, ctx.staff.name, "reported", `Logged by staff · ${cat.label} · ${severity}`);
+      if (severity !== "emergency") await autoRoute({ company, woId, cat, unit, severity });
     });
 
     redirect(ctx.res, `/app/maintenance/${woId}`);
@@ -412,9 +412,9 @@ export function registerMaintenance(router) {
 
   /* --- detail ------------------------------------------------------------ */
 
-  router.get("/app/maintenance/:id", (ctx) => {
+  router.get("/app/maintenance/:id", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const wo = get(
+    const wo = await get(
       `SELECT w.*, u.label, u.id AS unit_id, p.line1, p.city, p.owner_id,
               o.name AS owner_name, o.approval_threshold_cents,
               v.name AS vendor_name, v.phone AS vendor_phone
@@ -426,17 +426,17 @@ export function registerMaintenance(router) {
         WHERE w.id = ? AND w.company_id = ?`, ctx.params.id, cid);
     if (!wo) return sendHtml(ctx.res, "Not found", 404);
 
-    const events = all("SELECT * FROM work_order_event WHERE work_order_id = ? ORDER BY at DESC", wo.id);
-    const photos = all("SELECT * FROM work_order_photo WHERE work_order_id = ? ORDER BY created_at", wo.id);
-    const vendors = all(
+    const events = await all("SELECT * FROM work_order_event WHERE work_order_id = ? ORDER BY at DESC", wo.id);
+    const photos = await all("SELECT * FROM work_order_photo WHERE work_order_id = ? ORDER BY created_at", wo.id);
+    const vendors = await all(
       "SELECT * FROM vendor WHERE company_id = ? AND active = 1 ORDER BY trade, name", cid);
-    const approval = get(
+    const approval = await get(
       "SELECT * FROM owner_approval WHERE work_order_id = ? ORDER BY requested_at DESC LIMIT 1", wo.id);
     const triage = wo.triage_answers ? JSON.parse(wo.triage_answers) : null;
     const done = wo.status === "complete" || wo.status === "cancelled";
 
     sendHtml(ctx.res, appPage({
-      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: navCounts(cid),
+      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
       title: `${wo.reference} · ${wo.summary}`,
       subtitle: `${wo.line1}${wo.label ? `, unit ${wo.label}` : ""} · owner ${wo.owner_name}`,
       actions: html`
@@ -490,7 +490,7 @@ export function registerMaintenance(router) {
                 ? html`<div style="margin-top:1.25rem">
                     <span class="tile__label">Photos</span>
                     <div class="thumbs" style="margin-top:0.5rem">
-                      ${photos.map((p) => html`<a href="/uploads/${p.path}" target="_blank"><img src="/uploads/${p.path}" alt="${p.phase}" loading="lazy" /></a>`)}
+                      ${photos.map((p) => html`<a href="${fileUrl(p.path)}" target="_blank"><img src="${fileUrl(p.path)}" alt="${p.phase}" loading="lazy" /></a>`)}
                     </div>
                   </div>`
                 : ""}
@@ -522,34 +522,34 @@ export function registerMaintenance(router) {
 
   /* --- actions ----------------------------------------------------------- */
 
-  router.post("/app/maintenance/:id/assign", (ctx) => {
+  router.post("/app/maintenance/:id/assign", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const wo = loadForWrite(ctx.params.id, cid);
+    const wo = await loadForWrite(ctx.params.id, cid);
     const vendorId = String(ctx.fields.vendor_id || "");
-    const vendor = one("SELECT * FROM vendor WHERE id = ? AND company_id = ?", vendorId, cid);
+    const vendor = await one("SELECT * FROM vendor WHERE id = ? AND company_id = ?", vendorId, cid);
     const estimate = parseMoney(ctx.fields.estimate);
 
-    const owner = one(
+    const owner = await one(
       `SELECT o.* FROM owner o JOIN property p ON p.owner_id = o.id
          JOIN unit u ON u.property_id = p.id WHERE u.id = ?`, wo.unit_id);
 
-    tx(() => {
-      update("work_order", wo.id, { vendor_id: vendor.id, estimate_cents: estimate });
+    await tx(async () => {
+      await update("work_order", wo.id, { vendor_id: vendor.id, estimate_cents: estimate });
 
       /* The threshold gate. Above it, the owner is asked and the vendor is
          not dispatched — that is the whole point of recording a threshold. */
       if (estimate != null && estimate > owner.approval_threshold_cents) {
         const apprId = id();
         const tok = token();
-        insert("owner_approval", {
+        await insert("owner_approval", {
           id: apprId, company_id: cid, owner_id: owner.id, work_order_id: wo.id,
           amount_cents: estimate, status: "pending", token: tok, requested_at: stamp(),
         });
-        update("work_order", wo.id, { status: "awaiting_owner" });
-        event(wo.id, ctx.staff.name, "owner_asked",
+        await update("work_order", wo.id, { status: "awaiting_owner" });
+        await event(wo.id, ctx.staff.name, "owner_asked",
           `${usd(estimate)} is over the ${usd(owner.approval_threshold_cents)} threshold — ${owner.name} asked to approve.`);
         if (owner.email) {
-          insert("outbox", {
+          await insert("outbox", {
             id: id(), company_id: cid, channel: "email", to_contact: owner.email,
             subject: `Approval needed: ${usd(estimate)} at ${wo.line1}`,
             body: `${wo.summary}\n\nEstimate ${usd(estimate)} from ${vendor.name}.\n\n`
@@ -558,11 +558,11 @@ export function registerMaintenance(router) {
           });
         }
       } else {
-        update("work_order", wo.id, { status: "assigned" });
-        event(wo.id, ctx.staff.name, "assigned",
+        await update("work_order", wo.id, { status: "assigned" });
+        await event(wo.id, ctx.staff.name, "assigned",
           `${vendor.name} (${vendor.trade})${estimate != null ? ` · estimate ${usd(estimate)}` : ""}`);
         if (vendor.email || vendor.phone) {
-          insert("outbox", {
+          await insert("outbox", {
             id: id(), company_id: cid, channel: vendor.email ? "email" : "sms",
             to_contact: vendor.email || vendor.phone,
             subject: `${wo.reference} — ${wo.summary}`,
@@ -578,40 +578,40 @@ export function registerMaintenance(router) {
     redirect(ctx.res, `/app/maintenance/${wo.id}?m=${encodeURIComponent("Vendor recorded.")}`);
   });
 
-  router.post("/app/maintenance/:id/schedule", (ctx) => {
+  router.post("/app/maintenance/:id/schedule", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const wo = loadForWrite(ctx.params.id, cid);
+    const wo = await loadForWrite(ctx.params.id, cid);
     const start = String(ctx.fields.start || "").trim();
     if (!start) throw new BadRequest("Pick a date and time for the visit.");
-    tx(() => {
-      update("work_order", wo.id, {
+    await tx(async () => {
+      await update("work_order", wo.id, {
         scheduled_start: start,
         scheduled_end: String(ctx.fields.end || "").trim() || null,
         status: "scheduled",
       });
-      event(wo.id, ctx.staff.name, "scheduled", `Visit set for ${humanStamp(start)}`);
+      await event(wo.id, ctx.staff.name, "scheduled", `Visit set for ${humanStamp(start)}`);
     });
     redirect(ctx.res, `/app/maintenance/${wo.id}?m=${encodeURIComponent("Visit booked — the tenant's status page now shows it.")}`);
   });
 
-  router.post("/app/maintenance/:id/complete", (ctx) => {
+  router.post("/app/maintenance/:id/complete", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const wo = loadForWrite(ctx.params.id, cid);
+    const wo = await loadForWrite(ctx.params.id, cid);
     const actual = parseMoney(ctx.fields.actual);
-    const { stored, problems } = storeMany(ctx.files, "photos");
-    const owner = one(
+    const { stored, problems } = await storeMany(ctx.files, "photos");
+    const owner = await one(
       `SELECT o.*, p.id AS property_id FROM owner o JOIN property p ON p.owner_id = o.id
          JOIN unit u ON u.property_id = p.id WHERE u.id = ?`, wo.unit_id);
 
-    tx(() => {
-      update("work_order", wo.id, { status: "complete", actual_cents: actual, closed_at: stamp() });
+    await tx(async () => {
+      await update("work_order", wo.id, { status: "complete", actual_cents: actual, closed_at: stamp() });
       for (const s of stored) {
-        insert("work_order_photo", {
+        await insert("work_order_photo", {
           id: id(), work_order_id: wo.id, path: s.path, phase: "completion",
           mime: s.mime, bytes: s.bytes, created_at: stamp(),
         });
       }
-      event(wo.id, ctx.staff.name, "completed",
+      await event(wo.id, ctx.staff.name, "completed",
         `${actual != null ? usd(actual) : "no cost recorded"}${stored.length ? ` · ${stored.length} photo(s)` : ""}`
         + `${ctx.fields.note ? ` · ${String(ctx.fields.note).trim()}` : ""}`);
 
@@ -619,7 +619,7 @@ export function registerMaintenance(router) {
          attached. This is the link that makes the monthly statement cheap to
          produce and hard to argue with. */
       if (actual != null && actual > 0) {
-        insert("ledger_entry", {
+        await insert("ledger_entry", {
           id: id(), company_id: cid, owner_id: owner.id, property_id: owner.property_id,
           unit_id: wo.unit_id, lease_id: wo.lease_id, date: today(),
           kind: "expense", amount_cents: -Math.abs(actual),
@@ -632,22 +632,22 @@ export function registerMaintenance(router) {
     redirect(ctx.res, `/app/maintenance/${wo.id}?m=${encodeURIComponent(msg)}`);
   });
 
-  router.post("/app/maintenance/:id/note", (ctx) => {
+  router.post("/app/maintenance/:id/note", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const wo = loadForWrite(ctx.params.id, cid);
+    const wo = await loadForWrite(ctx.params.id, cid);
     const note = String(ctx.fields.note || "").trim();
     if (note) {
-      event(wo.id, ctx.staff.name, "note", note, ctx.fields.tenant_visible === "yes" ? 1 : 0);
+      await event(wo.id, ctx.staff.name, "note", note, ctx.fields.tenant_visible === "yes" ? 1 : 0);
     }
     redirect(ctx.res, `/app/maintenance/${wo.id}`);
   });
 
-  router.post("/app/maintenance/:id/cancel", (ctx) => {
+  router.post("/app/maintenance/:id/cancel", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const wo = loadForWrite(ctx.params.id, cid);
-    tx(() => {
-      update("work_order", wo.id, { status: "cancelled", closed_at: stamp() });
-      event(wo.id, ctx.staff.name, "cancelled", String(ctx.fields.note || "").trim() || null);
+    const wo = await loadForWrite(ctx.params.id, cid);
+    await tx(async () => {
+      await update("work_order", wo.id, { status: "cancelled", closed_at: stamp() });
+      await event(wo.id, ctx.staff.name, "cancelled", String(ctx.fields.note || "").trim() || null);
     });
     redirect(ctx.res, `/app/maintenance/${wo.id}`);
   });
@@ -657,15 +657,15 @@ export function registerMaintenance(router) {
    Helpers
    ========================================================================== */
 
-function loadForWrite(woId, cid) {
-  return one(
+async function loadForWrite(woId, cid) {
+  return await one(
     `SELECT w.*, u.label, p.line1 FROM work_order w
        JOIN unit u ON u.id = w.unit_id JOIN property p ON p.id = u.property_id
       WHERE w.id = ? AND w.company_id = ?`, woId, cid);
 }
 
-export function event(woId, actor, kind, note, tenantVisible = 1) {
-  insert("work_order_event", {
+export async function event(woId, actor, kind, note, tenantVisible = 1) {
+  await insert("work_order_event", {
     id: id(), work_order_id: woId, at: stamp(), actor, kind,
     note: note || null, tenant_visible: tenantVisible,
   });
@@ -673,24 +673,24 @@ export function event(woId, actor, kind, note, tenantVisible = 1) {
 
 /* Routes by the company's rules, lowest rank first. Recording that no rule
    matched is more useful than silently leaving the field null. */
-function autoRoute({ company, woId, cat, unit, severity }) {
-  const rule = get(
+async function autoRoute({ company, woId, cat, unit, severity }) {
+  const rule = await get(
     `SELECT r.*, v.name, v.trade, v.after_hours FROM routing_rule r
        JOIN vendor v ON v.id = r.vendor_id
       WHERE r.company_id = ? AND r.category = ? AND v.active = 1
       ORDER BY r.rank LIMIT 1`, company.id, cat.key);
 
   if (!rule) {
-    event(woId, "system", "triaged", `No routing rule for ${cat.label} — needs a vendor picked by hand.`, 0);
-    update("work_order", woId, { status: "triaged" });
+    await event(woId, "system", "triaged", `No routing rule for ${cat.label} — needs a vendor picked by hand.`, 0);
+    await update("work_order", woId, { status: "triaged" });
     return;
   }
-  update("work_order", woId, { status: "triaged", vendor_id: rule.vendor_id });
-  event(woId, "system", "triaged", `Routed to ${rule.name} (${rule.trade}) by category rule.`, 0);
+  await update("work_order", woId, { status: "triaged", vendor_id: rule.vendor_id });
+  await event(woId, "system", "triaged", `Routed to ${rule.name} (${rule.trade}) by category rule.`, 0);
 }
 
-function unitOptions(companyId) {
-  return all(
+async function unitOptions(companyId) {
+  return await all(
     `SELECT u.id, u.label, p.line1, p.city FROM unit u
        JOIN property p ON p.id = u.property_id
       WHERE u.company_id = ? ORDER BY p.line1, u.label`, companyId);

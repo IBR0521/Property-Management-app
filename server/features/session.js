@@ -5,9 +5,9 @@ import { sendHtml, redirect } from "../lib/http.js";
 import { signInPage } from "../views/layout.js";
 
 export function registerAuthRoutes(router) {
-  router.get("/app/sign-in", (ctx) => {
+  router.get("/app/sign-in", async (ctx) => {
     if (ctx.staff) return redirect(ctx.res, "/app");
-    const company = get("SELECT name FROM company LIMIT 1");
+    const company = await get("SELECT name FROM company LIMIT 1");
     sendHtml(ctx.res, signInPage({
       company,
       csrf: ctx.csrf,
@@ -16,10 +16,10 @@ export function registerAuthRoutes(router) {
     }));
   });
 
-  router.post("/app/sign-in", (ctx) => {
+  router.post("/app/sign-in", async (ctx) => {
     const email = String(ctx.fields.email || "").trim().toLowerCase();
     const password = String(ctx.fields.password || "");
-    const staff = get(
+    const staff = await get(
       "SELECT * FROM staff WHERE lower(email) = ? AND active = 1", email
     );
 
@@ -29,13 +29,13 @@ export function registerAuthRoutes(router) {
       return redirect(ctx.res, `/app/sign-in?e=${encodeURIComponent("That email and password do not match.")}`);
     }
 
-    startSession(ctx.res, staff.id, { secure: ctx.url.protocol === "https:" });
+    await startSession(ctx.res, staff.id, { secure: ctx.url.protocol === "https:" });
     const next = typeof ctx.fields.next === "string" && ctx.fields.next.startsWith("/app") ? ctx.fields.next : "/app";
     redirect(ctx.res, next);
   });
 
-  router.post("/app/sign-out", (ctx) => {
-    endSession(ctx.req, ctx.res);
+  router.post("/app/sign-out", async (ctx) => {
+    await endSession(ctx.req, ctx.res);
     redirect(ctx.res, "/app/sign-in");
   });
 }

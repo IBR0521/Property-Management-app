@@ -17,14 +17,14 @@ import { html, attr } from "../lib/render.js";
 import { appPage, publicPage, notice, empty, tabs, PEOPLE_TABS } from "../views/layout.js";
 import { icons } from "../views/icons.js";
 import { navCounts } from "../lib/counts.js";
-import { storeMany, DOC_TYPES } from "../lib/files.js";
+import { storeMany, DOC_TYPES, fileUrl } from "../lib/files.js";
 import { event } from "./maintenance.js";
 
 export function registerOwners(router) {
   /* --- list --------------------------------------------------------------- */
-  router.get("/app/owners", (ctx) => {
+  router.get("/app/owners", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const owners = all(
+    const owners = await all(
       `SELECT o.*,
               (SELECT COUNT(*) FROM property p WHERE p.owner_id = o.id) AS properties,
               (SELECT COUNT(*) FROM unit u JOIN property p ON p.id = u.property_id WHERE p.owner_id = o.id) AS units,
@@ -33,7 +33,7 @@ export function registerOwners(router) {
          FROM owner o WHERE o.company_id = ? ORDER BY o.name`, cid);
 
     sendHtml(ctx.res, appPage({
-      staff: ctx.staff, csrf: ctx.csrf, active: "people", counts: navCounts(cid),
+      staff: ctx.staff, csrf: ctx.csrf, active: "people", counts: await navCounts(cid),
       title: "Owners", subtitle: `${owners.length} owner${owners.length === 1 ? "" : "s"}`,
       body: html`
         ${tabs(PEOPLE_TABS, "owners")}
@@ -57,27 +57,27 @@ export function registerOwners(router) {
   });
 
   /* --- detail ------------------------------------------------------------- */
-  router.get("/app/owners/:id", (ctx) => {
+  router.get("/app/owners/:id", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const owner = get("SELECT * FROM owner WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    const owner = await get("SELECT * FROM owner WHERE id = ? AND company_id = ?", ctx.params.id, cid);
     if (!owner) return sendHtml(ctx.res, "Not found", 404);
 
-    const props = all(
+    const props = await all(
       `SELECT p.*, (SELECT COUNT(*) FROM unit u WHERE u.property_id = p.id) AS units,
               (SELECT COUNT(*) FROM unit u WHERE u.property_id = p.id AND u.status = 'occupied') AS occupied
          FROM property p WHERE p.owner_id = ? ORDER BY p.line1`, owner.id);
-    const statements = all(
+    const statements = await all(
       "SELECT * FROM owner_statement WHERE owner_id = ? ORDER BY period_end DESC LIMIT 12", owner.id);
-    const approvals = all(
+    const approvals = await all(
       `SELECT a.*, w.reference, w.summary FROM owner_approval a
          JOIN work_order w ON w.id = a.work_order_id
         WHERE a.owner_id = ? ORDER BY a.requested_at DESC LIMIT 10`, owner.id);
-    const ledger = all(
+    const ledger = await all(
       `SELECT * FROM ledger_entry WHERE owner_id = ? ORDER BY date DESC, created_at DESC LIMIT 25`, owner.id);
     const last = prevMonthRange(today());
 
     sendHtml(ctx.res, appPage({
-      staff: ctx.staff, csrf: ctx.csrf, active: "people", counts: navCounts(cid),
+      staff: ctx.staff, csrf: ctx.csrf, active: "people", counts: await navCounts(cid),
       title: owner.name,
       subtitle: `${props.length} propert${props.length === 1 ? "y" : "ies"} · approval threshold ${usd(owner.approval_threshold_cents)}`,
       actions: html`<a class="pill outline sm" href="/app/owners">Back</a>`,
@@ -206,7 +206,7 @@ export function registerOwners(router) {
                     <td>${l.memo}${l.work_order_id ? html`<span class="cellsub"><a href="/app/maintenance/${l.work_order_id}">linked job</a></span>` : ""}</td>
                     <td><span class="chip chip--plain">${l.kind.replace(/_/g, " ")}</span></td>
                     <td class="num" style="${l.amount_cents < 0 ? "color:var(--danger)" : ""}">${usd(l.amount_cents, { sign: true })}</td>
-                    <td class="shrink">${l.receipt_path ? html`<a class="pill outline sm" href="/uploads/${l.receipt_path}" target="_blank">Receipt</a>` : ""}</td>
+                    <td class="shrink">${l.receipt_path ? html`<a class="pill outline sm" href="${fileUrl(l.receipt_path)}" target="_blank">Receipt</a>` : ""}</td>
                   </tr>`)}</tbody>
               </table></div>` : ""}
           </div>
@@ -215,17 +215,17 @@ export function registerOwners(router) {
   });
 
   /* --- generate a statement ---------------------------------------------- */
-  router.post("/app/owners/:id/statement", (ctx) => {
+  router.post("/app/owners/:id/statement", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const owner = one("SELECT * FROM owner WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    const owner = await one("SELECT * FROM owner WHERE id = ? AND company_id = ?", ctx.params.id, cid);
     const from = String(ctx.fields.from || "");
     const to = String(ctx.fields.to || "");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || to < from) {
       throw new BadRequest("Give a valid period, with the end on or after the start.");
     }
 
-    const totals = computeStatement(owner.id, from, to);
-    const existing = get(
+    const totals = await computeStatement(owner.id, from, to);
+    const existing = await get(
       "SELECT * FROM owner_statement WHERE owner_id = ? AND period_start = ? AND period_end = ?",
       owner.id, from, to);
 
@@ -234,10 +234,10 @@ export function registerOwners(router) {
       // Regenerating keeps the link the owner may already have, but refreshes
       // the snapshot.
       tok = existing.token;
-      update("owner_statement", existing.id, { totals: JSON.stringify(totals), generated_at: stamp() });
+      await update("owner_statement", existing.id, { totals: JSON.stringify(totals), generated_at: stamp() });
     } else {
       tok = token();
-      insert("owner_statement", {
+      await insert("owner_statement", {
         id: id(), company_id: cid, owner_id: owner.id,
         period_start: from, period_end: to,
         totals: JSON.stringify(totals), token: tok, generated_at: stamp(),
@@ -245,7 +245,7 @@ export function registerOwners(router) {
     }
 
     if (owner.email) {
-      insert("outbox", {
+      await insert("outbox", {
         id: id(), company_id: cid, channel: "email", to_contact: owner.email,
         subject: `Your statement, ${human(from)} to ${human(to)}`,
         body: `Net to you for the period: ${usd(totals.net)}.\n\n`
@@ -257,9 +257,9 @@ export function registerOwners(router) {
     redirect(ctx.res, `/app/owners/${owner.id}?m=${encodeURIComponent("Statement generated.")}`);
   });
 
-  router.post("/app/owners/:id/ledger", (ctx) => {
+  router.post("/app/owners/:id/ledger", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const owner = one("SELECT * FROM owner WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    const owner = await one("SELECT * FROM owner WHERE id = ? AND company_id = ?", ctx.params.id, cid);
     const kind = String(ctx.fields.kind || "");
     const allowed = ["rent_payment", "rent_charge", "expense", "management_fee", "other"];
     if (!allowed.includes(kind)) throw new BadRequest("Pick a kind of entry.");
@@ -270,9 +270,9 @@ export function registerOwners(router) {
     // income by forgetting a minus.
     const outbound = kind === "expense" || kind === "management_fee";
     const amount = outbound ? -Math.abs(magnitude) : Math.abs(magnitude);
-    const { stored, problems } = storeMany(ctx.files, "receipt", { allow: DOC_TYPES });
+    const { stored, problems } = await storeMany(ctx.files, "receipt", { allow: DOC_TYPES });
 
-    insert("ledger_entry", {
+    await insert("ledger_entry", {
       id: id(), company_id: cid, owner_id: owner.id,
       date: String(ctx.fields.date || today()), kind, amount_cents: amount,
       memo: String(ctx.fields.memo || "").trim(), source: "manual",
@@ -283,14 +283,14 @@ export function registerOwners(router) {
   });
 
   /* --- public: statement -------------------------------------------------- */
-  router.get("/o/s/:tok", (ctx) => {
-    const s = get("SELECT * FROM owner_statement WHERE token = ?", ctx.params.tok);
+  router.get("/o/s/:tok", async (ctx) => {
+    const s = await get("SELECT * FROM owner_statement WHERE token = ?", ctx.params.tok);
     if (!s) return sendHtml(ctx.res, "Not found", 404);
-    const owner = one("SELECT * FROM owner WHERE id = ?", s.owner_id);
-    const company = one("SELECT * FROM company WHERE id = ?", s.company_id);
+    const owner = await one("SELECT * FROM owner WHERE id = ?", s.owner_id);
+    const company = await one("SELECT * FROM company WHERE id = ?", s.company_id);
     const t = JSON.parse(s.totals);
 
-    if (!s.sent_at) update("owner_statement", s.id, { sent_at: stamp() });
+    if (!s.sent_at) await update("owner_statement", s.id, { sent_at: stamp() });
 
     sendHtml(ctx.res, publicPage({
       company, title: `Statement ${s.period_start} to ${s.period_end}`,
@@ -313,7 +313,7 @@ export function registerOwners(router) {
                   <td class="shrink">${human(l.date)}</td>
                   <td>${l.memo}<span class="cellsub">${l.kind.replace(/_/g, " ")}</span></td>
                   <td class="num" style="${l.amount_cents < 0 ? "color:var(--danger)" : ""}">${usd(l.amount_cents, { sign: true })}</td>
-                  <td class="shrink">${l.receipt_path ? html`<a class="pill outline sm" href="/uploads/${l.receipt_path}" target="_blank">Receipt</a>` : ""}</td>
+                  <td class="shrink">${l.receipt_path ? html`<a class="pill outline sm" href="${fileUrl(l.receipt_path)}" target="_blank">Receipt</a>` : ""}</td>
                 </tr>`)}</tbody>
             </table></div>` : empty("No entries in this period", "Nothing was recorded between these dates.")}
           </div>
@@ -349,15 +349,15 @@ export function registerOwners(router) {
   });
 
   /* --- public: approve or decline a repair -------------------------------- */
-  router.get("/o/a/:tok", (ctx) => {
-    const a = get("SELECT * FROM owner_approval WHERE token = ?", ctx.params.tok);
+  router.get("/o/a/:tok", async (ctx) => {
+    const a = await get("SELECT * FROM owner_approval WHERE token = ?", ctx.params.tok);
     if (!a) return sendHtml(ctx.res, "Not found", 404);
-    const company = one("SELECT * FROM company WHERE id = ?", a.company_id);
-    const wo = one(
+    const company = await one("SELECT * FROM company WHERE id = ?", a.company_id);
+    const wo = await one(
       `SELECT w.*, u.label, p.line1, v.name AS vendor_name, v.trade
          FROM work_order w JOIN unit u ON u.id = w.unit_id JOIN property p ON p.id = u.property_id
          LEFT JOIN vendor v ON v.id = w.vendor_id WHERE w.id = ?`, a.work_order_id);
-    const photos = all("SELECT * FROM work_order_photo WHERE work_order_id = ? AND phase = 'report'", wo.id);
+    const photos = await all("SELECT * FROM work_order_photo WHERE work_order_id = ? AND phase = 'report'", wo.id);
 
     const decided = a.status !== "pending";
     sendHtml(ctx.res, publicPage({
@@ -380,7 +380,7 @@ export function registerOwners(router) {
             ${photos.length ? html`
               <div style="margin-top:1.25rem"><span class="tile__label">Photos from the tenant</span>
                 <div class="thumbs" style="margin-top:0.5rem">
-                  ${photos.map((p) => html`<a href="/uploads/${p.path}" target="_blank"><img src="/uploads/${p.path}" alt="" loading="lazy" /></a>`)}
+                  ${photos.map((p) => html`<a href="${fileUrl(p.path)}" target="_blank"><img src="${fileUrl(p.path)}" alt="" loading="lazy" /></a>`)}
                 </div>
               </div>` : ""}
           </div>
@@ -404,24 +404,24 @@ export function registerOwners(router) {
     }));
   });
 
-  router.post("/o/a/:tok", (ctx) => {
-    const a = get("SELECT * FROM owner_approval WHERE token = ?", ctx.params.tok);
+  router.post("/o/a/:tok", async (ctx) => {
+    const a = await get("SELECT * FROM owner_approval WHERE token = ?", ctx.params.tok);
     if (!a) return sendHtml(ctx.res, "Not found", 404);
     if (a.status !== "pending") return redirect(ctx.res, `/o/a/${a.token}`);
 
     const decision = ctx.fields.decision === "approved" ? "approved" : "declined";
     const note = String(ctx.fields.note || "").trim() || null;
-    const owner = one("SELECT * FROM owner WHERE id = ?", a.owner_id);
+    const owner = await one("SELECT * FROM owner WHERE id = ?", a.owner_id);
 
-    tx(() => {
-      update("owner_approval", a.id, { status: decision, decided_at: stamp(), decided_note: note });
-      update("work_order", a.work_order_id, { status: decision === "approved" ? "assigned" : "triaged" });
-      event(a.work_order_id, owner.name,
+    await tx(async () => {
+      await update("owner_approval", a.id, { status: decision, decided_at: stamp(), decided_note: note });
+      await update("work_order", a.work_order_id, { status: decision === "approved" ? "assigned" : "triaged" });
+      await event(a.work_order_id, owner.name,
         decision === "approved" ? "owner_approved" : "owner_declined",
         `${usd(a.amount_cents)}${note ? ` — ${note}` : ""}`, 0);
 
-      for (const s of all("SELECT email FROM staff WHERE company_id = ? AND active = 1", a.company_id)) {
-        insert("outbox", {
+      for (const s of await all("SELECT email FROM staff WHERE company_id = ? AND active = 1", a.company_id)) {
+        await insert("outbox", {
           id: id(), company_id: a.company_id, channel: "email", to_contact: s.email,
           subject: `Owner ${decision}: ${usd(a.amount_cents)}`,
           body: `${owner.name} ${decision} the ${usd(a.amount_cents)} estimate.${note ? `\n\nNote: ${note}` : ""}`,
@@ -435,8 +435,8 @@ export function registerOwners(router) {
 
 /* Snapshotted into owner_statement.totals so a statement an owner already has
    never silently changes underneath them. */
-export function computeStatement(ownerId, from, to) {
-  const lines = all(
+export async function computeStatement(ownerId, from, to) {
+  const lines = await all(
     `SELECT * FROM ledger_entry WHERE owner_id = ? AND date >= ? AND date <= ?
       ORDER BY date, created_at`, ownerId, from, to);
 
@@ -449,7 +449,7 @@ export function computeStatement(ownerId, from, to) {
   const other = sum(["other", "rent_charge", "deposit_held", "deposit_returned"]);
   const net = rent + expenses + fees + other;
 
-  const jobs = all(
+  const jobs = await all(
     `SELECT w.reference, w.summary, w.actual_cents, u.label, p.line1
        FROM work_order w
        JOIN unit u ON u.id = w.unit_id JOIN property p ON p.id = u.property_id
@@ -457,12 +457,12 @@ export function computeStatement(ownerId, from, to) {
         AND w.closed_at >= ? AND w.closed_at <= ?
       ORDER BY w.closed_at`, ownerId, from, `${to}T23:59:59.999Z`);
 
-  const leaseEnds = all(
+  const leaseEnds = await all(
     `SELECT l.end_date, u.label, p.line1 FROM lease l
        JOIN unit u ON u.id = l.unit_id JOIN property p ON p.id = u.property_id
       WHERE p.owner_id = ? AND l.status = 'active' AND l.end_date IS NOT NULL
         AND l.end_date <= date(?, '+90 day') ORDER BY l.end_date`, ownerId, to);
-  const vacant = all(
+  const vacant = await all(
     `SELECT u.label, p.line1 FROM unit u JOIN property p ON p.id = u.property_id
       WHERE p.owner_id = ? AND u.status IN ('vacant','turn')`, ownerId);
 

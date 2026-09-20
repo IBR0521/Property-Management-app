@@ -15,7 +15,7 @@ import { html, attr } from "../lib/render.js";
 import { appPage, notice, empty, tabs, PROPERTY_TABS } from "../views/layout.js";
 import { icons } from "../views/icons.js";
 import { navCounts } from "../lib/counts.js";
-import { storeMany } from "../lib/files.js";
+import { storeMany, fileUrl } from "../lib/files.js";
 
 const STAGES = [
   { key: "notice", label: "Notice given" },
@@ -30,9 +30,9 @@ const STAGES = [
 ];
 
 export function registerTurns(router) {
-  router.get("/app/turns", (ctx) => {
+  router.get("/app/turns", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const turns = all(
+    const turns = await all(
       `SELECT t.*, u.label, u.market_rent_cents, p.line1,
               (SELECT COUNT(*) FROM turn_task k WHERE k.turn_id = t.id AND k.done_at IS NULL) AS open_tasks,
               (SELECT MAX(entered_at) FROM turn_stage_event e WHERE e.turn_id = t.id) AS stage_since
@@ -40,7 +40,7 @@ export function registerTurns(router) {
         WHERE t.company_id = ? AND t.status = 'open'
         ORDER BY t.moveout_date`, cid);
 
-    const closed = all(
+    const closed = await all(
       `SELECT t.*, u.label, p.line1 FROM turn t
          JOIN unit u ON u.id = t.unit_id JOIN property p ON p.id = u.property_id
         WHERE t.company_id = ? AND t.status = 'closed'
@@ -55,7 +55,7 @@ export function registerTurns(router) {
     const lostPerDay = turns.reduce((n, t) => n + Math.round((t.market_rent_cents || 0) / 30), 0);
 
     sendHtml(ctx.res, appPage({
-      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: navCounts(cid),
+      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
       title: "Turns",
       subtitle: `${turns.length} in progress`,
       actions: html`<a class="pill solid" href="/app/turns/new">Start a turn</a>`,
@@ -116,16 +116,16 @@ export function registerTurns(router) {
     }));
   });
 
-  router.get("/app/turns/new", (ctx) => {
+  router.get("/app/turns/new", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const units = all(
+    const units = await all(
       `SELECT u.id, u.label, p.line1, u.status,
               (SELECT id FROM lease l WHERE l.unit_id = u.id AND l.status = 'active' LIMIT 1) AS lease_id
          FROM unit u JOIN property p ON p.id = u.property_id
         WHERE u.company_id = ? AND u.status != 'turn' ORDER BY p.line1, u.label`, cid);
 
     sendHtml(ctx.res, appPage({
-      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: navCounts(cid),
+      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
       title: "Start a turn",
       subtitle: "From the day notice is given, so the clock starts where the cost starts",
       body: html`
@@ -163,14 +163,14 @@ export function registerTurns(router) {
     }));
   });
 
-  router.post("/app/turns/new", (ctx) => {
+  router.post("/app/turns/new", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const unit = one("SELECT * FROM unit WHERE id = ? AND company_id = ?", String(ctx.fields.unit_id || ""), cid);
-    const lease = get("SELECT * FROM lease WHERE unit_id = ? AND status = 'active' LIMIT 1", unit.id);
+    const unit = await one("SELECT * FROM unit WHERE id = ? AND company_id = ?", String(ctx.fields.unit_id || ""), cid);
+    const lease = await get("SELECT * FROM lease WHERE unit_id = ? AND status = 'active' LIMIT 1", unit.id);
     const turnId = id();
 
-    tx(() => {
-      insert("turn", {
+    await tx(async () => {
+      await insert("turn", {
         id: turnId, company_id: cid, unit_id: unit.id, lease_id: lease ? lease.id : null,
         stage: "notice",
         notice_date: String(ctx.fields.notice_date || today()),
@@ -178,36 +178,37 @@ export function registerTurns(router) {
         target_ready_date: String(ctx.fields.target_ready_date || "") || null,
         status: "open", created_at: stamp(),
       });
-      stageEvent(turnId, "notice", ctx.staff.name, "Turn opened");
-      update("unit", unit.id, { status: "turn" });
+      await stageEvent(turnId, "notice", ctx.staff.name, "Turn opened");
+      await update("unit", unit.id, { status: "turn" });
 
       // A standard make-ready list, so nobody has to remember it at 7am.
       const defaults = ["Final inspection", "Clean", "Paint touch-up", "Carpet / flooring", "Keys and locks re-keyed", "Photos for listing"];
-      defaults.forEach((label, i) =>
-        insert("turn_task", { id: id(), turn_id: turnId, label, sort: i }));
+      for (let i = 0; i < defaults.length; i++) {
+        await insert("turn_task", { id: id(), turn_id: turnId, label: defaults[i], sort: i });
+      }
     });
     redirect(ctx.res, `/app/turns/${turnId}`);
   });
 
-  router.get("/app/turns/:id", (ctx) => {
+  router.get("/app/turns/:id", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const t = get(
+    const t = await get(
       `SELECT t.*, u.label, u.market_rent_cents, p.line1, p.city
          FROM turn t JOIN unit u ON u.id = t.unit_id JOIN property p ON p.id = u.property_id
         WHERE t.id = ? AND t.company_id = ?`, ctx.params.id, cid);
     if (!t) return sendHtml(ctx.res, "Not found", 404);
 
-    const events = all("SELECT * FROM turn_stage_event WHERE turn_id = ? ORDER BY entered_at", t.id);
-    const tasks = all("SELECT k.*, v.name AS vendor_name FROM turn_task k LEFT JOIN vendor v ON v.id = k.vendor_id WHERE k.turn_id = ? ORDER BY k.sort, k.label", t.id);
-    const photos = all("SELECT * FROM turn_photo WHERE turn_id = ? ORDER BY created_at", t.id);
-    const vendors = all("SELECT * FROM vendor WHERE company_id = ? AND active = 1 ORDER BY trade, name", cid);
+    const events = await all("SELECT * FROM turn_stage_event WHERE turn_id = ? ORDER BY entered_at", t.id);
+    const tasks = await all("SELECT k.*, v.name AS vendor_name FROM turn_task k LEFT JOIN vendor v ON v.id = k.vendor_id WHERE k.turn_id = ? ORDER BY k.sort, k.label", t.id);
+    const photos = await all("SELECT * FROM turn_photo WHERE turn_id = ? ORDER BY created_at", t.id);
+    const vendors = await all("SELECT * FROM vendor WHERE company_id = ? AND active = 1 ORDER BY trade, name", cid);
     const spend = tasks.reduce((n, k) => n + (k.cost_cents || 0), 0);
     const stageIdx = STAGES.findIndex((s) => s.key === t.stage);
     const nextStage = STAGES[stageIdx + 1];
     const vacantDays = t.moveout_date ? daysBetween(t.moveout_date, t.leased_date || today()) : null;
 
     sendHtml(ctx.res, appPage({
-      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: navCounts(cid),
+      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
       title: `${t.line1}${t.label ? ` · unit ${t.label}` : ""}`,
       subtitle: `${STAGES[stageIdx]?.label || t.stage}${vacantDays != null ? ` · vacant ${vacantDays} day(s)` : ""}`,
       actions: html`<a class="pill outline sm" href="/app/turns">Back to board</a>`,
@@ -347,7 +348,7 @@ export function registerTurns(router) {
                   <div style="margin-bottom:1.25rem">
                     <span class="tile__label">${phase === "moveout" ? "Move-out condition" : phase === "movein" ? "Move-in condition" : "In progress"}</span>
                     <div class="thumbs" style="margin-top:0.5rem">
-                      ${set.map((p) => html`<a href="/uploads/${p.path}" target="_blank" title="${p.room || ""}"><img src="/uploads/${p.path}" alt="${p.room || phase}" loading="lazy" /></a>`)}
+                      ${set.map((p) => html`<a href="${fileUrl(p.path)}" target="_blank" title="${p.room || ""}"><img src="${fileUrl(p.path)}" alt="${p.room || phase}" loading="lazy" /></a>`)}
                     </div>
                   </div>`;
               })}
@@ -356,41 +357,41 @@ export function registerTurns(router) {
     }));
   });
 
-  router.post("/app/turns/:id/advance", (ctx) => {
+  router.post("/app/turns/:id/advance", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const t = one("SELECT * FROM turn WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    const t = await one("SELECT * FROM turn WHERE id = ? AND company_id = ?", ctx.params.id, cid);
     const stage = String(ctx.fields.stage || "");
     if (!STAGES.some((s) => s.key === stage)) throw new BadRequest("Unknown stage.");
 
-    tx(() => {
+    await tx(async () => {
       const patch = { stage };
       // Stages that are also dates worth reporting on get stamped.
       if (stage === "moveout" && !t.moveout_date) patch.moveout_date = today();
       if (stage === "ready" && !t.ready_date) patch.ready_date = today();
       if (stage === "listed" && !t.listed_date) patch.listed_date = today();
       if (stage === "leased" && !t.leased_date) patch.leased_date = today();
-      update("turn", t.id, patch);
-      stageEvent(t.id, stage, ctx.staff.name, String(ctx.fields.note || "").trim() || null);
-      if (stage === "moveout") update("unit", t.unit_id, { status: "turn" });
+      await update("turn", t.id, patch);
+      await stageEvent(t.id, stage, ctx.staff.name, String(ctx.fields.note || "").trim() || null);
+      if (stage === "moveout") await update("unit", t.unit_id, { status: "turn" });
     });
     redirect(ctx.res, `/app/turns/${t.id}?m=${encodeURIComponent("Stage updated.")}`);
   });
 
-  router.post("/app/turns/:id/task", (ctx) => {
+  router.post("/app/turns/:id/task", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const t = one("SELECT * FROM turn WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    const t = await one("SELECT * FROM turn WHERE id = ? AND company_id = ?", ctx.params.id, cid);
     const label = String(ctx.fields.label || "").trim();
     if (!label) throw new BadRequest("Give the task a name.");
-    const max = get("SELECT COALESCE(MAX(sort),0) AS m FROM turn_task WHERE turn_id = ?", t.id).m;
-    insert("turn_task", { id: id(), turn_id: t.id, label, sort: max + 1 });
+    const max = (await get("SELECT COALESCE(MAX(sort),0) AS m FROM turn_task WHERE turn_id = ?", t.id)).m;
+    await insert("turn_task", { id: id(), turn_id: t.id, label, sort: max + 1 });
     redirect(ctx.res, `/app/turns/${t.id}`);
   });
 
-  router.post("/app/turns/:id/task/:taskId", (ctx) => {
+  router.post("/app/turns/:id/task/:taskId", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const t = one("SELECT * FROM turn WHERE id = ? AND company_id = ?", ctx.params.id, cid);
-    const task = one("SELECT * FROM turn_task WHERE id = ? AND turn_id = ?", ctx.params.taskId, t.id);
-    update("turn_task", task.id, {
+    const t = await one("SELECT * FROM turn WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    const task = await one("SELECT * FROM turn_task WHERE id = ? AND turn_id = ?", ctx.params.taskId, t.id);
+    await update("turn_task", task.id, {
       done_at: stamp(),
       cost_cents: parseMoney(ctx.fields.cost),
       vendor_id: String(ctx.fields.vendor_id || "") || null,
@@ -398,13 +399,13 @@ export function registerTurns(router) {
     redirect(ctx.res, `/app/turns/${t.id}`);
   });
 
-  router.post("/app/turns/:id/photos", (ctx) => {
+  router.post("/app/turns/:id/photos", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const t = one("SELECT * FROM turn WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    const t = await one("SELECT * FROM turn WHERE id = ? AND company_id = ?", ctx.params.id, cid);
     const phase = ["moveout", "progress", "movein"].includes(ctx.fields.phase) ? ctx.fields.phase : "progress";
-    const { stored, problems } = storeMany(ctx.files, "photos");
+    const { stored, problems } = await storeMany(ctx.files, "photos");
     for (const s of stored) {
-      insert("turn_photo", {
+      await insert("turn_photo", {
         id: id(), turn_id: t.id, phase, room: String(ctx.fields.room || "").trim() || null,
         path: s.path, mime: s.mime, bytes: s.bytes, created_at: stamp(),
       });
@@ -413,20 +414,20 @@ export function registerTurns(router) {
     redirect(ctx.res, `/app/turns/${t.id}?m=${encodeURIComponent(msg)}`);
   });
 
-  router.post("/app/turns/:id/close", (ctx) => {
+  router.post("/app/turns/:id/close", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const t = one("SELECT * FROM turn WHERE id = ? AND company_id = ?", ctx.params.id, cid);
-    tx(() => {
-      update("turn", t.id, { status: "closed", leased_date: t.leased_date || today() });
-      stageEvent(t.id, "leased", ctx.staff.name, "Turn closed");
-      update("unit", t.unit_id, { status: "occupied" });
+    const t = await one("SELECT * FROM turn WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    await tx(async () => {
+      await update("turn", t.id, { status: "closed", leased_date: t.leased_date || today() });
+      await stageEvent(t.id, "leased", ctx.staff.name, "Turn closed");
+      await update("unit", t.unit_id, { status: "occupied" });
     });
     redirect(ctx.res, `/app/turns?m=${encodeURIComponent("Turn closed.")}`);
   });
 }
 
-function stageEvent(turnId, stage, actor, note) {
-  insert("turn_stage_event", {
+async function stageEvent(turnId, stage, actor, note) {
+  await insert("turn_stage_event", {
     id: id(), turn_id: turnId, stage, entered_at: stamp(), actor, note: note || null,
   });
 }

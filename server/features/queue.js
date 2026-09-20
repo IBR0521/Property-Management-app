@@ -17,12 +17,12 @@ const ICON = {
 };
 
 export function registerQueue(router) {
-  router.get("/app", (ctx) => {
+  router.get("/app", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const items = buildQueue(cid);
+    const items = await buildQueue(cid);
     const now = items.filter((i) => i.rank <= 1);
     const later = items.filter((i) => i.rank > 1);
-    const queued = outboxPending(cid);
+    const queued = await outboxPending(cid);
 
     const row = (i) => html`
       <li class="q"${attr("data-tone", i.tone)}>
@@ -40,7 +40,7 @@ export function registerQueue(router) {
       </li>`;
 
     sendHtml(ctx.res, appPage({
-      staff: ctx.staff, csrf: ctx.csrf, active: "queue", counts: navCounts(cid),
+      staff: ctx.staff, csrf: ctx.csrf, active: "queue", counts: await navCounts(cid),
       title: items.length ? `${items.length} thing${items.length === 1 ? "" : "s"} need you` : "Nothing needs you",
       subtitle: human(today()),
       actions: html`

@@ -34,11 +34,11 @@ export function verifyPassword(plain, stored) {
 
 /* --- sessions ------------------------------------------------------------- */
 
-export function startSession(res, staffId, { secure = false } = {}) {
+export async function startSession(res, staffId, { secure = false } = {}) {
   const sid = id() + randomBytes(16).toString("hex");
   const now = new Date();
   const expires = new Date(now.getTime() + SESSION_DAYS * 86400000);
-  run(
+  await run(
     "INSERT INTO session (id, staff_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
     sid, staffId, now.toISOString(), expires.toISOString()
   );
@@ -46,16 +46,16 @@ export function startSession(res, staffId, { secure = false } = {}) {
   return sid;
 }
 
-export function endSession(req, res) {
+export async function endSession(req, res) {
   const sid = cookies(req)[SESSION_COOKIE];
-  if (sid) run("DELETE FROM session WHERE id = ?", sid);
+  if (sid) await run("DELETE FROM session WHERE id = ?", sid);
   clearCookie(res, SESSION_COOKIE);
 }
 
-export function currentStaff(req) {
+export async function currentStaff(req) {
   const sid = cookies(req)[SESSION_COOKIE];
   if (!sid) return null;
-  const row = get(
+  const row = await get(
     `SELECT s.*, c.name AS company_name, c.emergency_phone, c.phone AS company_phone
        FROM session sess
        JOIN staff s ON s.id = sess.staff_id
@@ -67,8 +67,8 @@ export function currentStaff(req) {
 }
 
 /* Housekeeping, called by the scheduler. */
-export function pruneSessions() {
-  const r = run("DELETE FROM session WHERE expires_at <= ?", new Date().toISOString());
+export async function pruneSessions() {
+  const r = await run("DELETE FROM session WHERE expires_at <= ?", new Date().toISOString());
   return r.changes;
 }
 
@@ -78,11 +78,11 @@ export function pruneSessions() {
    URL scoped to exactly one record, which is the only way these links are
    ever actually opened. Each lookup is scoped by token AND by the table, so a
    work-order token cannot be replayed against an owner statement. */
-export function byToken(table, tokenColumn, tokenValue, extra = "") {
+export async function byToken(table, tokenColumn, tokenValue, extra = "") {
   if (!tokenValue || tokenValue.length < 20) return null;
-  return get(`SELECT * FROM ${table} WHERE ${tokenColumn} = ? ${extra}`, tokenValue) || null;
+  return await get(`SELECT * FROM ${table} WHERE ${tokenColumn} = ? ${extra}`, tokenValue) || null;
 }
 
-export function staffList(companyId) {
-  return all("SELECT id, name, email, role, active FROM staff WHERE company_id = ? ORDER BY name", companyId);
+export async function staffList(companyId) {
+  return await all("SELECT id, name, email, role, active FROM staff WHERE company_id = ? ORDER BY name", companyId);
 }

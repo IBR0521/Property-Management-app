@@ -28,9 +28,9 @@ const KINDS = [
 ];
 
 export function registerCompliance(router) {
-  router.get("/app/compliance", (ctx) => {
+  router.get("/app/compliance", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const rows = all(
+    const rows = await all(
       `SELECT o.*, r.label, r.kind, r.authority_note
          FROM obligation o JOIN compliance_rule r ON r.id = o.rule_id
         WHERE o.company_id = ? AND o.status IN ('open','overdue')
@@ -38,11 +38,11 @@ export function registerCompliance(router) {
 
     // Subject labels are resolved in one pass rather than per row, so a long
     // list stays one query per subject type instead of N.
-    const label = subjectLabeller(cid);
+    const label = await subjectLabeller(cid);
     const overdue = rows.filter((r) => r.status === "overdue");
     const dueSoon = rows.filter((r) => r.status === "open" && daysBetween(today(), r.due_date) <= 14);
     const later = rows.filter((r) => r.status === "open" && daysBetween(today(), r.due_date) > 14);
-    const doneRecently = all(
+    const doneRecently = await all(
       `SELECT o.*, r.label FROM obligation o JOIN compliance_rule r ON r.id = o.rule_id
         WHERE o.company_id = ? AND o.status IN ('done','waived')
         ORDER BY o.completed_at DESC LIMIT 10`, cid);
@@ -77,7 +77,7 @@ export function registerCompliance(router) {
       </div>` : "";
 
     sendHtml(ctx.res, appPage({
-      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: navCounts(cid),
+      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
       title: "Compliance",
       subtitle: `${overdue.length} overdue · ${dueSoon.length} inside two weeks`,
       actions: html`
@@ -113,15 +113,15 @@ export function registerCompliance(router) {
     }));
   });
 
-  router.post("/app/compliance/:id/close", (ctx) => {
+  router.post("/app/compliance/:id/close", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const o = one("SELECT * FROM obligation WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    const o = await one("SELECT * FROM obligation WHERE id = ? AND company_id = ?", ctx.params.id, cid);
     const how = ctx.fields.how === "waived" ? "waived" : "done";
-    update("obligation", o.id, {
+    await update("obligation", o.id, {
       status: how, completed_at: stamp(), completed_by: ctx.staff.name,
       note: String(ctx.fields.note || "").trim() || null,
     });
-    insert("audit_log", {
+    await insert("audit_log", {
       id: id(), company_id: cid, at: stamp(), actor: ctx.staff.name,
       entity: "obligation", entity_id: o.id, action: how, detail: null,
     });
@@ -129,12 +129,12 @@ export function registerCompliance(router) {
   });
 
   /* --- rules -------------------------------------------------------------- */
-  router.get("/app/compliance/rules", (ctx) => {
+  router.get("/app/compliance/rules", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const rules = all("SELECT * FROM compliance_rule WHERE company_id = ? ORDER BY kind", cid);
+    const rules = await all("SELECT * FROM compliance_rule WHERE company_id = ? ORDER BY kind", cid);
 
     sendHtml(ctx.res, appPage({
-      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: navCounts(cid),
+      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
       title: "Compliance rules",
       subtitle: "The windows are yours to set — this app times them, it does not interpret the law",
       actions: html`<a class="pill outline sm" href="/app/compliance">Back</a>`,
@@ -203,7 +203,7 @@ export function registerCompliance(router) {
     }));
   });
 
-  router.post("/app/compliance/rules", (ctx) => {
+  router.post("/app/compliance/rules", async (ctx) => {
     const cid = ctx.staff.company_id;
     const kind = String(ctx.fields.kind || "");
     if (!KINDS.some((k) => k.key === kind)) throw new BadRequest("Pick a kind of rule.");
@@ -214,7 +214,7 @@ export function registerCompliance(router) {
       .split(",").map((s) => Number(s.trim()))
       .filter((n) => Number.isInteger(n) && n >= 0);
 
-    insert("compliance_rule", {
+    await insert("compliance_rule", {
       id: id(), company_id: cid, kind,
       label: String(ctx.fields.label || "").trim() || kind,
       window_days: windowDays,
@@ -222,12 +222,12 @@ export function registerCompliance(router) {
       authority_note: String(ctx.fields.authority_note || "").trim() || null,
       active: 1, created_at: stamp(),
     });
-    tick("rule-added");
+    await tick("rule-added");
     redirect(ctx.res, `/app/compliance/rules?m=${encodeURIComponent("Rule added and obligations generated.")}`);
   });
 
-  router.post("/app/compliance/run", (ctx) => {
-    const r = tick("manual");
+  router.post("/app/compliance/run", async (ctx) => {
+    const r = await tick("manual");
     const bits = Object.entries(r).filter(([, v]) => typeof v === "number" && v > 0).map(([k, v]) => `${k} ${v}`);
     redirect(ctx.res, `/app/compliance?m=${encodeURIComponent(bits.length ? bits.join(", ") : "Nothing new was due.")}`);
   });
@@ -243,17 +243,17 @@ function safeLeads(json) {
 }
 
 /* Resolves an obligation's subject to something a human recognises. */
-function subjectLabeller(companyId) {
-  const leases = new Map(all(
+async function subjectLabeller(companyId) {
+  const leases = new Map((await all(
     `SELECT l.id, p.line1, u.label FROM lease l JOIN unit u ON u.id = l.unit_id
-       JOIN property p ON p.id = u.property_id WHERE l.company_id = ?`, companyId)
+       JOIN property p ON p.id = u.property_id WHERE l.company_id = ?`, companyId))
     .map((r) => [r.id, `${r.line1}${r.label ? ` unit ${r.label}` : ""}`]));
-  const units = new Map(all(
+  const units = new Map((await all(
     `SELECT u.id, p.line1, u.label FROM unit u JOIN property p ON p.id = u.property_id
-      WHERE u.company_id = ?`, companyId)
+      WHERE u.company_id = ?`, companyId))
     .map((r) => [r.id, `${r.line1}${r.label ? ` unit ${r.label}` : ""}`]));
-  const props = new Map(all(
-    "SELECT id, line1 FROM property WHERE company_id = ?", companyId).map((r) => [r.id, r.line1]));
+  const props = new Map((await all(
+    "SELECT id, line1 FROM property WHERE company_id = ?", companyId)).map((r) => [r.id, r.line1]));
 
   return (type, sid) => {
     const m = type === "lease" ? leases : type === "unit" ? units : type === "property" ? props : null;

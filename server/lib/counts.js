@@ -6,9 +6,9 @@
 import { get } from "./db.js";
 import { buildQueue } from "./queue.js";
 
-export function navCounts(companyId) {
-  const n = (sql, ...p) => get(sql, ...p).n;
-  const items = buildQueue(companyId);
+export async function navCounts(companyId) {
+  const n = async (sql, ...p) => (await get(sql, ...p)).n;
+  const items = await buildQueue(companyId);
   const urgent = items.filter((i) => i.rank <= 1).length;
 
   const lateRent = n(

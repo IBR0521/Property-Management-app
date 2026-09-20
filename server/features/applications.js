@@ -23,7 +23,7 @@ import { sendHtml, redirect, BadRequest } from "../lib/http.js";
 import { html, attr } from "../lib/render.js";
 import { appPage, publicPage, notice, empty, tabs, PEOPLE_TABS } from "../views/layout.js";
 import { navCounts } from "../lib/counts.js";
-import { storeMany, DOC_TYPES } from "../lib/files.js";
+import { storeMany, DOC_TYPES, fileUrl } from "../lib/files.js";
 
 const STATUS_TONE = {
   received: "warn", incomplete: "warn", screening: "brand",
@@ -32,14 +32,14 @@ const STATUS_TONE = {
 
 export function registerApplications(router) {
   /* --- public: apply ----------------------------------------------------- */
-  router.get("/apply", (ctx) => {
-    const company = one("SELECT * FROM company LIMIT 1");
-    const units = all(
+  router.get("/apply", async (ctx) => {
+    const company = await one("SELECT * FROM company LIMIT 1");
+    const units = await all(
       `SELECT u.id, u.label, u.beds, u.baths, u.market_rent_cents, p.line1, p.city
          FROM unit u JOIN property p ON p.id = u.property_id
         WHERE u.company_id = ? AND u.status IN ('vacant','turn')
         ORDER BY p.line1, u.label`, company.id);
-    const criteria = get(
+    const criteria = await get(
       "SELECT * FROM criteria_set WHERE company_id = ? AND active = 1 LIMIT 1", company.id);
 
     sendHtml(ctx.res, publicPage({
@@ -111,10 +111,10 @@ export function registerApplications(router) {
     }));
   });
 
-  router.post("/apply", (ctx) => {
-    const company = one("SELECT * FROM company LIMIT 1");
+  router.post("/apply", async (ctx) => {
+    const company = await one("SELECT * FROM company LIMIT 1");
     const f = ctx.fields;
-    const unit = get(
+    const unit = await get(
       "SELECT * FROM unit WHERE id = ? AND company_id = ?", String(f.unit_id || ""), company.id);
     if (!unit) return redirect(ctx.res, `/apply?m=${encodeURIComponent("Pick which home you are applying for.")}`);
 
@@ -124,13 +124,13 @@ export function registerApplications(router) {
       return redirect(ctx.res, `/apply?m=${encodeURIComponent("We need your name and a full phone number.")}`);
     }
 
-    const criteria = get(
+    const criteria = await get(
       "SELECT * FROM criteria_set WHERE company_id = ? AND active = 1 LIMIT 1", company.id);
     const appId = id();
     const tok = token();
 
-    tx(() => {
-      insert("application", {
+    await tx(async () => {
+      await insert("application", {
         id: appId, company_id: company.id, unit_id: unit.id,
         criteria_set_id: criteria ? criteria.id : null,
         applicant_name: name, email: String(f.email || "").trim() || null, phone,
@@ -146,15 +146,15 @@ export function registerApplications(router) {
       // accident, and so the list is identical for every applicant.
       if (criteria) {
         for (const item of safeItems(criteria.items)) {
-          insert("application_check", {
+          await insert("application_check", {
             id: id(), application_id: appId, criteria_item_key: item.key,
             result: "pending", checked_by: "—", checked_at: stamp(),
           });
         }
       }
 
-      for (const s of all("SELECT email FROM staff WHERE company_id = ? AND active = 1", company.id)) {
-        insert("outbox", {
+      for (const s of await all("SELECT email FROM staff WHERE company_id = ? AND active = 1", company.id)) {
+        await insert("outbox", {
           id: id(), company_id: company.id, channel: "email", to_contact: s.email,
           subject: `Application: ${name}`,
           body: `${name} applied for ${unit.label || "the unit"}.\nPhone ${phone}.`,
@@ -166,11 +166,11 @@ export function registerApplications(router) {
   });
 
   /* --- public: applicant's own page, for documents ------------------------- */
-  router.get("/a/:tok", (ctx) => {
-    const app = get("SELECT * FROM application WHERE token = ?", ctx.params.tok);
+  router.get("/a/:tok", async (ctx) => {
+    const app = await get("SELECT * FROM application WHERE token = ?", ctx.params.tok);
     if (!app) return sendHtml(ctx.res, "Not found", 404);
-    const company = one("SELECT * FROM company WHERE id = ?", app.company_id);
-    const docs = all("SELECT * FROM application_doc WHERE application_id = ? ORDER BY created_at", app.id);
+    const company = await one("SELECT * FROM company WHERE id = ?", app.company_id);
+    const docs = await all("SELECT * FROM application_doc WHERE application_id = ? ORDER BY created_at", app.id);
 
     sendHtml(ctx.res, publicPage({
       company, title: "Your application",
@@ -222,13 +222,13 @@ export function registerApplications(router) {
     }));
   });
 
-  router.post("/a/:tok", (ctx) => {
-    const app = get("SELECT * FROM application WHERE token = ?", ctx.params.tok);
+  router.post("/a/:tok", async (ctx) => {
+    const app = await get("SELECT * FROM application WHERE token = ?", ctx.params.tok);
     if (!app) return sendHtml(ctx.res, "Not found", 404);
-    const { stored, problems } = storeMany(ctx.files, "docs", { allow: DOC_TYPES });
+    const { stored, problems } = await storeMany(ctx.files, "docs", { allow: DOC_TYPES });
     const kind = String(ctx.fields.kind || "other");
     for (const s of stored) {
-      insert("application_doc", {
+      await insert("application_doc", {
         id: id(), application_id: app.id, kind, path: s.path,
         mime: s.mime, bytes: s.bytes, created_at: stamp(),
       });
@@ -238,9 +238,9 @@ export function registerApplications(router) {
   });
 
   /* --- app: list ---------------------------------------------------------- */
-  router.get("/app/applications", (ctx) => {
+  router.get("/app/applications", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const rows = all(
+    const rows = await all(
       `SELECT a.*, u.label, p.line1,
               (SELECT COUNT(*) FROM application_doc d WHERE d.application_id = a.id) AS docs,
               (SELECT COUNT(*) FROM application_check c WHERE c.application_id = a.id AND c.result = 'pending') AS pending
@@ -250,7 +250,7 @@ export function registerApplications(router) {
         WHERE a.company_id = ? ORDER BY a.received_at`, cid);
 
     sendHtml(ctx.res, appPage({
-      staff: ctx.staff, csrf: ctx.csrf, active: "people", counts: navCounts(cid),
+      staff: ctx.staff, csrf: ctx.csrf, active: "people", counts: await navCounts(cid),
       title: "Applications",
       subtitle: "In the order received",
       actions: html`<a class="pill outline" href="/apply" target="_blank">Public form</a>`,
@@ -280,23 +280,23 @@ export function registerApplications(router) {
   });
 
   /* --- app: one application ----------------------------------------------- */
-  router.get("/app/applications/:id", (ctx) => {
+  router.get("/app/applications/:id", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const app = get(
+    const app = await get(
       `SELECT a.*, u.label, u.market_rent_cents, p.line1 FROM application a
          LEFT JOIN unit u ON u.id = a.unit_id LEFT JOIN property p ON p.id = u.property_id
         WHERE a.id = ? AND a.company_id = ?`, ctx.params.id, cid);
     if (!app) return sendHtml(ctx.res, "Not found", 404);
 
     const criteria = app.criteria_set_id
-      ? get("SELECT * FROM criteria_set WHERE id = ?", app.criteria_set_id) : null;
-    const checks = all("SELECT * FROM application_check WHERE application_id = ?", app.id);
-    const docs = all("SELECT * FROM application_doc WHERE application_id = ? ORDER BY created_at", app.id);
+      ? await get("SELECT * FROM criteria_set WHERE id = ?", app.criteria_set_id) : null;
+    const checks = await all("SELECT * FROM application_check WHERE application_id = ?", app.id);
+    const docs = await all("SELECT * FROM application_doc WHERE application_id = ? ORDER BY created_at", app.id);
     const items = criteria ? safeItems(criteria.items) : [];
     const decided = ["approved", "declined", "withdrawn"].includes(app.status);
 
     sendHtml(ctx.res, appPage({
-      staff: ctx.staff, csrf: ctx.csrf, active: "people", counts: navCounts(cid),
+      staff: ctx.staff, csrf: ctx.csrf, active: "people", counts: await navCounts(cid),
       title: app.applicant_name,
       subtitle: `${app.line1 || "no unit"}${app.label ? `, unit ${app.label}` : ""} · received ${humanStamp(app.received_at)}`,
       actions: html`<a class="pill outline sm" href="/app/applications">Back</a>`,
@@ -320,7 +320,7 @@ export function registerApplications(router) {
               ${docs.length ? html`
                 <div style="margin-top:1.25rem"><span class="tile__label">Documents</span>
                   <div class="btnrow" style="margin-top:0.5rem">
-                    ${docs.map((d) => html`<a class="pill outline sm" href="/uploads/${d.path}" target="_blank">${d.kind}</a>`)}
+                    ${docs.map((d) => html`<a class="pill outline sm" href="${fileUrl(d.path)}" target="_blank">${d.kind}</a>`)}
                   </div>
                 </div>` : notice("warn", "No documents yet", html`Send them to <a href="/a/${app.token}">their page</a> to upload ID and proof of income.`)}
             </div>
@@ -385,38 +385,38 @@ export function registerApplications(router) {
     }));
   });
 
-  router.post("/app/applications/:id/checks", (ctx) => {
+  router.post("/app/applications/:id/checks", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const app = one("SELECT * FROM application WHERE id = ? AND company_id = ?", ctx.params.id, cid);
-    const criteria = app.criteria_set_id ? get("SELECT * FROM criteria_set WHERE id = ?", app.criteria_set_id) : null;
+    const app = await one("SELECT * FROM application WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    const criteria = app.criteria_set_id ? await get("SELECT * FROM criteria_set WHERE id = ?", app.criteria_set_id) : null;
     if (!criteria) throw new BadRequest("No criteria set is attached to this application.");
 
-    tx(() => {
+    await tx(async () => {
       for (const item of safeItems(criteria.items)) {
         const result = String(ctx.fields[`result_${item.key}`] || "pending");
         if (!["pass", "fail", "na", "pending"].includes(result)) continue;
         const note = String(ctx.fields[`note_${item.key}`] || "").trim() || null;
-        const existing = get(
+        const existing = await get(
           "SELECT * FROM application_check WHERE application_id = ? AND criteria_item_key = ?", app.id, item.key);
         if (existing) {
-          update("application_check", existing.id, {
+          await update("application_check", existing.id, {
             result, note, checked_by: ctx.staff.name, checked_at: stamp(),
           });
         } else {
-          insert("application_check", {
+          await insert("application_check", {
             id: id(), application_id: app.id, criteria_item_key: item.key,
             result, note, checked_by: ctx.staff.name, checked_at: stamp(),
           });
         }
       }
-      if (app.status === "received") update("application", app.id, { status: "screening" });
+      if (app.status === "received") await update("application", app.id, { status: "screening" });
     });
     redirect(ctx.res, `/app/applications/${app.id}?m=${encodeURIComponent("Checks saved.")}`);
   });
 
-  router.post("/app/applications/:id/decide", (ctx) => {
+  router.post("/app/applications/:id/decide", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const app = one("SELECT * FROM application WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    const app = await one("SELECT * FROM application WHERE id = ? AND company_id = ?", ctx.params.id, cid);
     const status = String(ctx.fields.status || "");
     if (!["approved", "declined", "withdrawn"].includes(status)) throw new BadRequest("Pick a decision.");
     const reason = String(ctx.fields.reason || "").trim();
@@ -424,16 +424,16 @@ export function registerApplications(router) {
     // record that the written criteria were what decided it.
     if (!reason) throw new BadRequest("Give the reason for the decision.");
 
-    tx(() => {
-      update("application", app.id, {
+    await tx(async () => {
+      await update("application", app.id, {
         status, decided_at: stamp(), decided_by: ctx.staff.name, decision_reason: reason,
       });
-      insert("audit_log", {
+      await insert("audit_log", {
         id: id(), company_id: cid, at: stamp(), actor: ctx.staff.name,
         entity: "application", entity_id: app.id, action: status, detail: reason,
       });
       if (app.email) {
-        insert("outbox", {
+        await insert("outbox", {
           id: id(), company_id: cid, channel: "email", to_contact: app.email,
           subject: `Your application`,
           body: status === "approved"

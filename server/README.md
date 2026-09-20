@@ -8,10 +8,13 @@ existing marketing site on one origin.
 `package.json` has no `dependencies` block at all.
 
 ```bash
+npm install
 npm run seed     # demo company + portfolio (once)
 npm start        # http://localhost:4300
 npm run reset    # wipe the database and re-seed
 ```
+
+Locally it uses a SQLite file at `data/app.db` and needs no configuration.
 
 Sign in at `/app` with `dana@leafridgepm.test` / `columbus2026`.
 
@@ -130,3 +133,90 @@ sessions.
 - [ ] Have the screening criteria reviewed before they are used
 - [ ] Serve over HTTPS (session cookies set `Secure` automatically then)
 - [ ] Back up `data/app.db` — it is the whole system of record
+
+---
+
+# Deploying to Vercel
+
+The app is a plain `(req, res)` handler, so Vercel runs it unchanged. Three
+things had to move, because serverless has no disk and no process that stays
+alive between requests:
+
+| Local | On Vercel |
+|---|---|
+| SQLite file at `data/app.db` | Turso (libSQL) over HTTP |
+| `data/uploads/` on disk | Vercel Blob |
+| `setInterval` every 10 minutes | Vercel Cron hitting `/api/cron` |
+
+libSQL was chosen over Postgres deliberately: it *is* SQLite, so the schema and
+every query in this codebase are byte-identical either way. A Postgres port
+would have meant rewriting `group_concat`, `date(?, '+N day')` and several
+hundred statements, which is where a silent bug would have hidden.
+
+## 1. Create the database
+
+```bash
+turso db create property-ops
+turso db show property-ops --url        # libsql://...
+turso db tokens create property-ops     # the auth token
+```
+
+## 2. Set the environment variables
+
+In the Vercel project settings:
+
+| Variable | Value |
+|---|---|
+| `DATABASE_URL` | `libsql://<your-db>.turso.io` |
+| `DATABASE_AUTH_TOKEN` | the token from above |
+| `CRON_SECRET` | any long random string — the cron endpoint refuses to run without it |
+| `BLOB_READ_WRITE_TOKEN` | created for you when you add Vercel Blob to the project |
+
+Without `BLOB_READ_WRITE_TOKEN` the app falls back to local disk, which on
+Vercel means uploads vanish after the request. Add the Blob store before
+anyone uploads a photo.
+
+## 3. Seed the database once
+
+Point your local machine at the hosted database and run the seed:
+
+```bash
+DATABASE_URL="libsql://<your-db>.turso.io" \
+DATABASE_AUTH_TOKEN="<token>" \
+npm run seed
+```
+
+For a real client, replace `server/seed.js` with their actual portfolio — and
+change the demo password, which is printed in that file in plain text.
+
+## 4. Deploy
+
+```bash
+vercel --prod
+```
+
+`vercel.json` does the rest: everything routes to `api/index.js` except
+`/api/*`, and the cron fires hourly.
+
+## What runs where
+
+```
+api/index.js    the whole app          every request
+api/cron.js     the scheduler          hourly, via Vercel Cron
+server/app.js   the request handler    shared by both entry points
+server/index.js the local dev server   never runs on Vercel
+```
+
+## Things to know
+
+**The cron schedule is hourly, not every ten minutes.** Tighten it in
+`vercel.json` if you want faster reminders — every job is idempotent, so
+running it more often is safe and running it less just means a delay.
+
+**`maxDuration` is 15s for the app and 60s for the cron.** The cron does more
+work per invocation than any single request, and a large portfolio will need
+the headroom.
+
+**The free Vercel plan allows one cron per day.** On Hobby you will need a paid
+plan for hourly, or call `/api/cron` from an external scheduler with the same
+`CRON_SECRET` header.

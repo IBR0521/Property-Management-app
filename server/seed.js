@@ -12,9 +12,9 @@ import { hashPassword } from "./lib/auth.js";
 import { stamp, today, addDays, monthKey, prevMonthRange } from "./lib/dates.js";
 import { tick } from "./lib/scheduler.js";
 
-migrate();
+await migrate();
 
-if (get("SELECT id FROM company LIMIT 1")) {
+if (await get("SELECT id FROM company LIMIT 1")) {
   console.log("Already seeded. Use `npm run reset` to start over.");
   process.exit(0);
 }
@@ -24,7 +24,7 @@ const T = today();
 const PASSWORD = "columbus2026";
 
 const companyId = id();
-insert("company", {
+await insert("company", {
   id: companyId, name: "Leafridge Property Management",
   phone: "(614) 655-8240", emergency_phone: "(614) 655-8241",
   timezone: "America/New_York", created_at: now,
@@ -32,30 +32,32 @@ insert("company", {
 
 /* --- staff ---------------------------------------------------------------- */
 const staffId = id();
-insert("staff", {
+await insert("staff", {
   id: staffId, company_id: companyId, name: "Dana Whitfield",
   email: "dana@leafridgepm.test", password_hash: hashPassword(PASSWORD),
   role: "admin", active: 1, created_at: now,
 });
-insert("staff", {
+await insert("staff", {
   id: id(), company_id: companyId, name: "Marcus Bell",
   email: "marcus@leafridgepm.test", password_hash: hashPassword(PASSWORD),
   role: "manager", active: 1, created_at: now,
 });
 
 /* --- owners --------------------------------------------------------------- */
-const owners = [
+const OWNER_SEED = [
   { name: "Ruth Calloway", email: "ruth@example.test", phone: "(614) 555-0113", threshold: 40000 },
   { name: "Okafor Holdings LLC", email: "admin@okaforholdings.test", phone: "(614) 555-0148", threshold: 75000 },
   { name: "Tomas Reyes", email: "tomas@example.test", phone: "(614) 555-0172", threshold: 25000 },
-].map((o) => {
+];
+const owners = [];
+for (const o of OWNER_SEED) {
   const oid = id();
-  insert("owner", {
+  await insert("owner", {
     id: oid, company_id: companyId, name: o.name, email: o.email, phone: o.phone,
     approval_threshold_cents: o.threshold, statement_day: 1, created_at: now,
   });
-  return { ...o, id: oid };
-});
+  owners.push({ ...o, id: oid });
+}
 
 /* --- properties and units -------------------------------------------------- */
 const PROPERTIES = [
@@ -81,14 +83,14 @@ const PROPERTIES = [
 const units = [];
 for (const p of PROPERTIES) {
   const pid = id();
-  insert("property", {
+  await insert("property", {
     id: pid, company_id: companyId, owner_id: owners[p.owner].id,
     line1: p.line1, city: p.city, state: "OH", zip: p.zip, kind: p.kind,
     created_at: addDays(T, -400) + "T09:00:00.000Z",
   });
   for (const u of p.units) {
     const uid = id();
-    insert("unit", {
+    await insert("unit", {
       id: uid, company_id: companyId, property_id: pid, label: u.label,
       beds: u.beds, baths: u.baths, sqft: u.sqft, market_rent_cents: u.rent,
       status: "occupied", created_at: now,
@@ -104,15 +106,15 @@ const TENANTS = [
 ];
 
 const leases = [];
-units.forEach((u, i) => {
+for (const [i, u] of units.entries()) {
   // The last unit is left vacant so the turn board and the application form
   // both have something to point at.
   if (i === units.length - 1) {
-    run("UPDATE unit SET status = 'vacant' WHERE id = ?", u.id);
-    return;
+    await run("UPDATE unit SET status = 'vacant' WHERE id = ?", u.id);
+    continue;
   }
   const tid = id();
-  insert("tenant", {
+  await insert("tenant", {
     id: tid, company_id: companyId, name: TENANTS[i],
     email: `${TENANTS[i].split(" ")[0].toLowerCase()}@example.test`,
     phone: `(614) 555-0${200 + i}`, created_at: now,
@@ -120,15 +122,15 @@ units.forEach((u, i) => {
 
   const lid = id();
   const start = addDays(T, -(200 + i * 30));
-  insert("lease", {
+  await insert("lease", {
     id: lid, company_id: companyId, unit_id: u.id,
     start_date: start, end_date: addDays(start, 365),
     rent_cents: u.rent, deposit_cents: u.rent,
     rent_due_day: 1, grace_days: 5, status: "active", created_at: now,
   });
-  insert("lease_tenant", { lease_id: lid, tenant_id: tid });
+  await insert("lease_tenant", { lease_id: lid, tenant_id: tid });
   leases.push({ id: lid, unitId: u.id, ownerId: u.ownerId, propertyId: u.propertyId, rent: u.rent, tenant: TENANTS[i] });
-});
+}
 
 /* --- vendors and routing --------------------------------------------------- */
 const VENDORS = [
@@ -140,18 +142,19 @@ const VENDORS = [
   { name: "Franklin General Contracting", trade: "general", phone: "(614) 555-0390", afterHours: 0, cats: ["structural", "other"] },
   { name: "Capital Pest Control", trade: "pest", phone: "(614) 555-0399", afterHours: 0, cats: ["pest"] },
 ];
-const vendors = VENDORS.map((v) => {
+const vendors = [];
+for (const v of VENDORS) {
   const vid = id();
-  insert("vendor", {
+  await insert("vendor", {
     id: vid, company_id: companyId, name: v.name, trade: v.trade,
     phone: v.phone, email: `dispatch@${v.trade}.test`,
     after_hours: v.afterHours, active: 1, created_at: now,
   });
   for (const c of v.cats) {
-    insert("routing_rule", { id: id(), company_id: companyId, category: c, vendor_id: vid, rank: 1 });
+    await insert("routing_rule", { id: id(), company_id: companyId, category: c, vendor_id: vid, rank: 1 });
   }
-  return { ...v, id: vid };
-});
+  vendors.push({ ...v, id: vid });
+}
 
 /* --- compliance rules ------------------------------------------------------ */
 /* Windows here are placeholders with the basis field left honest: the real
@@ -167,7 +170,7 @@ const RULES = [
     basis: "Annual, company policy" },
 ];
 for (const r of RULES) {
-  insert("compliance_rule", {
+  await insert("compliance_rule", {
     id: id(), company_id: companyId, kind: r.kind, label: r.label,
     window_days: r.window, lead_days: JSON.stringify(r.lead),
     authority_note: r.basis, active: 1, created_at: now,
@@ -190,7 +193,7 @@ const TEMPLATES = [
       + "{{amount}} / {{period}} / {{address}} / {{days_late}} days" },
 ];
 for (const t of TEMPLATES) {
-  insert("notice_template", {
+  await insert("notice_template", {
     company_id: companyId, key: t.key, name: t.name, body: t.body,
     approved_by: t.approved ? "R. Okonkwo, counsel" : null,
     approved_at: t.approved ? addDays(T, -60) + "T00:00:00.000Z" : null,
@@ -203,14 +206,14 @@ const STEPS = [
   { stage: 4, day: 21, key: "notice_day10", channel: "hand", attorney: 1 },
 ];
 for (const s of STEPS) {
-  insert("delinquency_step", {
+  await insert("delinquency_step", {
     id: id(), company_id: companyId, stage: s.stage, day_offset: s.day,
     template_key: s.key, channel: s.channel, requires_attorney: s.attorney,
   });
 }
 
 /* --- screening criteria ---------------------------------------------------- */
-insert("criteria_set", {
+await insert("criteria_set", {
   id: id(), company_id: companyId, name: "Standard criteria (2026)",
   items: JSON.stringify([
     { key: "income", label: "Verifiable household income", how_checked: "Two most recent pay stubs or equivalent" },
@@ -226,16 +229,16 @@ insert("criteria_set", {
 /* --- ledger: last month paid in full, this month partly ------------------- */
 const last = prevMonthRange(T);
 const period = monthKey(T);
-leases.forEach((l, i) => {
+for (const [i, l] of leases.entries()) {
   const fee = Math.round(l.rent * 0.09);
 
-  insert("ledger_entry", {
+  await insert("ledger_entry", {
     id: id(), company_id: companyId, owner_id: l.ownerId, property_id: l.propertyId,
     unit_id: l.unitId, lease_id: l.id, date: addDays(last.start, 2),
     kind: "rent_payment", amount_cents: l.rent,
     memo: `Rent ${monthKey(last.start)} — ${l.tenant}`, source: "import", created_at: now,
   });
-  insert("ledger_entry", {
+  await insert("ledger_entry", {
     id: id(), company_id: companyId, owner_id: l.ownerId, property_id: l.propertyId,
     unit_id: l.unitId, lease_id: l.id, date: addDays(last.start, 2),
     kind: "management_fee", amount_cents: -fee,
@@ -245,24 +248,24 @@ leases.forEach((l, i) => {
   // Two leases are left unpaid this month so the ladder has real work, and
   // one pays short so a partial balance is visible.
   if (i < leases.length - 2) {
-    insert("ledger_entry", {
+    await insert("ledger_entry", {
       id: id(), company_id: companyId, owner_id: l.ownerId, property_id: l.propertyId,
       unit_id: l.unitId, lease_id: l.id, date: `${period}-03`,
       kind: "rent_payment", amount_cents: i === 0 ? l.rent - 30000 : l.rent,
       memo: `Rent ${period} — ${l.tenant}`, source: "import", created_at: now,
     });
   }
-});
+}
 
 /* --- work orders ----------------------------------------------------------- */
-function wo({ leaseIdx, category, severity, summary, detail, status, vendorTrade, estimate, actual, ageDays, answers, reasons }) {
+async function wo({ leaseIdx, category, severity, summary, detail, status, vendorTrade, estimate, actual, ageDays, answers, reasons }) {
   const l = leases[leaseIdx];
   const u = units.find((x) => x.id === l.unitId);
   const woId = id();
   const created = addDays(T, -ageDays) + "T14:20:00.000Z";
   const vendor = vendorTrade ? vendors.find((v) => v.trade === vendorTrade) : null;
 
-  insert("work_order", {
+  await insert("work_order", {
     id: woId, company_id: companyId, unit_id: l.unitId, lease_id: l.id,
     reference: ref("WO"), category, severity, summary, detail: detail || null,
     triage_answers: JSON.stringify({ answers: answers || {}, reasons: reasons || [] }),
@@ -273,23 +276,23 @@ function wo({ leaseIdx, category, severity, summary, detail, status, vendorTrade
     public_token: token(), created_at: created,
     closed_at: status === "complete" ? addDays(T, -(ageDays - 2)) + "T16:00:00.000Z" : null,
   });
-  insert("work_order_event", {
+  await insert("work_order_event", {
     id: id(), work_order_id: woId, at: created, actor: "tenant", kind: "reported",
     note: `${category} · ${severity}`, tenant_visible: 1,
   });
   if (vendor) {
-    insert("work_order_event", {
+    await insert("work_order_event", {
       id: id(), work_order_id: woId, at: addDays(T, -(ageDays - 1)) + "T09:15:00.000Z",
       actor: "system", kind: "triaged", note: `Routed to ${vendor.name} by category rule.`, tenant_visible: 0,
     });
   }
   if (status === "complete") {
-    insert("work_order_event", {
+    await insert("work_order_event", {
       id: id(), work_order_id: woId, at: addDays(T, -(ageDays - 2)) + "T16:00:00.000Z",
       actor: "Marcus Bell", kind: "completed", note: `${detail || "Repaired"}`, tenant_visible: 1,
     });
     if (actual) {
-      insert("ledger_entry", {
+      await insert("ledger_entry", {
         id: id(), company_id: companyId, owner_id: l.ownerId, property_id: l.propertyId,
         unit_id: l.unitId, lease_id: l.id, date: addDays(T, -(ageDays - 2)),
         kind: "expense", amount_cents: -actual, memo: `${summary}`,
@@ -300,34 +303,34 @@ function wo({ leaseIdx, category, severity, summary, detail, status, vendorTrade
   return { id: woId, ownerId: l.ownerId, summary };
 }
 
-wo({ leaseIdx: 1, category: "hvac", severity: "emergency", ageDays: 0,
+await wo({ leaseIdx: 1, category: "hvac", severity: "emergency", ageDays: 0,
   summary: "No heat, unit is cold", detail: "Furnace not firing",
   status: "triaged", vendorTrade: "hvac",
   answers: { no_heat_cold: "yes", vulnerable: "yes" },
   reasons: ["Is the heat out and the unit uncomfortably cold?", "Is an infant, an elderly person or someone with a medical condition in the unit?"] });
 
-wo({ leaseIdx: 2, category: "plumbing", severity: "normal", ageDays: 3,
+await wo({ leaseIdx: 2, category: "plumbing", severity: "normal", ageDays: 3,
   summary: "Kitchen tap drips constantly", status: "scheduled", vendorTrade: "plumber", estimate: 18500,
   answers: { one_fixture: "yes" } });
 
-wo({ leaseIdx: 3, category: "appliance", severity: "urgent", ageDays: 6,
+await wo({ leaseIdx: 3, category: "appliance", severity: "urgent", ageDays: 6,
   summary: "Fridge not holding temperature", detail: "Replaced thermostat and door seal",
   status: "complete", vendorTrade: "appliance", estimate: 24000, actual: 27350,
   answers: { fridge: "yes" } });
 
-const bigJob = wo({ leaseIdx: 4, category: "structural", severity: "urgent", ageDays: 2,
+const bigJob = await wo({ leaseIdx: 4, category: "structural", severity: "urgent", ageDays: 2,
   summary: "Water staining spreading on bathroom ceiling", detail: "Suspected failed shower pan above",
   status: "awaiting_owner", vendorTrade: "general", estimate: 128000,
   answers: { damp: "yes" } });
 
 /* The over-threshold job waiting on its owner. */
 const apprToken = token();
-insert("owner_approval", {
+await insert("owner_approval", {
   id: id(), company_id: companyId, owner_id: bigJob.ownerId, work_order_id: bigJob.id,
   amount_cents: 128000, status: "pending", token: apprToken,
   requested_at: addDays(T, -1) + "T11:00:00.000Z",
 });
-insert("work_order_event", {
+await insert("work_order_event", {
   id: id(), work_order_id: bigJob.id, at: addDays(T, -1) + "T11:00:00.000Z",
   actor: "Dana Whitfield", kind: "owner_asked",
   note: "$1,280.00 is over the $750.00 threshold — Okafor Holdings LLC asked to approve.", tenant_visible: 0,
@@ -336,29 +339,32 @@ insert("work_order_event", {
 /* --- a turn in flight ------------------------------------------------------ */
 const vacant = units[units.length - 1];
 const turnId = id();
-insert("turn", {
+await insert("turn", {
   id: turnId, company_id: companyId, unit_id: vacant.id, lease_id: null,
   stage: "in_progress",
   notice_date: addDays(T, -34), moveout_date: addDays(T, -12),
   target_ready_date: addDays(T, -2), status: "open", created_at: now,
 });
-run("UPDATE unit SET status = 'turn' WHERE id = ?", vacant.id);
-[["notice", -34], ["moveout", -12], ["inspected", -11], ["scoped", -9], ["in_progress", -7]]
-  .forEach(([stage, d]) => insert("turn_stage_event", {
+await run("UPDATE unit SET status = 'turn' WHERE id = ?", vacant.id);
+for (const [stage, d] of [["notice", -34], ["moveout", -12], ["inspected", -11], ["scoped", -9], ["in_progress", -7]]) {
+  await insert("turn_stage_event", {
     id: id(), turn_id: turnId, stage, entered_at: addDays(T, d) + "T10:00:00.000Z",
     actor: "Marcus Bell", note: null,
-  }));
-[["Final inspection", 0, -11], ["Clean", 32000, -8], ["Paint touch-up", 48000, -6],
- ["Carpet / flooring", 92000, null], ["Keys and locks re-keyed", null, null], ["Photos for listing", null, null]]
-  .forEach(([label, cost, doneOffset], i) => insert("turn_task", {
+  });
+}
+const TURN_TASKS = [["Final inspection", 0, -11], ["Clean", 32000, -8], ["Paint touch-up", 48000, -6],
+ ["Carpet / flooring", 92000, null], ["Keys and locks re-keyed", null, null], ["Photos for listing", null, null]];
+for (const [i, [label, cost, doneOffset]] of TURN_TASKS.entries()) {
+  await insert("turn_task", {
     id: id(), turn_id: turnId, label, cost_cents: cost,
     done_at: doneOffset == null ? null : addDays(T, doneOffset) + "T12:00:00.000Z", sort: i,
-  }));
+  });
+}
 
 /* --- an application -------------------------------------------------------- */
-const crit = get("SELECT * FROM criteria_set WHERE company_id = ? AND active = 1", companyId);
+const crit = await get("SELECT * FROM criteria_set WHERE company_id = ? AND active = 1", companyId);
 const appId = id();
-insert("application", {
+await insert("application", {
   id: appId, company_id: companyId, unit_id: vacant.id, criteria_set_id: crit.id,
   applicant_name: "Adaeze Nwosu", email: "adaeze@example.test", phone: "(614) 555-0455",
   desired_move_in: addDays(T, 21), occupants: 2, monthly_income_cents: 520000,
@@ -366,14 +372,14 @@ insert("application", {
   received_at: addDays(T, -2) + "T08:40:00.000Z", token: token(),
 });
 for (const item of JSON.parse(crit.items)) {
-  insert("application_check", {
+  await insert("application_check", {
     id: id(), application_id: appId, criteria_item_key: item.key,
     result: "pending", checked_by: "—", checked_at: now,
   });
 }
 
 /* --- let the engines catch up ---------------------------------------------- */
-const result = tick("seed");
+const result = await tick("seed");
 
 console.log(`
   Seeded Leafridge Property Management

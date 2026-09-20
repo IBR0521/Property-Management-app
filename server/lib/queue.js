@@ -17,12 +17,12 @@ import { all, get } from "./db.js";
 import { today, daysBetween, human } from "./dates.js";
 import { usd } from "./money.js";
 
-export function buildQueue(companyId) {
+export async function buildQueue(companyId) {
   const items = [];
   const age = (iso) => (iso ? daysBetween(iso.slice(0, 10), today()) : 0);
 
   /* --- 0: emergencies ---------------------------------------------------- */
-  for (const w of all(
+  for (const w of await all(
     `SELECT w.*, u.label, p.line1 FROM work_order w
        JOIN unit u ON u.id = w.unit_id JOIN property p ON p.id = u.property_id
       WHERE w.company_id = ? AND w.severity = 'emergency'
@@ -43,7 +43,7 @@ export function buildQueue(companyId) {
   }
 
   /* --- 1: money waiting on an owner -------------------------------------- */
-  for (const a of all(
+  for (const a of await all(
     `SELECT a.*, o.name AS owner_name, w.reference, w.summary, u.label, p.line1
        FROM owner_approval a
        JOIN owner o ON o.id = a.owner_id
@@ -63,14 +63,14 @@ export function buildQueue(companyId) {
   }
 
   /* --- 1: statutory clocks ------------------------------------------------ */
-  for (const o of all(
+  for (const o of await all(
     `SELECT o.*, r.label, r.kind FROM obligation o JOIN compliance_rule r ON r.id = o.rule_id
       WHERE o.company_id = ? AND o.status = 'overdue' ORDER BY o.due_date`, companyId)) {
     items.push({
       rank: 1, kind: "deadline", tone: "danger",
       title: o.label,
       why: `Due ${human(o.due_date)} — ${Math.abs(daysBetween(today(), o.due_date))} day(s) past`,
-      where: subjectLabel(companyId, o.subject_type, o.subject_id),
+      where: await subjectLabel(companyId, o.subject_type, o.subject_id),
       age: Math.abs(daysBetween(today(), o.due_date)),
       href: `/app/compliance`,
       cta: "Close it out",
@@ -83,7 +83,7 @@ export function buildQueue(companyId) {
      sitting in a table. This used to filter on vendor_id IS NULL, which meant
      an auto-routed job vanished from the queue entirely — assigned on paper,
      nobody contacted. */
-  for (const w of all(
+  for (const w of await all(
     `SELECT w.*, u.label, p.line1, v.name AS vendor_name, v.trade
        FROM work_order w
        JOIN unit u ON u.id = w.unit_id JOIN property p ON p.id = u.property_id
@@ -106,7 +106,7 @@ export function buildQueue(companyId) {
   }
 
   /* --- 2: dispatched, but still no date ----------------------------------- */
-  for (const w of all(
+  for (const w of await all(
     `SELECT w.*, u.label, p.line1, v.name AS vendor_name FROM work_order w
        JOIN unit u ON u.id = w.unit_id JOIN property p ON p.id = u.property_id
        LEFT JOIN vendor v ON v.id = w.vendor_id
@@ -130,7 +130,7 @@ export function buildQueue(companyId) {
      Collapsed into one row per template. Three identical lines saying the
      same template needs the same signature is noise, and one fix clears all
      of them. */
-  const blocked = all(
+  const blocked = await all(
     `SELECT * FROM outbox WHERE company_id = ? AND about_type = 'notice_blocked'
         AND status = 'queued' ORDER BY queued_at`, companyId);
   if (blocked.length) {
@@ -155,7 +155,7 @@ export function buildQueue(companyId) {
   }
 
   /* --- 2: rent past grace ------------------------------------------------- */
-  for (const d of all(
+  for (const d of await all(
     `SELECT d.*, u.label, p.line1 FROM delinquency d
        JOIN lease l ON l.id = d.lease_id JOIN unit u ON u.id = l.unit_id
        JOIN property p ON p.id = u.property_id
@@ -175,7 +175,7 @@ export function buildQueue(companyId) {
   }
 
   /* --- 2: a turn running past its own target ------------------------------ */
-  for (const t of all(
+  for (const t of await all(
     `SELECT t.*, u.label, u.market_rent_cents, p.line1 FROM turn t
        JOIN unit u ON u.id = t.unit_id JOIN property p ON p.id = u.property_id
       WHERE t.company_id = ? AND t.status = 'open'
@@ -196,7 +196,7 @@ export function buildQueue(companyId) {
   }
 
   /* --- 3: people waiting on us -------------------------------------------- */
-  for (const a of all(
+  for (const a of await all(
     `SELECT a.*, u.label, p.line1,
             (SELECT COUNT(*) FROM application_check c WHERE c.application_id = a.id AND c.result = 'pending') AS pending
        FROM application a
@@ -234,20 +234,20 @@ function safeReasons(json) {
 
 /* Obligations point at a lease, unit or property by id; the queue shows an
    address instead. */
-function subjectLabel(companyId, type, sid) {
+async function subjectLabel(companyId, type, sid) {
   if (type === "lease") {
-    const r = get(
+    const r = await get(
       `SELECT p.line1, u.label FROM lease l JOIN unit u ON u.id = l.unit_id
          JOIN property p ON p.id = u.property_id WHERE l.id = ?`, sid);
     return r ? place(r.line1, r.label) : "a lease";
   }
   if (type === "unit") {
-    const r = get(
+    const r = await get(
       `SELECT p.line1, u.label FROM unit u JOIN property p ON p.id = u.property_id WHERE u.id = ?`, sid);
     return r ? place(r.line1, r.label) : "a unit";
   }
   if (type === "property") {
-    const r = get("SELECT line1 FROM property WHERE id = ?", sid);
+    const r = await get("SELECT line1 FROM property WHERE id = ?", sid);
     return r ? r.line1 : "a property";
   }
   return "the company";

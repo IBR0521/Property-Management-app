@@ -5,7 +5,8 @@
    a traversal attempt lands outside and is refused rather than served. */
 import { createReadStream, statSync } from "node:fs";
 import { join, resolve, extname, normalize } from "node:path";
-import { ROOT, UPLOAD_DIR } from "./db.js";
+import { ROOT } from "./db.js";
+import { UPLOAD_DIR } from "./files.js";
 
 const TYPES = {
   ".html": "text/html; charset=utf-8",

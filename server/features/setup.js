@@ -16,23 +16,23 @@ import { CATEGORIES } from "../lib/triage.js";
 import { DELIVERY, outboxPending } from "../lib/scheduler.js";
 
 export function registerSetup(router) {
-  router.get("/app/setup", (ctx) => {
+  router.get("/app/setup", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const company = one("SELECT * FROM company WHERE id = ?", cid);
-    const vendors = all("SELECT * FROM vendor WHERE company_id = ? ORDER BY trade, name", cid);
-    const rules = all(
+    const company = await one("SELECT * FROM company WHERE id = ?", cid);
+    const vendors = await all("SELECT * FROM vendor WHERE company_id = ? ORDER BY trade, name", cid);
+    const rules = await all(
       `SELECT r.*, v.name AS vendor_name FROM routing_rule r JOIN vendor v ON v.id = r.vendor_id
         WHERE r.company_id = ? ORDER BY r.category, r.rank`, cid);
-    const templates = all("SELECT * FROM notice_template WHERE company_id = ? ORDER BY key", cid);
-    const criteria = all("SELECT * FROM criteria_set WHERE company_id = ? ORDER BY created_at DESC", cid);
-    const owners = all("SELECT * FROM owner WHERE company_id = ? ORDER BY name", cid);
-    const queued = outboxPending(cid);
-    const recent = all(
+    const templates = await all("SELECT * FROM notice_template WHERE company_id = ? ORDER BY key", cid);
+    const criteria = await all("SELECT * FROM criteria_set WHERE company_id = ? ORDER BY created_at DESC", cid);
+    const owners = await all("SELECT * FROM owner WHERE company_id = ? ORDER BY name", cid);
+    const queued = await outboxPending(cid);
+    const recent = await all(
       `SELECT * FROM outbox WHERE company_id = ? ORDER BY queued_at DESC LIMIT 12`, cid);
     const unrouted = CATEGORIES.filter((c) => !rules.some((r) => r.category === c.key));
 
     sendHtml(ctx.res, appPage({
-      staff: ctx.staff, csrf: ctx.csrf, active: "setup", counts: navCounts(cid),
+      staff: ctx.staff, csrf: ctx.csrf, active: "setup", counts: await navCounts(cid),
       title: "Setup",
       subtitle: company.name,
       body: html`
@@ -242,12 +242,12 @@ export function registerSetup(router) {
 
   /* --- writes ------------------------------------------------------------- */
 
-  router.post("/app/setup/vendor", (ctx) => {
+  router.post("/app/setup/vendor", async (ctx) => {
     const cid = ctx.staff.company_id;
     const name = String(ctx.fields.name || "").trim();
     const trade = String(ctx.fields.trade || "").trim().toLowerCase();
     if (!name || !trade) throw new BadRequest("A vendor needs a name and a trade.");
-    insert("vendor", {
+    await insert("vendor", {
       id: id(), company_id: cid, name, trade,
       phone: String(ctx.fields.phone || "").trim() || null,
       email: String(ctx.fields.email || "").trim() || null,
@@ -257,39 +257,39 @@ export function registerSetup(router) {
     redirect(ctx.res, `/app/setup?m=${encodeURIComponent("Vendor added.")}`);
   });
 
-  router.post("/app/setup/routing", (ctx) => {
+  router.post("/app/setup/routing", async (ctx) => {
     const cid = ctx.staff.company_id;
     const category = String(ctx.fields.category || "");
     if (!CATEGORIES.some((c) => c.key === category)) throw new BadRequest("Unknown category.");
-    const vendor = one("SELECT * FROM vendor WHERE id = ? AND company_id = ?", String(ctx.fields.vendor_id || ""), cid);
+    const vendor = await one("SELECT * FROM vendor WHERE id = ? AND company_id = ?", String(ctx.fields.vendor_id || ""), cid);
     const rank = Number(ctx.fields.rank) || 1;
 
     // The UNIQUE on (company, category, rank) means re-adding the same rank is
     // an update, not a duplicate — which is what the operator meant.
-    const existing = get(
+    const existing = await get(
       "SELECT * FROM routing_rule WHERE company_id = ? AND category = ? AND rank = ?", cid, category, rank);
-    if (existing) update("routing_rule", existing.id, { vendor_id: vendor.id });
-    else insert("routing_rule", { id: id(), company_id: cid, category, vendor_id: vendor.id, rank });
+    if (existing) await update("routing_rule", existing.id, { vendor_id: vendor.id });
+    else await insert("routing_rule", { id: id(), company_id: cid, category, vendor_id: vendor.id, rank });
 
     redirect(ctx.res, `/app/setup?m=${encodeURIComponent("Routing saved.")}`);
   });
 
-  router.post("/app/setup/owner/:id", (ctx) => {
+  router.post("/app/setup/owner/:id", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const owner = one("SELECT * FROM owner WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    const owner = await one("SELECT * FROM owner WHERE id = ? AND company_id = ?", ctx.params.id, cid);
     const patch = {};
     const t = parseMoney(ctx.fields.threshold);
     if (t != null && t >= 0) patch.approval_threshold_cents = t;
     const email = String(ctx.fields.email || "").trim();
     if (email) patch.email = email;
-    update("owner", owner.id, patch);
+    await update("owner", owner.id, patch);
     redirect(ctx.res, `/app/setup?m=${encodeURIComponent("Owner updated.")}`);
   });
 
-  router.post("/app/setup/template", (ctx) => {
+  router.post("/app/setup/template", async (ctx) => {
     const cid = ctx.staff.company_id;
     const key = String(ctx.fields.key || "");
-    const tpl = one("SELECT * FROM notice_template WHERE company_id = ? AND key = ?", cid, key);
+    const tpl = await one("SELECT * FROM notice_template WHERE company_id = ? AND key = ?", cid, key);
     const body = String(ctx.fields.body || "").trim();
     if (!body) throw new BadRequest("A template needs a body.");
 
@@ -309,7 +309,7 @@ export function registerSetup(router) {
     const freshSignOff = signed && approvedOn !== storedOn;
     const keep = signed && (!changed || freshSignOff);
 
-    // notice_template is keyed on (company_id, key), so the id-based update()
+    // notice_template is keyed on (company_id, key), so the id-based await update()
     // helper does not apply here.
     sqlRun(
       `UPDATE notice_template SET body = ?, approved_by = ?, approved_at = ?

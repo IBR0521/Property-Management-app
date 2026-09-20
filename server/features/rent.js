@@ -21,11 +21,11 @@ import { queueNotice, renderTemplate, tick } from "../lib/scheduler.js";
 
 export function registerRent(router) {
   /* --- rent roll ---------------------------------------------------------- */
-  router.get("/app/rent", (ctx) => {
+  router.get("/app/rent", async (ctx) => {
     const cid = ctx.staff.company_id;
     const period = /^\d{4}-\d{2}$/.test(ctx.query.period || "") ? ctx.query.period : monthKey(today());
 
-    const leases = all(
+    const leases = await all(
       `SELECT l.*, u.label, p.line1,
               (SELECT COALESCE(SUM(amount_cents),0) FROM ledger_entry e
                 WHERE e.lease_id = l.id AND e.kind = 'rent_payment'
@@ -44,7 +44,7 @@ export function registerRent(router) {
     const lateCount = leases.filter((l) => l.paid < l.rent_cents && today() > addDays(dueDateFor(period, l.rent_due_day), l.grace_days)).length;
 
     sendHtml(ctx.res, appPage({
-      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: navCounts(cid),
+      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
       title: "Rent",
       subtitle: `${period} · ${leases.length} active lease${leases.length === 1 ? "" : "s"}`,
       actions: html`
@@ -99,15 +99,15 @@ export function registerRent(router) {
   });
 
   /* --- record a payment --------------------------------------------------- */
-  router.get("/app/rent/record", (ctx) => {
+  router.get("/app/rent/record", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const lease = one(
+    const lease = await one(
       `SELECT l.*, u.label, p.line1, p.owner_id FROM lease l
          JOIN unit u ON u.id = l.unit_id JOIN property p ON p.id = u.property_id
         WHERE l.id = ? AND l.company_id = ?`, String(ctx.query.lease || ""), cid);
 
     sendHtml(ctx.res, appPage({
-      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: navCounts(cid),
+      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
       title: "Record a payment",
       subtitle: `${lease.line1}${lease.label ? `, unit ${lease.label}` : ""} · rent ${usd(lease.rent_cents)}`,
       body: html`
@@ -143,9 +143,9 @@ export function registerRent(router) {
     }));
   });
 
-  router.post("/app/rent/record", (ctx) => {
+  router.post("/app/rent/record", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const lease = one(
+    const lease = await one(
       `SELECT l.*, p.owner_id, p.id AS property_id FROM lease l
          JOIN unit u ON u.id = l.unit_id JOIN property p ON p.id = u.property_id
         WHERE l.id = ? AND l.company_id = ?`, String(ctx.fields.lease_id || ""), cid);
@@ -153,8 +153,8 @@ export function registerRent(router) {
     if (amount == null || amount <= 0) throw new BadRequest("Enter the amount received.");
     const date = String(ctx.fields.date || today());
 
-    tx(() => {
-      insert("ledger_entry", {
+    await tx(async () => {
+      await insert("ledger_entry", {
         id: id(), company_id: cid, owner_id: lease.owner_id, property_id: lease.property_id,
         unit_id: lease.unit_id, lease_id: lease.id, date, kind: "rent_payment",
         amount_cents: Math.abs(amount), memo: String(ctx.fields.memo || "Rent").trim(),
@@ -164,17 +164,17 @@ export function registerRent(router) {
       /* Close any delinquency the payment clears. Recomputed from the ledger
          rather than decremented, so a correction cannot leave a stale balance. */
       const period = monthKey(date);
-      const d = get("SELECT * FROM delinquency WHERE lease_id = ? AND period = ?", lease.id, period);
+      const d = await get("SELECT * FROM delinquency WHERE lease_id = ? AND period = ?", lease.id, period);
       if (d && d.status !== "resolved") {
-        const paid = get(
+        const paid = (await get(
           `SELECT COALESCE(SUM(amount_cents),0) AS c FROM ledger_entry
             WHERE lease_id = ? AND kind = 'rent_payment' AND date >= ? AND date <= ?`,
-          lease.id, `${period}-01`, addDays(`${period}-01`, 45)).c;
+          lease.id, `${period}-01`, addDays(`${period}-01`, 45))).c;
         const owed = lease.rent_cents - paid;
         if (owed <= 0) {
-          update("delinquency", d.id, { status: "resolved", resolved_at: stamp(), amount_cents: 0 });
+          await update("delinquency", d.id, { status: "resolved", resolved_at: stamp(), amount_cents: 0 });
         } else {
-          update("delinquency", d.id, { amount_cents: owed });
+          await update("delinquency", d.id, { amount_cents: owed });
         }
       }
     });
@@ -182,13 +182,13 @@ export function registerRent(router) {
   });
 
   /* --- the ladder config -------------------------------------------------- */
-  router.get("/app/rent/ladder", (ctx) => {
+  router.get("/app/rent/ladder", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const steps = all("SELECT * FROM delinquency_step WHERE company_id = ? ORDER BY stage", cid);
-    const templates = all("SELECT * FROM notice_template WHERE company_id = ? ORDER BY key", cid);
+    const steps = await all("SELECT * FROM delinquency_step WHERE company_id = ? ORDER BY stage", cid);
+    const templates = await all("SELECT * FROM notice_template WHERE company_id = ? ORDER BY key", cid);
 
     sendHtml(ctx.res, appPage({
-      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: navCounts(cid),
+      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
       title: "Delinquency ladder",
       subtitle: "The same sequence for every tenant, on the same offsets",
       actions: html`<a class="pill outline sm" href="/app/rent">Back</a>`,
@@ -241,35 +241,35 @@ export function registerRent(router) {
         </div>`,
     }));
   });
-  router.post("/app/rent/run", (ctx) => {
-    const r = tick("manual");
+  router.post("/app/rent/run", async (ctx) => {
+    const r = await tick("manual");
     const bits = Object.entries(r).filter(([, v]) => typeof v === "number" && v > 0).map(([k, v]) => `${k} ${v}`);
     redirect(ctx.res, `/app/rent?m=${encodeURIComponent(bits.length ? bits.join(", ") : "Nothing changed.")}`);
   });
 
   /* --- one delinquency ---------------------------------------------------- */
-  router.get("/app/rent/:id", (ctx) => {
+  router.get("/app/rent/:id", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const d = get(
+    const d = await get(
       `SELECT d.*, l.rent_cents, l.rent_due_day, l.grace_days, u.label, p.line1, p.city
          FROM delinquency d JOIN lease l ON l.id = d.lease_id
          JOIN unit u ON u.id = l.unit_id JOIN property p ON p.id = u.property_id
         WHERE d.id = ? AND d.company_id = ?`, ctx.params.id, cid);
     if (!d) return sendHtml(ctx.res, "Not found", 404);
 
-    const tenants = all(
+    const tenants = await all(
       `SELECT t.* FROM tenant t JOIN lease_tenant lt ON lt.tenant_id = t.id WHERE lt.lease_id = ?`, d.lease_id);
-    const notices = all(
+    const notices = await all(
       "SELECT * FROM notice_log WHERE delinquency_id = ? ORDER BY sent_at DESC", d.id);
-    const promises = all(
+    const promises = await all(
       "SELECT * FROM payment_promise WHERE delinquency_id = ? ORDER BY promised_date DESC", d.id);
-    const steps = all("SELECT * FROM delinquency_step WHERE company_id = ? ORDER BY stage", cid);
-    const templates = all("SELECT * FROM notice_template WHERE company_id = ?", cid);
+    const steps = await all("SELECT * FROM delinquency_step WHERE company_id = ? ORDER BY stage", cid);
+    const templates = await all("SELECT * FROM notice_template WHERE company_id = ?", cid);
     const lateDays = daysBetween(d.late_since, today());
     const nextStep = steps.find((s) => s.stage === d.stage + 1);
 
     sendHtml(ctx.res, appPage({
-      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: navCounts(cid),
+      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
       title: `${usd(d.amount_cents)} outstanding`,
       subtitle: `${d.line1}${d.label ? `, unit ${d.label}` : ""} · ${d.period} · ${lateDays} day(s) late`,
       actions: html`<a class="pill outline sm" href="/app/rent">Back</a>`,
@@ -383,16 +383,16 @@ export function registerRent(router) {
     }));
   });
 
-  router.post("/app/rent/:id/promise", (ctx) => {
+  router.post("/app/rent/:id/promise", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const d = one("SELECT * FROM delinquency WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    const d = await one("SELECT * FROM delinquency WHERE id = ? AND company_id = ?", ctx.params.id, cid);
     const amount = parseMoney(ctx.fields.promised);
     const date = String(ctx.fields.promised_date || "");
     if (amount == null || amount <= 0) throw new BadRequest("How much did they promise?");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new BadRequest("Give the date they promised to pay by.");
 
-    tx(() => {
-      insert("payment_promise", {
+    await tx(async () => {
+      await insert("payment_promise", {
         id: id(), company_id: cid, delinquency_id: d.id,
         promised_date: date, promised_cents: amount,
         note: String(ctx.fields.note || "").trim() || null,
@@ -401,19 +401,19 @@ export function registerRent(router) {
       // Pausing the ladder is the point: chasing someone who has committed to
       // a date, on the same schedule as someone who has not, is what makes a
       // sequence feel mechanical rather than fair.
-      if (d.status === "open") update("delinquency", d.id, { status: "promised" });
+      if (d.status === "open") await update("delinquency", d.id, { status: "promised" });
     });
     redirect(ctx.res, `/app/rent/${d.id}?m=${encodeURIComponent("Promise logged — the ladder is paused until that date.")}`);
   });
 
-  router.post("/app/rent/:id/notice", (ctx) => {
+  router.post("/app/rent/:id/notice", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const d = one(
+    const d = await one(
       `SELECT d.*, u.label, p.line1 FROM delinquency d JOIN lease l ON l.id = d.lease_id
          JOIN unit u ON u.id = l.unit_id JOIN property p ON p.id = u.property_id
         WHERE d.id = ? AND d.company_id = ?`, ctx.params.id, cid);
     const key = String(ctx.fields.template_key || "");
-    const template = get("SELECT * FROM notice_template WHERE company_id = ? AND key = ?", cid, key);
+    const template = await get("SELECT * FROM notice_template WHERE company_id = ? AND key = ?", cid, key);
     if (!template) throw new BadRequest("That template does not exist.");
 
     /* The block that matters. A form can be tampered with, so approval is
@@ -424,10 +424,10 @@ export function registerRent(router) {
         + `Have your attorney review it and record the sign-off in Setup.`);
     }
 
-    const step = get("SELECT * FROM delinquency_step WHERE company_id = ? AND template_key = ?", cid, key)
+    const step = await get("SELECT * FROM delinquency_step WHERE company_id = ? AND template_key = ?", cid, key)
       || { stage: d.stage, channel: "email", template_key: key };
-    const company = one("SELECT * FROM company WHERE id = ?", cid);
-    const n = queueNotice({
+    const company = await one("SELECT * FROM company WHERE id = ?", cid);
+    const n = await queueNotice({
       company, delinquency: d, step, template,
       lateDays: daysBetween(d.late_since, today()), sentBy: ctx.staff.name,
     });
