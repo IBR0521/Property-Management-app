@@ -146,7 +146,7 @@ alive between requests:
 |---|---|
 | SQLite file at `data/app.db` | Turso (libSQL) over HTTP |
 | `data/uploads/` on disk | Vercel Blob |
-| `setInterval` every 10 minutes | Vercel Cron hitting `/api/cron` |
+| `setInterval` every 10 minutes | **currently nothing — see below** |
 
 libSQL was chosen over Postgres deliberately: it *is* SQLite, so the schema and
 every query in this codebase are byte-identical either way. A Postgres port
@@ -209,11 +209,44 @@ server/index.js the local dev server   never runs on Vercel
 
 ## Things to know
 
-**The cron runs once a day, at 09:00 UTC.** That is deliberate: the Vercel
-Hobby plan only triggers a cron job once per day, so anything more frequent
-fails on the free tier.
+**No cron is scheduled right now.** The `crons` block has been removed from
+`vercel.json`, so on Vercel nothing drives the scheduler automatically.
 
-What running daily actually costs you: deadline reminders and delinquency
+The endpoint still exists at `/api/cron` and still works — it is just not
+being called. To turn it back on, put this back in `vercel.json`:
+
+```json
+"crons": [{ "path": "/api/cron", "schedule": "0 9 * * *" }]
+```
+
+Daily is the most frequent schedule the Hobby plan will accept; anything
+tighter fails the deploy.
+
+### What does not happen while it is off
+
+Nothing breaks, but four things stop advancing on their own:
+
+- new compliance obligations are not generated from move-outs or lease dates
+- obligations never age from `open` to `overdue`
+- delinquencies never open, and the ladder never advances a stage
+- payment promises are never judged kept or broken
+
+Everything request-driven is unaffected: maintenance intake, emergency
+escalation, owner approvals, recording payments, turns and applications all
+work exactly as before, because they happen during the request.
+
+**The manual trigger covers the gap.** Compliance and Rent both have a
+*Re-check now* button that runs the same tick on demand, and it is safe to
+press as often as you like — every job is idempotent. A manager pressing it
+once a morning is functionally the same as the cron.
+
+You can also call it from anywhere with the secret:
+
+```
+curl -H "Authorization: Bearer $CRON_SECRET" https://<your-app>/api/cron
+```
+
+What running on a daily schedule costs you, once re-enabled: deadline reminders and delinquency
 ladder steps land up to 24 hours late. Nothing is missed — every job works
 from current state rather than from "what happened since", so a late run
 catches up completely. Emergencies are unaffected, because those escalate
