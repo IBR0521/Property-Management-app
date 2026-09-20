@@ -1,0 +1,16 @@
+# Runtime state. app.db IS the system of record — back it up, don't commit it.
+data/
+
+# The marketing site is not part of this repository.
+# It is generated and owned elsewhere; the app serves it at / when present and
+# redirects to /app when it is not.
+#
+# assets/css/styles.css is the exception and IS tracked: it defines the design
+# tokens and components the back office is built from, so the app renders
+# unstyled without it.
+/index.html
+/assets/js/
+
+node_modules/
+*.log
+.DS_Store

@@ -1,0 +1,585 @@
+/* ==========================================================================
+   Quick Property Buyer — stylesheet
+   --------------------------------------------------------------------------
+   Layout is driven off the root font size, which is a vw unit below 1920px.
+   Every dimension is therefore in rem so the whole page scales as one piece
+   instead of reflowing at each breakpoint.
+   ========================================================================== */
+
+/* --- tokens --------------------------------------------------------------- */
+:root{
+  --background:#ffffff; --foreground:#0a0a0a;
+  --brand:#4f46e5; --brand-deep:#1b184e; --brand-light:#2563eb;
+  --deep-rgb:27,24,78; --teal-rgb:37,99,235;
+  --accent:#4f46e5; --accent-teal:#2563eb;
+  --surface:#f4f4f4; --surface-card:#ffffff;
+  --ink:#0a0a0a; --ink-soft:#717784; --ghost:#d7dae1; --hairline:#e6e8ec;
+  --on-brand:#ffffff;
+  --radius-card:1.5rem; --radius-card-lg:2rem; --radius-pill:62.5rem; --radius-xl:0.75rem;
+  --ease-out:cubic-bezier(0.16,1,0.3,1);
+}
+
+/* --- reset ---------------------------------------------------------------- */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+/* clip, not hidden. overflow-x:hidden on the root element forces the other
+   axis to compute as auto, which turns <html> into a scroll container and
+   kills position:sticky for everything inside it. clip stops the sideways
+   scroll the parallax transforms would otherwise create without making a
+   scroll container. */
+html,body{overflow-x:clip}
+
+html{font-size:16px}
+@media (max-width:1920px){html{font-size:0.833333vw}}
+@media (max-width:1440px){html{font-size:1.111111vw}}
+@media (max-width:1024px){html{font-size:1.5625vw}}
+@media (max-width:640px){html{font-size:4.444444vw}}
+
+img{display:block;max-width:100%}
+button{cursor:pointer;font:inherit;color:inherit;background:none;border:none}
+a{color:inherit;text-decoration:none}
+:focus-visible{outline:2px solid var(--brand-light);outline-offset:2px}
+
+body{
+  min-height:100vh;background:var(--background);color:var(--foreground);
+  font-family:"Manrope","Onest",system-ui,sans-serif;font-weight:400;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* Set while a modal or the menu owns the screen. */
+.lock{position:relative;overflow:hidden;height:100%}
+
+main{width:100%;overflow-x:clip;padding:0.5rem}
+@media (min-width:640px){main{padding:0.75rem}}
+
+/* --- text utilities ------------------------------------------------------- */
+.fm{font-weight:500}
+.uc{text-transform:uppercase}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.hide{display:none}
+
+/* --- reveal primitives ---------------------------------------------------- */
+/* Per-word and per-line masks: the inner span slides up out of an overflow
+   hidden box, so the type appears to rise from behind its own baseline. */
+.clip{display:inline-block;overflow:hidden;vertical-align:bottom;padding-bottom:0.2em}
+.clip>span{display:inline-block;transform:translateY(115%);opacity:0;
+  transition:transform 1s var(--ease-out),opacity 1s var(--ease-out)}
+.clip.in>span{transform:translateY(0);opacity:1}
+
+.lines{display:block}
+.lines .line{display:block;overflow:hidden;padding-bottom:0.22em}
+.lines .line>span{display:block;transform:translateY(115%);opacity:0;
+  transition:transform 0.95s var(--ease-out),opacity 0.95s var(--ease-out)}
+.lines.in .line>span{transform:translateY(0);opacity:1}
+
+/* Word-by-word fade for body copy. */
+.wf{display:inline-block;transform:translateY(18px);opacity:0;
+  transition:transform 0.7s cubic-bezier(0.25,1,0.5,1),opacity 0.7s cubic-bezier(0.25,1,0.5,1)}
+.wf.in{transform:translateY(0);opacity:1}
+
+/* Generic "rise into view" for cards and images. */
+.iv{opacity:0;transform:translateY(28px);
+  transition:opacity 0.8s var(--ease-out),transform 0.8s var(--ease-out)}
+.iv.in{opacity:1;transform:none}
+
+/* ==========================================================================
+   Header
+   ========================================================================== */
+.hdr{display:flex;align-items:center;padding:1.5rem 1.5rem 0;font-size:0.75rem;
+  color:#fff;position:relative;z-index:20}
+@media (min-width:640px){.hdr{padding:2rem 2.5rem 0}}
+.hdr .nav-l{display:none;flex:1;gap:2rem;align-items:center}
+@media (min-width:1024px){.hdr .nav-l{display:flex}}
+.hdr .nav-l a{color:rgba(255,255,255,.9)}
+.hdr .nav-l a:hover{color:#fff}
+.hdr .brand-c{flex:1;display:flex;justify-content:center}
+.hdr .nav-r{flex:1;display:flex;justify-content:flex-end;align-items:center;gap:1rem}
+@media (min-width:640px){.hdr .nav-r{gap:1.25rem}}
+
+.brand{display:inline-flex;align-items:center;gap:0.5rem;font-size:1rem;letter-spacing:0.2em}
+.brand svg{width:1.25rem;height:1.25rem}
+
+.book-txt{display:none;letter-spacing:0.06em}
+@media (min-width:640px){.book-txt{display:inline}}
+.book-txt:hover{text-decoration:underline}
+
+.burger{width:2.5rem;height:2.5rem;display:grid;place-content:center;gap:5px;
+  border-radius:var(--radius-pill);background:rgba(255,255,255,.15);backdrop-filter:blur(8px)}
+.burger:hover{background:rgba(255,255,255,.25)}
+.burger span{display:block;width:1rem;height:1px;background:#fff}
+
+/* ==========================================================================
+   Hero
+   --------------------------------------------------------------------------
+   A card inset from the page edge, not a full-bleed band: the white frame
+   around it is main's padding showing through. min-height is capped against
+   the viewport so a short screen can never push the rounded bottom out of
+   sight, which is what would make the frame read as a square-cornered image.
+   ========================================================================== */
+.hero{position:relative;isolation:isolate;overflow:hidden;
+  border-radius:var(--radius-card-lg);box-shadow:0 0 0 1px rgba(10,10,10,.06);
+  background:var(--brand-deep);color:#fff;display:flex;flex-direction:column;
+  height:calc(100svh - 1rem);min-height:min(36rem,calc(100svh - 1rem))}
+@media (min-width:640px){.hero{height:calc(100svh - 1.5rem)}}
+
+/* The plate is taller than the frame so it can translate on scroll without
+   ever exposing an edge. */
+.hero .plate{position:absolute;inset:0;z-index:-10}
+.hero .plate .mv{position:absolute;left:0;right:0;top:-16%;height:132%;width:100%;will-change:transform}
+.hero .plate img{width:100%;height:100%;object-fit:cover;object-position:50% 55%}
+.hero .plate .grad{position:absolute;inset:0;
+  background:linear-gradient(to bottom,rgba(var(--deep-rgb),.65),rgba(var(--deep-rgb),.35),rgba(var(--deep-rgb),.75))}
+
+.hero-title{padding:1rem 1.5rem 0;font-size:clamp(2.2rem,5.8vw,13rem);font-weight:500;
+  text-transform:uppercase;line-height:0.85;letter-spacing:-0.02em;
+  white-space:normal;overflow-wrap:break-word}
+@media (min-width:640px){.hero-title{padding-left:2.5rem;padding-right:2.5rem}}
+
+.hero-bottom{margin-top:auto;padding:0 1.5rem 2rem;display:flex;flex-direction:column;gap:1.5rem}
+@media (min-width:640px){.hero-bottom{padding:0 2.5rem 2.5rem;flex-direction:row;
+  justify-content:space-between;align-items:flex-end}}
+
+.tagline{font-size:2.4rem;font-weight:500;text-transform:uppercase;line-height:0.95;
+  letter-spacing:-0.02em;color:rgba(255,255,255,.85)}
+
+.hero-cluster{display:flex;align-items:flex-end;gap:1rem}
+
+.glass{border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.1);
+  box-shadow:0 20px 40px rgba(var(--deep-rgb),.2);backdrop-filter:blur(10px)}
+
+/* Rotating "what's on" card. */
+.coll{display:none;width:16rem;flex-direction:column;gap:0.75rem}
+@media (min-width:768px){.coll{display:flex}}
+.coll-card{display:flex;gap:0.75rem;border-radius:var(--radius-card);padding:0.75rem}
+.coll-card>img{width:3.5rem;height:3.5rem;border-radius:var(--radius-xl);object-fit:cover;flex:none}
+.coll-brand{font-size:0.7rem;font-weight:500;text-transform:uppercase;letter-spacing:0.06em}
+.coll-title{font-size:0.7rem;text-transform:uppercase;opacity:.8;margin-top:0.15rem}
+.coll-cta{font-size:0.65rem;text-decoration:underline;margin-top:0.35rem;display:inline-block}
+.coll-fade{transition:opacity .5s ease,transform .5s ease}
+
+.membership{width:100%;max-width:20rem;display:flex;gap:0.75rem;align-items:stretch;
+  border-radius:var(--radius-card);padding:0.75rem}
+@media (min-width:640px){.membership{max-width:15rem}}
+.membership .col{display:flex;flex-direction:column;justify-content:space-between;flex:1}
+.membership .val{font-size:1.875rem;font-weight:500;line-height:1}
+.membership .cap{font-size:0.65rem;opacity:.8}
+.membership>img{width:4rem;aspect-ratio:3/4;border-radius:var(--radius-xl);object-fit:cover;flex:none}
+
+.dots-av{display:flex}
+.dots-av span{width:1.25rem;height:1.25rem;border-radius:var(--radius-pill);
+  border:1px solid rgba(var(--deep-rgb),.4);margin-left:-0.5rem}
+.dots-av span:first-child{margin-left:0}
+
+/* ==========================================================================
+   Shared components
+   ========================================================================== */
+.eyebrow{display:inline-flex;align-items:center;gap:0.5rem;font-size:0.75rem;font-weight:500;
+  text-transform:uppercase;letter-spacing:0.22em}
+.eyebrow .dot{width:0.375rem;height:0.375rem;border-radius:var(--radius-pill)}
+.eyebrow.dark{color:var(--ink-soft)}
+.eyebrow.dark .dot{background:var(--brand)}
+.eyebrow.light{color:rgba(255,255,255,.7)}
+.eyebrow.light .dot{background:var(--brand-light)}
+
+.pill{display:inline-flex;align-items:center;gap:0.5rem;border-radius:var(--radius-pill);
+  padding:0.875rem 1.75rem;font-size:0.875rem;font-weight:500;text-transform:uppercase;
+  letter-spacing:0.06em;transition:background .3s ease,color .3s ease}
+.pill svg{width:1rem;height:1rem;transition:transform .3s var(--ease-out)}
+.pill:hover svg{transform:translateX(5px)}
+.pill.light{background:#fff;color:var(--brand-deep)}
+.pill.light:hover{background:var(--brand-light);color:#fff}
+.pill.solid{background:var(--ink);color:#fff}
+.pill.solid:hover{background:var(--brand-deep)}
+.pill.outline{border:1px solid currentColor;color:var(--ink)}
+.pill.outline:hover{background:var(--ink);color:#fff}
+
+.arrowbtn{width:3rem;height:3rem;display:grid;place-content:center;border-radius:var(--radius-pill)}
+@media (min-width:640px){.arrowbtn{width:3.5rem;height:3.5rem}}
+.arrowbtn svg{width:1.25rem;height:1.25rem;transition:transform .3s var(--ease-out)}
+.arrowbtn:hover svg{transform:scale(1.15)}
+.arrowbtn.prev svg{transform:scaleX(-1)}
+.arrowbtn.prev:hover svg{transform:scaleX(-1) scale(1.15)}
+.arrowbtn.outline{border:1px solid var(--hairline);color:var(--ink)}
+.arrowbtn.outline:hover{border-color:var(--ink)}
+.arrowbtn.solid{background:var(--ink);border:1px solid var(--ink);color:#fff}
+.arrowbtn.solid:hover{background:var(--brand-deep)}
+
+.cdots{display:flex;gap:0.5rem}
+.cdots button{padding:0.375rem}
+.cdots .bar{display:block;height:0.375rem;width:0.375rem;border-radius:var(--radius-pill);
+  transition:width .3s ease,background .3s ease}
+.cdots.dark .bar{background:var(--ghost)}
+.cdots.dark .active .bar{width:1.25rem;background:var(--ink)}
+.cdots.light .bar{background:rgba(255,255,255,.4)}
+.cdots.light .active .bar{width:1.25rem;background:#fff}
+
+.h2big{font-size:3rem;font-weight:500;line-height:0.95;letter-spacing:-0.02em;margin-top:1rem}
+
+/* --- gilded CTA ----------------------------------------------------------- */
+/* The one button treatment that carries the brand gradient. */
+.pd-cta{
+  background:linear-gradient(180deg,#a7a3f2 0%,#4f46e5 38%,#312b8e 74%,#231f65 100%);
+  color:#fff;border:1px solid rgba(223,222,250,.7);
+  text-shadow:0 1px 0 rgba(0,0,0,.4);
+  box-shadow:0 8px 22px rgba(43,39,126,.45),inset 0 -6px 12px rgba(33,29,96,.38);
+  transition:transform .25s ease,box-shadow .25s ease,filter .25s ease;
+}
+.pd-cta:hover{transform:translateY(-2px);filter:brightness(1.06);
+  box-shadow:0 12px 30px rgba(43,39,126,.55),inset 0 -6px 12px rgba(33,29,96,.38)}
+.pd-cta.u{text-decoration:underline;text-underline-offset:2px}
+
+/* --- icon chip ------------------------------------------------------------ */
+.pd-ico{display:inline-flex;align-items:center;justify-content:center;flex:none;
+  align-self:center;width:2rem;height:2rem;border-radius:.55rem;
+  border:1px solid color-mix(in srgb,var(--accent) 26%,transparent);
+  background:color-mix(in srgb,var(--accent) 8%,transparent);color:var(--accent)}
+.pd-ico-svg{width:1.05rem;height:1.05rem;stroke-width:1.4}
+
+/* ==========================================================================
+   Trust
+   ========================================================================== */
+.trust{position:relative;isolation:isolate;overflow:hidden;background:var(--background);
+  padding:4rem 1.5rem}
+@media (min-width:640px){.trust{padding:5rem 2.5rem}}
+
+.trust-badges{position:relative;z-index:20;display:flex;flex-direction:column;gap:1.5rem;
+  justify-content:space-between}
+@media (min-width:640px){.trust-badges{flex-direction:row;align-items:flex-start}}
+
+.pctbadge{width:7rem;height:7rem;border-radius:var(--radius-pill);background:var(--surface);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;flex:none}
+@media (min-width:640px){.pctbadge{width:8rem;height:8rem}}
+.pctbadge .n{font-size:1.5rem;font-weight:500}
+.pctbadge .c{font-size:0.6rem;color:var(--ink-soft);max-width:7em;margin-top:0.25rem}
+
+.badgecard{max-width:28rem;display:flex;gap:1rem;border-radius:var(--radius-card);
+  background:var(--surface);padding:1.25rem}
+@media (min-width:640px){.badgecard{gap:1.25rem;padding:1.5rem}}
+.badgecard .chip{border-radius:var(--radius-xl);background:var(--background);
+  padding:0.5rem 1rem;font-size:1.25rem;font-weight:500;align-self:flex-start}
+.badgecard .t{font-size:1.125rem;font-weight:500}
+.badgecard .b{font-size:0.75rem;color:var(--ink-soft);line-height:1.6;margin-top:0.4rem}
+
+/* Oversized type that sits behind the coach card and drifts on scroll. */
+.ghost-h{pointer-events:none;position:relative;z-index:0;user-select:none;max-width:88rem;
+  margin:3rem auto 0;font-size:8.2vw;font-weight:500;text-transform:uppercase;
+  line-height:1.02;letter-spacing:-0.02em}
+.ghost-row{display:flex;justify-content:space-between}
+.gword{color:var(--ghost)}
+.gword.ink{color:var(--ink)}
+
+.coach{position:relative;z-index:10;width:17rem;margin:2.5rem auto 0}
+@media (min-width:640px){.coach{width:24rem;position:absolute;left:50%;top:50%;
+  transform:translate(-50%,-50%);margin:0}}
+
+/* The card's motion lives on the <figure>, never on .coach. .coach carries the
+   desktop centring transform, and .iv.in{transform:none} would outrank it and
+   knock the card down-right of centre the moment it revealed. JS only ever
+   drives --cx/--co, so the 6deg tilt survives every slide. */
+.coach figure{transform:translate3d(var(--cx,0px),0,0) rotate(6deg);opacity:var(--co,1);
+  transition:transform .55s var(--ease-out),opacity .4s ease;
+  aspect-ratio:3/4;border-radius:var(--radius-card);background:var(--brand);
+  overflow:hidden;position:relative}
+/* Entrance: the card starts off to the right and settles into place. */
+.coach[data-iv] figure{--cx:64px;--co:0}
+.coach.in figure{--cx:0px;--co:1}
+/* Leaving is faster than arriving, and the jump to the far side is untweened. */
+.coach.swap figure{transition:transform .26s cubic-bezier(0.4,0,1,1),opacity .2s ease}
+.coach.jump figure{transition:none}
+.coach img{width:100%;height:100%;object-fit:cover;transition:opacity .4s ease}
+.coach .cap{position:absolute;left:0.75rem;right:0.75rem;bottom:0.75rem;
+  border-radius:var(--radius-xl);background:rgba(var(--deep-rgb),.4);color:#fff;
+  backdrop-filter:blur(8px);padding:0.5rem 0.75rem}
+.coach .cap .nm{font-size:0.875rem;font-weight:500}
+.coach .cap .rl{font-size:0.65rem;opacity:.8}
+
+.trust-ctrl{position:relative;z-index:20;margin-top:3rem;display:flex;align-items:center;
+  justify-content:space-between}
+@media (min-width:640px){.trust-ctrl{margin-top:6rem}}
+
+/* ==========================================================================
+   Services list
+   ========================================================================== */
+.svsp{position:relative;--svsp-accent:var(--accent)}
+.svsp-inner{max-width:72rem;margin:0 auto;padding:6rem 1.5rem}
+.svsp-eyebrow{font-size:.72rem;letter-spacing:.35em;text-transform:uppercase;
+  color:var(--svsp-accent);margin-bottom:.75rem}
+.svsp-heading{font-size:clamp(2rem,5vw,3.5rem);font-weight:700;line-height:1.05;margin-bottom:2.5rem}
+.svsp-rows{display:flex;flex-direction:column}
+.svsp-row{display:grid;grid-template-columns:auto 1fr;gap:clamp(1rem,4vw,3rem);
+  align-items:baseline;padding:1.9rem 0;
+  border-top:1px solid color-mix(in srgb,currentColor 16%,transparent);
+  transition:padding-left .4s cubic-bezier(.2,.7,.2,1)}
+.svsp-row:hover{padding-left:.75rem}
+.svsp-num{font-size:1rem;font-weight:700;color:var(--svsp-accent);opacity:.85;
+  padding-top:.4rem;min-width:2.4rem}
+.svsp-title{font-size:clamp(1.5rem,3.4vw,2.5rem);font-weight:700;line-height:1.08;
+  letter-spacing:-.02em}
+.svsp-desc{margin-top:.7rem;font-size:1.02rem;line-height:1.6;opacity:.62;max-width:52ch}
+@media (max-width:640px){
+  .svsp-row{grid-template-columns:1fr;gap:.4rem}
+  .svsp-num{padding-top:0}
+}
+
+/* ==========================================================================
+   Facilities
+   --------------------------------------------------------------------------
+   Pulled up over the section above it so the rounded top overlaps.
+   ========================================================================== */
+.facilities{background:var(--background);border-radius:var(--radius-card-lg);
+  margin-top:-2.5rem;position:relative;padding:4rem 1.5rem 5rem}
+@media (min-width:640px){.facilities{padding-left:2.5rem;padding-right:2.5rem}}
+.fac-grid{display:grid;grid-template-columns:1fr;align-items:end;gap:2.5rem}
+@media (min-width:768px){.fac-grid{grid-template-columns:1fr 1fr}}
+.fac-intro{max-width:24rem}
+.fac-icon{width:4rem;height:4rem;border-radius:var(--radius-card);object-fit:cover}
+.fac-body{font-size:0.875rem;color:var(--ink-soft);max-width:20rem;margin-top:1.5rem}
+.fac-cards{display:flex;align-items:flex-end;gap:1.25rem}
+.fac-tile{flex:1;aspect-ratio:3/4;border-radius:var(--radius-card);overflow:hidden;
+  background:var(--surface);position:relative}
+.fac-tile img{width:100%;height:100%;object-fit:cover;transition:transform .4s var(--ease-out)}
+.fac-tile:hover img{transform:scale(1.03)}
+.fac-tile.mb{margin-bottom:2rem}
+.fac-cap{position:absolute;left:0.75rem;right:0.75rem;bottom:0.75rem;
+  border-radius:var(--radius-xl);backdrop-filter:blur(8px);color:#fff;padding:0.75rem 1rem}
+.fac-cap.clay{background:rgba(var(--deep-rgb),.4)}
+.fac-cap.blue{background:rgba(var(--teal-rgb),.55)}
+.fac-cap .nm{font-size:0.875rem;font-weight:500}
+.fac-cap .ds{font-size:0.65rem;opacity:.85;margin-top:0.15rem}
+
+/* ==========================================================================
+   Stats band
+   ========================================================================== */
+.stats{background:var(--brand-deep);color:#fff;border-radius:var(--radius-card-lg);
+  margin-top:0.75rem;padding:5rem 1.5rem}
+@media (min-width:640px){.stats{padding-left:2.5rem;padding-right:2.5rem}}
+.stats-grid{display:grid;grid-template-columns:1fr 1fr;column-gap:2rem;row-gap:3rem;margin-top:4rem}
+@media (min-width:1024px){.stats-grid{grid-template-columns:repeat(4,1fr)}}
+.stat-cell{border-top:1px solid rgba(255,255,255,.2);padding-top:1.25rem}
+.stat-cell .v{font-size:3.75rem;font-weight:500;letter-spacing:-0.02em;line-height:1}
+@media (min-width:640px){.stat-cell .v{font-size:4.5rem}}
+.stat-cell .l{font-size:0.875rem;color:rgba(255,255,255,.65);margin-top:0.75rem}
+
+/* ==========================================================================
+   Content blocks — features, process, FAQ, contact, service area
+   --------------------------------------------------------------------------
+   One card vocabulary shared by all five: a hairline box on the page ground,
+   tinted from currentColor so it reads on light and dark bands alike.
+   ========================================================================== */
+.blk{max-width:72rem;margin:0 auto;padding:5rem 1.5rem}
+.blk.narrow{max-width:64rem}
+.blk-head{margin-bottom:3rem}
+.blk-head.wide{margin-bottom:3.5rem}
+.blk-eyebrow{font-size:0.875rem;line-height:1.25rem;font-weight:500;text-transform:uppercase;
+  letter-spacing:0.1em;opacity:.7;margin-bottom:0.75rem}
+.blk-h2{font-size:2.25rem;line-height:2.5rem;font-weight:600;max-width:42rem}
+@media (min-width:768px){.blk-h2{font-size:3rem;line-height:1}}
+
+.blk-grid{display:grid;grid-template-columns:1fr;gap:1.5rem}
+@media (min-width:768px){
+  .blk-grid.cols-2{grid-template-columns:repeat(2,1fr)}
+  .blk-grid.cols-3{grid-template-columns:repeat(3,1fr)}
+  .blk-grid.cols-4{grid-template-columns:repeat(2,1fr)}
+}
+@media (min-width:1024px){.blk-grid.cols-4{grid-template-columns:repeat(4,1fr)}}
+
+.blk-card{border:1px solid color-mix(in srgb,currentColor 14%,transparent);
+  border-radius:1rem;padding:2rem}
+.blk-card.lift{transition:transform .15s ease-out}
+.blk-card.lift:hover{transform:translateY(-0.25rem)}
+.blk-card h3{font-weight:600;margin-top:1rem;margin-bottom:0.75rem}
+.blk-card.plain h3{margin-top:0}
+.blk-card h3.sz-lg{font-size:1.125rem;line-height:1.75rem}
+.blk-card h3.sz-xl{font-size:1.25rem;line-height:1.75rem}
+.blk-card p{opacity:.7;line-height:1.625}
+.blk-card p.sm{font-size:0.875rem}
+.blk-card p.blk-step{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
+  font-size:0.75rem;line-height:1rem;letter-spacing:0.1em;opacity:.4;margin-bottom:1rem}
+
+/* Contact block: two taller cards side by side. */
+.blk-card.tall{padding:2.5rem;display:flex;flex-direction:column;gap:2rem}
+.blk-card.tall.split{justify-content:space-between}
+.blk-row{display:flex;align-items:flex-start;gap:1.25rem}
+.blk-row .lb{font-weight:600;margin-bottom:0.25rem;line-height:normal;opacity:1}
+.blk-row p,.blk-row a{opacity:.7;line-height:1.625}
+.blk-row a.pd-cta:hover{opacity:1}
+.blk-card.tall h3{font-size:1.5rem;line-height:2rem;margin-top:0;margin-bottom:1rem}
+.blk-btn{border-radius:9999px;display:inline-block;padding:1rem 2rem;
+  font-weight:600;font-size:1rem;line-height:1.5rem}
+
+/* Service area block sits on a narrower measure with small tiles. */
+.blk.area{max-width:none;padding:4rem 1.5rem}
+@media (min-width:768px){.blk.area{padding-left:3rem;padding-right:3rem}}
+.blk-area-inner{max-width:48rem;margin:0 auto}
+.blk-kicker{font-size:0.75rem;line-height:1rem;text-transform:uppercase;
+  letter-spacing:0.1em;opacity:.5;margin-bottom:1rem}
+.blk-h2.sm{font-size:1.875rem;line-height:2.25rem;margin-bottom:1.5rem;max-width:none}
+@media (min-width:768px){.blk-h2.sm{font-size:2.25rem;line-height:2.5rem}}
+.blk-lede{font-size:1rem;line-height:1.625;opacity:.7;margin-bottom:2.5rem}
+.blk-grid.tiles{gap:1rem}
+@media (min-width:640px){.blk-grid.tiles{grid-template-columns:repeat(3,1fr)}}
+.blk-card.tile{border-radius:var(--radius-xl);padding:1.5rem}
+.blk-card.tile h3{font-size:1.125rem;line-height:1.75rem;margin-top:1rem;margin-bottom:0.5rem}
+.blk-card.tile p{font-size:0.875rem;line-height:1.25rem}
+
+/* ==========================================================================
+   Footer
+   ========================================================================== */
+.ft{background:var(--brand-deep);color:#fff;border-radius:var(--radius-card-lg);
+  margin-top:0.75rem;padding:3.5rem 1.5rem}
+@media (min-width:640px){.ft{padding:4rem 2.5rem}}
+.ft-cta{border-bottom:1px solid rgba(255,255,255,.15);padding-bottom:3.5rem;display:flex;
+  flex-direction:column;gap:1.5rem;justify-content:space-between}
+@media (min-width:640px){.ft-cta{flex-direction:row;align-items:flex-end}}
+.ft-cta .big{font-size:3.75rem;font-weight:500;line-height:0.92;letter-spacing:-0.02em;
+  margin-top:1rem}
+.ft-cols{display:grid;grid-template-columns:1fr;gap:2.5rem;padding:3.5rem 0}
+@media (min-width:768px){.ft-cols{grid-template-columns:1.4fr 1fr 1fr 1fr}}
+.ft-brand{max-width:20rem}
+.ft-brand .bl{font-size:1.125rem;font-weight:500;text-transform:uppercase;letter-spacing:0.2em;
+  display:inline-flex;align-items:center;gap:0.5rem}
+.ft-brand .bl svg{width:1.25rem;height:1.25rem}
+.ft-blurb{font-size:0.875rem;color:rgba(255,255,255,.65);margin-top:1rem}
+.ft-addr{font-style:normal;margin-top:1.5rem;font-size:0.875rem;color:rgba(255,255,255,.8);
+  display:flex;flex-direction:column;gap:0.35rem}
+.ft-addr .muted{color:rgba(255,255,255,.55)}
+.ft-col h4{font-size:0.75rem;font-weight:500;text-transform:uppercase;letter-spacing:0.2em;
+  color:rgba(255,255,255,.5)}
+.ft-col ul{list-style:none;margin-top:1rem;display:flex;flex-direction:column;gap:0.75rem;
+  font-size:0.875rem;color:rgba(255,255,255,.8)}
+.ft-col a:hover{color:#fff}
+.ft-bottom{border-top:1px solid rgba(255,255,255,.15);padding-top:2rem;font-size:0.875rem;
+  color:rgba(255,255,255,.6);display:flex;flex-direction:column;gap:1.25rem;
+  justify-content:space-between}
+@media (min-width:640px){.ft-bottom{flex-direction:row;align-items:center}}
+.ft-bottom nav{display:flex;gap:1.25rem}
+.ft-bottom a:hover{color:#fff}
+
+/* ==========================================================================
+   Booking modal
+   ========================================================================== */
+.modal-root{position:fixed;inset:0;z-index:90;display:flex;align-items:flex-end;
+  justify-content:center;padding:0.75rem;pointer-events:none}
+@media (min-width:640px){.modal-root{align-items:center;padding:1.5rem}}
+.modal-root.open{pointer-events:auto}
+.modal-bk{position:absolute;inset:0;background:rgba(var(--deep-rgb),.4);backdrop-filter:blur(8px);
+  opacity:0;transition:opacity .45s var(--ease-out)}
+.modal-root.open .modal-bk{opacity:1}
+.modal-panel{position:relative;max-height:92svh;overflow-y:auto;border-radius:var(--radius-card-lg);
+  background:var(--surface-card);padding:1.5rem;color:var(--ink);width:100%;
+  box-shadow:0 40px 80px rgba(var(--deep-rgb),.35);opacity:0;
+  transform:translateY(28px) scale(0.96);
+  transition:opacity .5s var(--ease-out),transform .5s var(--ease-out)}
+@media (min-width:640px){.modal-panel{padding:2rem;max-width:32rem}}
+.modal-root.open .modal-panel{opacity:1;transform:none}
+.modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}
+.modal-title{font-size:2.25rem;font-weight:500;line-height:0.95;letter-spacing:-0.02em;
+  margin-top:0.75rem}
+@media (min-width:640px){.modal-title{font-size:3rem}}
+
+.iconbtn{width:2.5rem;height:2.5rem;border-radius:var(--radius-pill);background:var(--surface);
+  display:grid;place-content:center;flex:none}
+.iconbtn:hover{background:var(--hairline)}
+.iconbtn svg{width:1.1rem;height:1.1rem;transition:transform .3s var(--ease-out)}
+.iconbtn:hover svg{transform:rotate(90deg)}
+
+.modal-form{margin-top:1.75rem;display:flex;flex-direction:column;gap:1rem}
+.field label{display:block;font-size:0.75rem;font-weight:500;text-transform:uppercase;
+  letter-spacing:0.18em;color:var(--ink-soft);margin-bottom:0.5rem}
+.field input,.field textarea{width:100%;border-radius:var(--radius-xl);border:1px solid var(--hairline);
+  background:var(--background);padding:0.75rem 1rem;font-size:0.875rem;font-family:inherit;
+  color:var(--ink)}
+.field input:focus,.field textarea:focus{outline:none;border-color:var(--brand-light);
+  box-shadow:0 0 0 2px var(--brand-light)}
+.modal-submit{border-radius:var(--radius-pill);background:var(--ink);color:#fff;
+  padding:0.875rem 1.75rem;font-size:0.875rem;font-weight:500;text-transform:uppercase;
+  letter-spacing:0.06em;transition:background .3s ease}
+.modal-submit:hover{background:var(--brand-deep)}
+.modal-submit[disabled]{opacity:.6;cursor:default}
+
+.msuccess{margin-top:2rem;border-radius:var(--radius-card);background:var(--surface);
+  padding:1.5rem;text-align:center}
+.msuccess .ck{width:3rem;height:3rem;border-radius:var(--radius-pill);background:var(--brand);
+  display:grid;place-content:center;margin:0 auto}
+.msuccess .ck svg{width:1.25rem;height:1.25rem}
+.msuccess h3{font-size:1.125rem;font-weight:500;margin-top:1rem}
+.msuccess p{color:var(--ink-soft);margin-top:0.5rem;font-size:0.9rem}
+.msuccess .pill{margin-top:1.25rem}
+
+/* ==========================================================================
+   Full-screen menu
+   ========================================================================== */
+.menu-root{position:fixed;inset:0;z-index:70;display:flex;flex-direction:column;
+  pointer-events:none}
+.menu-root.open{pointer-events:auto}
+.menu-bk{position:absolute;inset:0;background:var(--brand-deep);opacity:0;
+  transition:opacity .5s var(--ease-out)}
+.menu-root.open .menu-bk{opacity:1}
+.menu-panel{position:relative;height:100%;display:flex;flex-direction:column;color:#fff;
+  padding:0.5rem;opacity:0;transform:translateY(-24px);
+  transition:opacity .5s var(--ease-out),transform .5s var(--ease-out)}
+@media (min-width:640px){.menu-panel{padding:0.75rem}}
+.menu-root.open .menu-panel{opacity:1;transform:none}
+.menu-inner{height:100%;display:flex;flex-direction:column;padding:1.5rem}
+@media (min-width:640px){.menu-inner{padding:2.5rem}}
+.menu-top{display:flex;align-items:center;justify-content:space-between}
+.menu-nav{flex:1;display:flex;flex-direction:column;justify-content:center;gap:0.5rem}
+.menu-nav a{display:block;font-size:3rem;font-weight:500;letter-spacing:-0.02em;opacity:0;
+  transform:translateY(28px);
+  transition:opacity .6s var(--ease-out),transform .6s var(--ease-out),color .3s ease}
+@media (min-width:640px){.menu-nav a{font-size:4.5rem}}
+.menu-root.open .menu-nav a{opacity:1;transform:none}
+.menu-nav a:hover{color:var(--brand-light)}
+.menu-bottom{border-top:1px solid rgba(255,255,255,.15);padding-top:2rem;display:flex;
+  flex-direction:column;gap:1.25rem;justify-content:space-between}
+@media (min-width:640px){.menu-bottom{flex-direction:row;align-items:center}}
+.menu-social{display:flex;gap:1.25rem;color:rgba(255,255,255,.7)}
+.menu-social a:hover{color:#fff}
+
+/* ==========================================================================
+   Loading curtain
+   ========================================================================== */
+.loader{position:fixed;inset:0;z-index:200;background:var(--brand-deep);color:#fff;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2rem;
+  transition:transform .85s cubic-bezier(0.65,0,0.35,1)}
+.loader.done{transform:translateY(-105%)}
+.loader .wm{display:inline-flex;align-items:center;gap:0.5rem;font-size:1.5rem;font-weight:500;
+  text-transform:uppercase;letter-spacing:0.2em;opacity:0;transform:translateY(16px);
+  transition:opacity .6s ease,transform .6s var(--ease-out)}
+.loader .wm svg{width:1.75rem;height:1.75rem}
+.loader.ready .wm{opacity:1;transform:none}
+.loader .track{width:10rem;height:1px;border-radius:var(--radius-pill);
+  background:rgba(255,255,255,.2);overflow:hidden}
+.loader .fill{height:100%;width:100%;background:#fff;transform:scaleX(0);transform-origin:left;
+  transition:transform 1.28s cubic-bezier(0.65,0,0.35,1) 0.12s}
+.loader.fillon .fill{transform:scaleX(1)}
+
+/* ==========================================================================
+   Small-screen type scale
+   --------------------------------------------------------------------------
+   The vw-driven root size alone makes headings too large on a phone; these
+   clamp the heading ramp back to something readable.
+   ========================================================================== */
+@media (max-width:640px){
+  /* :where() carries zero specificity, so every one of these needs !important
+     to reach past the component classes it is correcting. */
+  :where(h1){font-size:clamp(26px,7.4vw,38px)!important;line-height:1.08!important}
+  :where(h2){font-size:clamp(21px,5.8vw,28px)!important;line-height:1.15!important}
+  :where(h3){font-size:clamp(16px,4.4vw,20px)!important;line-height:1.25!important}
+  :where(h4,h5,h6){font-size:min(1em,17px)!important}
+  :where(p,li,dd,dt,blockquote,figcaption){font-size:min(1em,15.5px)!important}
+  :where(a.pd-cta,button,[class*="btn"],[class*="cta"],[class*="button"]):not(:where(nav,header) *){font-size:min(1em,14px)!important}
+  :where(header,nav,[class*="nav"],[class*="header"]) :where([class*="brand"],[class*="logo"],[class*="wordmark"],[class*="title"]){font-size:min(1em,17px)!important}
+  :where(header,nav,[class*="nav"]) :where(a,button){font-size:min(1em,14px)!important}
+}
+
+/* ==========================================================================
+   Reduced motion
+   ========================================================================== */
+@media (prefers-reduced-motion:reduce){
+  .loader,.loader .fill{transition-duration:.15s}
+  .clip>span,.lines .line>span,.wf,.iv{transition-duration:.2s}
+  .coach figure,.coach.swap figure{transition:none}
+  .coach[data-iv] figure{--cx:0px;--co:1}
+}

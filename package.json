@@ -1,0 +1,13 @@
+{
+  "name": "property-ops",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Property management operations app. Zero runtime dependencies: Node 22 built-ins only.",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node --no-warnings=ExperimentalWarning server/index.js",
+    "seed": "node --no-warnings=ExperimentalWarning server/seed.js",
+    "reset": "rm -f data/app.db && npm run seed"
+  }
+}

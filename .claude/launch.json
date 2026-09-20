@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "app",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--no-warnings=ExperimentalWarning", "server/index.js"],
+      "port": 4300,
+      "autoPort": true
+    }
+  ]
+}
