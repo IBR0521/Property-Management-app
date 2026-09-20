@@ -22,7 +22,6 @@
    pooled connection. AsyncLocalStorage carries it, so call sites never pass a
    handle around and nested tx() calls join the outer transaction instead of
    deadlocking on a second BEGIN. */
-import { createClient } from "@libsql/client";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -31,8 +30,28 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(here, "..", "..");
 
+const SERVERLESS = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 const url = process.env.DATABASE_URL || "file:data/app.db";
 export const IS_REMOTE = !url.startsWith("file:");
+
+/* A serverless filesystem is read-only and does not survive the request, so a
+   file: URL there is always a misconfiguration. Saying so plainly beats the
+   opaque crash it would otherwise cause on the first query. */
+if (SERVERLESS && !IS_REMOTE) {
+  throw new Error(
+    "DATABASE_URL is not set. On a serverless host the filesystem is read-only, " +
+    "so the default file:data/app.db cannot work. Set DATABASE_URL to your " +
+    "libsql:// URL and DATABASE_AUTH_TOKEN to its token."
+  );
+}
+
+/* The package's default entry loads a native binding so it can open local
+   SQLite files. That binding is unnecessary for a remote database and is a
+   common cause of cold-start failure on serverless runtimes, so remote URLs
+   use the pure-HTTP client instead. */
+const { createClient } = IS_REMOTE
+  ? await import("@libsql/client/web")
+  : await import("@libsql/client");
 
 export const db = createClient({
   url,
@@ -105,6 +124,14 @@ function norm(v) {
 }
 
 /* --- migrations ----------------------------------------------------------- */
+
+/* Cached so a warm function does not re-check on every request, and so a
+   cold start does not race two migrations against each other. */
+let migrated = null;
+export function ready() {
+  if (!migrated) migrated = migrate();
+  return migrated;
+}
 
 export async function migrate() {
   await db.execute(`CREATE TABLE IF NOT EXISTS schema_migration (

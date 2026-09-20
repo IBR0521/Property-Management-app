@@ -10,7 +10,7 @@
      /report /t/ /apply /a/ /o/ tokenised public pages, no account
      /app/...                   the back office, staff session required
 */
-import { migrate, get } from "./lib/db.js";
+import { ready } from "./lib/db.js";
 import { createRouter } from "./lib/router.js";
 import { serveFromRoot, serveUpload } from "./lib/static.js";
 import { currentStaff } from "./lib/auth.js";
@@ -28,8 +28,6 @@ import { registerTurns } from "./features/turns.js";
 import { registerApplications } from "./features/applications.js";
 import { registerPortfolio } from "./features/portfolio.js";
 import { registerSetup } from "./features/setup.js";
-
-await migrate();
 
 const router = createRouter();
 
@@ -73,7 +71,22 @@ export async function handle(req, res) {
         if (serveUpload(res, path.slice("/uploads/".length))) return;
         return sendText(res, "Not found", 404);
       }
-      if (path === "/health") return sendJson(res, { ok: true, at: new Date().toISOString() });
+      if (path === "/health") {
+        let dbOk = false, dbError = null;
+        try {
+          const { db } = await import("./lib/db.js");
+          await db.execute("SELECT 1");
+          dbOk = true;
+        } catch (err) {
+          dbError = err.message;
+        }
+        return sendJson(res, {
+          ok: dbOk,
+          at: new Date().toISOString(),
+          db: { reachable: dbOk, remote: Boolean(process.env.DATABASE_URL), error: dbError },
+          blob: Boolean(process.env.BLOB_READ_WRITE_TOKEN),
+        }, dbOk ? 200 : 503);
+      }
     }
 
     /* --- routing --------------------------------------------------------- */
