@@ -209,14 +209,40 @@ server/index.js the local dev server   never runs on Vercel
 
 ## Things to know
 
-**The cron schedule is hourly, not every ten minutes.** Tighten it in
-`vercel.json` if you want faster reminders — every job is idempotent, so
-running it more often is safe and running it less just means a delay.
+**The cron runs once a day, at 09:00 UTC.** That is deliberate: the Vercel
+Hobby plan only triggers a cron job once per day, so anything more frequent
+fails on the free tier.
+
+What running daily actually costs you: deadline reminders and delinquency
+ladder steps land up to 24 hours late. Nothing is missed — every job works
+from current state rather than from "what happened since", so a late run
+catches up completely. Emergencies are unaffected, because those escalate
+during the request itself and never wait for the scheduler.
+
+To run it more often you have two options:
+
+- **Upgrade to Pro** and change the schedule in `vercel.json` to `0 * * * *`
+  (hourly) or tighter.
+- **Stay on Hobby and drive it externally.** The endpoint is a plain
+  authenticated POST/GET, so any free scheduler can call it:
+
+  ```
+  curl -H "Authorization: Bearer $CRON_SECRET" https://<your-app>/api/cron
+  ```
+
+  cron-job.org, GitHub Actions on a schedule, or an Uptime-style pinger all
+  work. Keep `CRON_SECRET` set either way — the endpoint refuses to run
+  without it.
 
 **`maxDuration` is 15s for the app and 60s for the cron.** The cron does more
 work per invocation than any single request, and a large portfolio will need
 the headroom.
 
-**The free Vercel plan allows one cron per day.** On Hobby you will need a paid
-plan for hourly, or call `/api/cron` from an external scheduler with the same
-`CRON_SECRET` header.
+**Free-tier limits this stays inside:** one cron per day, function memory
+512MB, `maxDuration` 15s for the app and 60s for the cron — all within Hobby
+allowances. Vercel Blob has a free storage allowance; tenant photos are the
+only thing written to it. Turso's free tier covers a portfolio of this size
+comfortably.
+
+**Nothing in this app costs money to run.** There is no payment API, no paid
+third-party service, and no metered call anywhere in the code.
