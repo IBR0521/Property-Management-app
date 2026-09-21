@@ -8,8 +8,9 @@ import { appPage, notice, empty } from "../views/layout.js";
 import { icons } from "../views/icons.js";
 import { navCounts } from "../lib/counts.js";
 import { buildQueue } from "../lib/queue.js";
-import { outboxPending, DELIVERY } from "../lib/scheduler.js";
+import { outboxPending, DELIVERY, lastTickAt, tickIsStale, STALE_AFTER_HOURS } from "../lib/scheduler.js";
 import { describe as describeDelivery } from "../lib/delivery/mode.js";
+import { humanStamp } from "../lib/dates.js";
 import { human, today } from "../lib/dates.js";
 
 const ICON = {
@@ -40,6 +41,9 @@ export function registerQueue(router) {
         </span>
       </li>`;
 
+    const lastRun = await lastTickAt();
+    const schedulerStale = tickIsStale(lastRun);
+
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "queue", counts: await navCounts(cid),
       title: items.length ? `${items.length} thing${items.length === 1 ? "" : "s"} need you` : "Nothing needs you",
@@ -48,6 +52,19 @@ export function registerQueue(router) {
         <a class="pill outline" href="/report" target="_blank">Tenant form</a>
         <a class="pill solid" href="/app/maintenance/new">Log a repair</a>`,
       body: html`
+        ${(() => {
+          /* Nothing else in the app can tell a manager the clocks have
+             stopped. Obligations stop ageing, the delinquency ladder stops
+             advancing, and every screen looks exactly as it did yesterday —
+             which is the failure mode of a scheduler nobody is watching. */
+          if (!schedulerStale) return "";
+          return notice("danger", "The scheduler has not run",
+            html`Deadlines, the delinquency ladder and payment promises stop advancing without it.
+                 ${lastRun ? html`Last completed ${humanStamp(lastRun.finished_at)}.`
+                           : html`It has never completed a run.`}
+                 <a href="/app/compliance">Run it now</a>.`);
+        })()}
+
         ${!DELIVERY.reaching && queued > 0
           ? (() => {
               const d = describeDelivery(DELIVERY.mode, queued);

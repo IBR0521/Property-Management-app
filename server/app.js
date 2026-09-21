@@ -37,6 +37,7 @@ import { registerLeases } from "./features/leases.js";
 import { registerBanking } from "./features/banking.js";
 import { registerVendors } from "./features/vendors.js";
 import { registerListings } from "./features/listings.js";
+import { registerMessages } from "./features/messages.js";
 
 const router = createRouter();
 
@@ -57,6 +58,7 @@ registerLeases(router);
 registerBanking(router);
 registerVendors(router);
 registerListings(router);
+registerMessages(router);
 
 /* Routes that need a signed-in staff member. Everything under /app except the
    sign-in pages, which register themselves as public. */

@@ -43,6 +43,28 @@ export async function startScheduler() {
   }, EVERY_MS).unref();
 }
 
+/* The name the scheduler records its runs under, and the age past which the
+   dashboard calls it stale. 26 hours rather than 24 so a daily cron that
+   drifts by an hour does not cry wolf every morning. */
+export const TICK_JOB = "scheduler-tick";
+export const STALE_AFTER_HOURS = 26;
+
+/* When the tick last finished, or null if it never has. The dashboard turns
+   this into a warning; without it, "is the scheduler running" is a question
+   nobody can answer from inside the app. */
+export async function lastTickAt() {
+  const row = await get(
+    "SELECT finished_at, outcome FROM job_run WHERE name = ? AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1",
+    TICK_JOB);
+  return row || null;
+}
+
+export function tickIsStale(lastRun, now = new Date()) {
+  if (!lastRun || !lastRun.finished_at) return true;
+  const ageHours = (now - new Date(lastRun.finished_at)) / 3_600_000;
+  return ageHours > STALE_AFTER_HOURS;
+}
+
 export async function tick(reason = "manual") {
   const out = {
     reason,
@@ -73,7 +95,25 @@ export async function tick(reason = "manual") {
   out.deliverySuppressed = drained.suppressed;
   out.sessionsPruned = await pruneSessions();
   out.rateHitsPruned = await pruneRateHits();
+
+  /* Recorded last, and only on success, so "last run" means "last run that
+     completed" rather than "last run that started and may have died". */
+  await recordTickRun(reason, out);
   return out;
+}
+
+async function recordTickRun(reason, result) {
+  try {
+    const runId = id();
+    const at = stamp();
+    await insert("job_run", {
+      id: runId, name: TICK_JOB, started_at: at, finished_at: at,
+      outcome: "ok", detail: JSON.stringify({ reason, ...result }).slice(0, 900),
+    });
+  } catch (err) {
+    /* Never let bookkeeping fail a tick that already did its work. */
+    log.warn("could not record scheduler run", { reason: String(err.message).slice(0, 120) });
+  }
 }
 
 function sumInto(acc, delta) {

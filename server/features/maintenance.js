@@ -24,6 +24,7 @@ import { navCounts } from "../lib/counts.js";
 import { storeMany, fileUrl } from "../lib/files.js";
 import { CATEGORIES, category, assess } from "../lib/triage.js";
 import { check, clientIp } from "../lib/ratelimit.js";
+import { sendNow } from "../lib/delivery/now.js";
 import { complianceState } from "./vendors.js";
 
 const STATUS_TONE = {
@@ -176,13 +177,26 @@ export function registerMaintenance(router) {
           `Emergency at intake: ${reasons.join(" / ")}. Tenant directed to call ${company.emergency_phone || company.phone}.`);
         const to = company.emergency_phone || company.phone;
         if (to) {
-          await insert("outbox", {
-            id: id(), company_id: company.id, channel: "sms", to_contact: to,
+          /* Sent inside the request, not queued. The scheduler runs daily;
+             an on-call alert delivered tomorrow is not an on-call alert. If
+             it fails the tenant still sees the stop card telling them to
+             phone, which is the guarantee that actually holds — but the
+             failure is recorded on the work order so a manager knows the
+             number was never reached. */
+          const alert = await sendNow({
+            companyId: company.id, channel: "sms", to,
             subject: `EMERGENCY ${reference}`,
             body: `${reference} ${cat.label} EMERGENCY at ${unit.line1}${unit.label ? " unit " + unit.label : ""}. `
               + `${reasons.join("; ")}. Tenant ${f.name || "unknown"} ${phone}.`,
-            about_type: "work_order_emergency", about_id: woId, status: "queued", queued_at: stamp(),
+            aboutType: "work_order_emergency", aboutId: woId,
           });
+
+          await event(woId, "system", "note",
+            alert.ok
+              ? `On-call alerted by SMS to ${to}.`
+              : `ON-CALL SMS DID NOT SEND to ${to} — ${alert.reason}. `
+                + `The tenant was told to call ${to}; confirm somebody has picked this up.`,
+            0);
         }
         for (const s of await all("SELECT email FROM staff WHERE company_id = ? AND active = 1", company.id)) {
           await insert("outbox", {

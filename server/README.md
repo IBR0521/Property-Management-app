@@ -919,3 +919,195 @@ Every request gets one before anything can throw, so even a 404 or a failed
 body parse carries it. It appears on every log line that request produces, in
 `X-Request-Id`, and on the 500 page for a user to quote — but not on a 404,
 because a reference number on every expired form trains people to ignore it.
+
+---
+
+# Message delivery
+
+The blocker at the top of this file is gone. Messages are sent, retried,
+given up on, and the result is visible.
+
+## It starts with a mistake I made
+
+Phase 0 moved every environment variable into `config.js`, and in doing so
+changed the delivery default from `"none"` to `"off"`. Three files still
+compared against `"none"`: the drainer's guard, the dashboard warning and the
+Setup chip. All three went false at once.
+
+The live app then had thirty-nine undelivered messages, no warning, and a green
+status chip. It was quietly claiming to be fine while sending nothing — the
+exact failure the delivery-honesty rule exists to prevent.
+
+The repair is not the string. A magic value compared in three places is a
+promise nobody keeps, so *"does anything reach a human"* is one function in
+`lib/delivery/mode.js` and the call sites ask it. There is now a test that
+fails if any file outside that module compares the mode to a literal.
+
+It also corrected a judgement the old code had backwards. `log` mode was
+treated as success. It is not: three of the four modes put nothing in front of
+a person.
+
+| mode | what happens | warned about |
+|---|---|---|
+| `off` | queued, nothing sent | yes, in red |
+| `log` | written to the server log | yes |
+| `sandbox` | provider accepts and discards | yes |
+| `live` | actually delivered | no |
+
+An unrecognised value is refused at boot rather than defaulted, because a typo
+would otherwise read as "some mode is set" and the warnings would stop.
+
+## Providers
+
+Resend for email, Twilio for SMS, both over plain `fetch`. No SDKs: each one
+wraps the same request and still has to be kept current and audited.
+
+**Resend was chosen over Postmark for one reason — verification.** Resend signs
+webhooks with Svix (HMAC-SHA256 over `id.timestamp.body`), which is forty lines
+of `node:crypto` and fully testable. Postmark does not sign webhooks at all; it
+authenticates the callback with HTTP basic auth, which would make "signature
+verification" a password comparison.
+
+The real work in an adapter is not sending. It is deciding which failures
+deserve another attempt. Too permissive and a malformed address is retried five
+times, burying the errors worth reading; too strict and a rent notice is
+dropped because the provider hiccupped once. Resend maps on its error names,
+Twilio on its numeric codes, and anything unrecognised defaults to retryable —
+an unseen failure is more likely transient, and the attempt limit bounds the
+cost of being wrong.
+
+## Retry, and where it stops
+
+    attempt 1 fails -> 1 minute
+    attempt 2 fails -> 5 minutes
+    attempt 3 fails -> 25 minutes
+    attempt 4 fails -> 2 hours
+    attempt 5 fails -> dead
+
+Fast first because most failures last seconds. Slow later because if it is
+still failing after half an hour it is not a blip, and hammering a provider
+that is rate-limiting you is how a temporary problem becomes a suspended
+account.
+
+There is a terminus on purpose. A queue that retries forever looks healthy
+while containing a message that will never send, and the only thing worse than
+a failed notice is a failed notice nobody noticed. Dead messages get their own
+tab with the provider's own error — "failed" is not actionable, `21614: not a
+mobile number` is.
+
+A permanent rejection skips the schedule entirely.
+
+## The emergency alert does not queue
+
+Everything else queues, and that is right: a reminder four minutes late is a
+reminder that went out. The on-call alert is different. The tenant is standing
+in front of something that is flooding, and the scheduler runs daily.
+
+So it sends inside the request, with a five-second timeout, and records what
+happened either way:
+
+- **sent** — the provider accepted it.
+- **dead** — it failed, and the work order says so in as many words, because
+  the one thing worse than an alert that did not send is an alert nobody knows
+  did not send. Not left queued: a retry in half an hour is not an emergency
+  alert, and a stale `EMERGENCY` arriving tomorrow is worse than none.
+- **queued** — delivery is off, and every screen counting queued messages
+  counts this one.
+
+The tenant sees the stop card in all three cases, because the stop card is the
+guarantee that actually holds. It tells them to phone, and phoning works when
+nothing else does.
+
+## Consent
+
+There was none. `outbox.status` has had a `suppressed` value since 001 that
+nothing ever set, and sending after somebody replies STOP is a TCPA problem
+rather than a missing feature.
+
+Checked inside `deliver()` rather than at the twelve places that write to the
+outbox, because a check every producer has to remember is one that a producer
+will not.
+
+Two judgements worth knowing:
+
+**SMS revocation is absolute.** A STOP is a carrier instruction and a legal
+one. There is no transactional exemption to it.
+
+**Email unsubscribe is not.** A tenant cannot unsubscribe from being told their
+lease is ending, so it stops informational mail only. A hard bounce stops
+everything, because a nonexistent address receives nothing either way. A *soft*
+bounce suppresses nothing — a full mailbox is temporary, and suppressing on one
+would permanently silence an address over a transient condition.
+
+**STOP is matched on the whole message.** "Please stop the leaking tap" is not
+an opt-out, and treating it as one would cut a tenant off from their own repair
+updates.
+
+## Webhooks
+
+    /api/webhooks/resend     delivery, bounce, complaint
+    /api/webhooks/twilio     status callbacks, and inbound STOP/HELP
+
+Their own functions rather than routes in the app: `vercel.json` rewrites
+everything except `/api/*` into the handler, and a request authenticated by a
+signature over its bytes should not be run through a pipeline built for
+browsers and then exempted from that pipeline's checks one at a time.
+
+Three rules, both providers. Verify before parsing, because the signature
+covers raw bytes and re-serialising produces different ones. Compare in
+constant time. Reject timestamps outside five minutes, or a captured request
+replayed next month is indistinguishable from a real one.
+
+Everything is idempotent on the provider's own event id, and a duplicate
+returns 200 so the provider stops replaying it for three days.
+
+One production trap worth stating: **Twilio signs over the full public URL.**
+Behind a proxy the app sees `http` and an internal host while Twilio signed
+`https` and the public one, and every callback is rejected. Hence
+`APP_BASE_URL` rather than anything derived from the request.
+
+## Scheduling
+
+The `crons` block is back in `vercel.json` at `0 9 * * *` — daily, which is
+what the Hobby plan allows. `tick()` now records each completed run, and the
+dashboard turns red when the last one is more than 26 hours old. Twenty-six
+rather than twenty-four so a daily cron that drifts by an hour does not cry
+wolf.
+
+Without that indicator, a stopped scheduler is invisible: obligations stop
+ageing, the delinquency ladder stops advancing, and every screen looks exactly
+as it did yesterday.
+
+For hourly without paying for Pro, drive it externally:
+
+    curl -H "Authorization: Bearer $CRON_SECRET" https://<your-app>/api/cron
+
+## Before the first live send
+
+**There is a backlog.** Forty-three messages are queued, some weeks old.
+Switching to `live` sends every one of them as-is, including rent notices whose
+dates have passed. `/app/messages` has a discard action and a bulk
+"discard anything older than N days" for exactly this — the first thing a new
+delivery system should not do is send a month of backdated warnings.
+
+**A2P 10DLC registration takes days to weeks.** US carriers require brand and
+campaign registration before application-to-person SMS is delivered.
+Unregistered traffic is filtered silently. This is paperwork, not code, and it
+is the longest pole.
+
+**The sending domain needs SPF, DKIM and DMARC** or rent notices land in spam.
+Also not code.
+
+## What has and has not been verified
+
+Fully, with no credentials: signature verification against generated vectors
+including tampered bodies, wrong secrets, replayed timestamps and altered
+parameters; retry timing and dead-lettering on an injected clock; suppression
+in every consent state; the emergency path's three outcomes including a
+provider that never answers; webhook idempotency; and that mode `off` never
+reaches a provider at all.
+
+**Not verified:** that Resend's live signature header matches my reading of the
+Svix spec, that Twilio's live callbacks arrive in the documented shape, and
+anything about deliverability. Those need a live account. The sandbox path is
+written but unexercised, because this project has no provider credentials.

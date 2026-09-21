@@ -53,6 +53,23 @@ export function registerSetup(router) {
                   late-rent notice is worse than one that admits it has not.`}`);
             })()}
 
+            <div class="btnrow" style="margin-top:1rem">
+              <form method="post" action="/app/messages/test">
+                <input type="hidden" name="_csrf" value="${ctx.csrf}" />
+                <input type="hidden" name="channel" value="email" />
+                <button class="pill outline sm" type="submit">Send a test email to me</button>
+              </form>
+              <form method="post" action="/app/messages/test" class="filterbar" style="padding:0;border:0;gap:0.5rem">
+                <input type="hidden" name="_csrf" value="${ctx.csrf}" />
+                <input type="hidden" name="channel" value="sms" />
+                <div class="field" style="min-width:11rem">
+                  <input name="to" type="tel" placeholder="Your mobile number" />
+                </div>
+                <button class="pill outline sm" type="submit">Send a test SMS</button>
+              </form>
+              <a class="pill outline sm" href="/app/messages">All messages</a>
+            </div>
+
             ${recent.length ? html`
               <div class="tablewrap" style="margin-top:1.25rem"><table class="data">
                 <thead><tr><th>To</th><th>Subject</th><th class="shrink">Channel</th><th class="shrink">State</th><th>Queued</th></tr></thead>

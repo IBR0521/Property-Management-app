@@ -39,6 +39,7 @@ const NAV = [
     { href: "/app/leases", key: "leases", icon: "doc", label: "Lease documents", need: "leasing.work" },
   ] },
   { group: null, items: [
+    { href: "/app/messages", key: "messages", icon: "send", label: "Messages" },
     { href: "/app/setup", key: "setup", icon: "cog", label: "Setup", need: "settings.manage" },
   ] },
 ];
