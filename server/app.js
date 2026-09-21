@@ -42,6 +42,7 @@ import { registerSignup } from "./features/signup.js";
 import { registerStaff } from "./features/staff.js";
 import { registerTwoFactor } from "./features/twofactor.js";
 import { registerCompany } from "./features/company.js";
+import { registerBilling, companyIsReadOnly, readOnlyExempt } from "./features/billing.js";
 
 const router = createRouter();
 
@@ -67,6 +68,7 @@ registerSignup(router);
 registerStaff(router);
 registerTwoFactor(router);
 registerCompany(router);
+registerBilling(router);
 
 /* Routes that need a signed-in staff member. Everything under /app except the
    sign-in pages, which register themselves as public. */
@@ -201,6 +203,17 @@ export async function handle(req, res) {
             "Your session needs a second factor before it can change anything. Sign in again."), 403);
         }
         return redirect(res, elevate);
+      }
+
+      /* A lapsed subscription makes a company read-only: every screen loads,
+         every report runs, nothing is deleted — and writes are refused with a
+         way to fix it. Checked here rather than in handlers, because a rule
+         each handler must remember is one that a handler will not. */
+      if (req.method === "POST" && !readOnlyExempt(path) && await companyIsReadOnly(ctx.staff.company_id)) {
+        ctx.log.warn("write refused, subscription lapsed", { companyId: ctx.staff.company_id });
+        return sendHtml(res, errorPage(402,
+          "Your subscription has lapsed, so this account is read-only. Everything is still here and "
+          + "nothing has been deleted — start a plan on the billing page and you can carry on."), 402);
       }
 
       const needed = requiredCapability(path, req.method);

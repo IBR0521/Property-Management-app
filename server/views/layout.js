@@ -43,6 +43,7 @@ const NAV = [
     { href: "/app/messages", key: "messages", icon: "send", label: "Messages" },
     { href: "/app/staff", key: "staff", icon: "users", label: "People", need: "staff.manage" },
     { href: "/app/company", key: "company", icon: "home", label: "Company", need: "settings.manage" },
+    { href: "/app/billing", key: "billing", icon: "cash", label: "Billing", need: "settings.manage" },
     { href: "/app/setup", key: "setup", icon: "cog", label: "Setup", need: "settings.manage" },
   ] },
 ];

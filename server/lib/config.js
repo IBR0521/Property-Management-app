@@ -177,6 +177,28 @@ export const PLAID = {
   get configured() { return Boolean(this.clientId && this.secret); },
 };
 
+/* --- subscription billing ------------------------------------------------- */
+
+export const STRIPE_SECRET_KEY = raw("STRIPE_SECRET_KEY");
+export const STRIPE_WEBHOOK_SECRET = raw("STRIPE_WEBHOOK_SECRET");
+export const STRIPE_PUBLISHABLE_KEY = raw("STRIPE_PUBLISHABLE_KEY");
+
+/* A price id per band, read by name so a missing one identifies itself. */
+export const STRIPE_PRICES = {
+  starter: raw("STRIPE_PRICE_STARTER"),
+  growth: raw("STRIPE_PRICE_GROWTH"),
+  professional: raw("STRIPE_PRICE_PROFESSIONAL"),
+  scale: raw("STRIPE_PRICE_SCALE"),
+};
+
+/* A live secret key in a non-production environment is how a test run charges
+   somebody. Refused rather than warned about. */
+if (STRIPE_SECRET_KEY && STRIPE_SECRET_KEY.startsWith("sk_live_") && APP_ENV !== "production") {
+  problems.push(
+    `STRIPE_SECRET_KEY is a live key but APP_ENV is "${APP_ENV}".\n` +
+    "    Use a test key outside production, or a test run will charge real cards.");
+}
+
 /* --- observability -------------------------------------------------------- */
 
 export const LOG_FORMAT = raw("LOG_FORMAT") || (IS_SERVERLESS ? "json" : "human");
@@ -222,5 +244,8 @@ export function configSummary() {
     sms: TWILIO_ACCOUNT_SID ? "twilio" : "unset",
     plaid: PLAID.configured ? PLAID.env : "unset",
     errorReporting: SENTRY_DSN ? "configured" : "unset",
+    billing: STRIPE_SECRET_KEY
+      ? (STRIPE_SECRET_KEY.startsWith("sk_live_") ? "live" : "test")
+      : "unset",
   };
 }
