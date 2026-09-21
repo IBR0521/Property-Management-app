@@ -14,6 +14,7 @@ import { appPage, notice, empty } from "../views/layout.js";
 import { navCounts } from "../lib/counts.js";
 import { CATEGORIES } from "../lib/triage.js";
 import { DELIVERY, outboxPending } from "../lib/scheduler.js";
+import { describe as describeDelivery } from "../lib/delivery/mode.js";
 
 export function registerSetup(router) {
   router.get("/app/setup", async (ctx) => {
@@ -41,18 +42,16 @@ export function registerSetup(router) {
         <!-- Delivery -->
         <div class="panel">
           <div class="panel__head"><h2>Delivery</h2>
-            <span class="chip"${attr("data-tone", DELIVERY.mode === "none" ? "warn" : "ok")}>${DELIVERY.mode}</span>
+            <span class="chip"${attr("data-tone", describeDelivery(DELIVERY.mode, 0).tone)}>${DELIVERY.mode}</span>
           </div>
           <div class="panel__body">
-            ${DELIVERY.mode === "none"
-              ? notice("warn", "Nothing is being sent",
-                  html`${queued} message${queued === 1 ? "" : "s"} queued. Reminders, owner requests and rent
-                       notices are <b>recorded but not delivered</b>. Start the server with
-                       <code>DELIVERY_MODE=log</code> to drain the queue to the console, or wire a real
-                       provider in <code>server/lib/scheduler.js</code> (<code>drainOutbox</code>).
-                       This is deliberately off by default — a queue that silently claims to have sent a
-                       late-rent notice is worse than one that admits it has not.`)
-              : notice("ok", `Delivery mode: ${DELIVERY.mode}`, `${queued} still queued.`)}
+            ${(() => {
+              const d = describeDelivery(DELIVERY.mode, queued);
+              return notice(d.tone, d.title, html`${d.detail}
+                ${DELIVERY.reaching ? "" : html`<br /><br />
+                  This is deliberately off by default — a queue that silently claims to have sent a
+                  late-rent notice is worse than one that admits it has not.`}`);
+            })()}
 
             ${recent.length ? html`
               <div class="tablewrap" style="margin-top:1.25rem"><table class="data">

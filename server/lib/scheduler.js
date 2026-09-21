@@ -15,13 +15,21 @@ import { usd } from "./money.js";
 import { pruneSessions } from "./auth.js";
 import { prune as pruneRateHits } from "./ratelimit.js";
 import { DELIVERY_MODE } from "./config.js";
+import { drains, reachesRecipients } from "./delivery/mode.js";
+import { deliver } from "./delivery/index.js";
 
 const EVERY_MS = 10 * 60 * 1000;
 
 /* Delivery is off until someone wires a provider. Queued messages stay queued
    and the app says so, rather than marking them sent and quietly dropping a
    late-rent notice. See setup screen. */
-export const DELIVERY = { mode: DELIVERY_MODE };
+export const DELIVERY = {
+  mode: DELIVERY_MODE,
+  /* Asked, never compared against a literal. The last time this was a string
+     comparison it silently went false in three files at once. */
+  get reaching() { return reachesRecipients(DELIVERY_MODE); },
+  get draining() { return drains(DELIVERY_MODE); },
+};
 
 export async function startScheduler() {
   const result = await tick("boot");
@@ -376,14 +384,26 @@ async function judgePromises(company) {
    the tenant dialling the number on the stop card. Providers are plain HTTP
    APIs, so this stays dependency-free. See the checklist in server/README.md. */
 async function drainOutbox() {
-  if (DELIVERY.mode === "none") return 0;         // nothing is configured; say so in the UI
+  if (!DELIVERY.draining) return 0;              // nothing is configured; the UI says so
   const queued = await all("SELECT * FROM outbox WHERE status = 'queued' ORDER BY queued_at LIMIT 50");
   let n = 0;
   for (const m of queued) {
-    if (DELIVERY.mode === "log") {
-      console.log(`[outbox:${m.channel}] -> ${m.to_contact} :: ${m.subject || ""}`);
-      await run("UPDATE outbox SET status = 'sent', sent_at = ?, attempts = attempts + 1 WHERE id = ?", stamp(), m.id);
+    /* One path for every provider. A branch per mode here is how the
+       production path becomes the one that is never exercised. */
+    const result = await deliver({
+      channel: m.channel, to: m.to_contact, subject: m.subject,
+      body: m.body, companyId: m.company_id,
+    });
+
+    if (result.ok) {
+      await run(
+        "UPDATE outbox SET status = 'sent', sent_at = ?, attempts = attempts + 1 WHERE id = ?",
+        stamp(), m.id);
       n++;
+    } else {
+      await run(
+        "UPDATE outbox SET attempts = attempts + 1, last_error = ? WHERE id = ?",
+        String(result.error || "send failed").slice(0, 300), m.id);
     }
   }
   return n;

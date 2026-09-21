@@ -9,6 +9,7 @@ import { icons } from "../views/icons.js";
 import { navCounts } from "../lib/counts.js";
 import { buildQueue } from "../lib/queue.js";
 import { outboxPending, DELIVERY } from "../lib/scheduler.js";
+import { describe as describeDelivery } from "../lib/delivery/mode.js";
 import { human, today } from "../lib/dates.js";
 
 const ICON = {
@@ -47,10 +48,12 @@ export function registerQueue(router) {
         <a class="pill outline" href="/report" target="_blank">Tenant form</a>
         <a class="pill solid" href="/app/maintenance/new">Log a repair</a>`,
       body: html`
-        ${DELIVERY.mode === "none" && queued > 0
-          ? notice("warn", "Nothing is being sent",
-              html`${queued} message${queued === 1 ? " is" : "s are"} queued and not delivered.
-                   <a href="/app/setup">Turn on a provider</a>.`)
+        ${!DELIVERY.reaching && queued > 0
+          ? (() => {
+              const d = describeDelivery(DELIVERY.mode, queued);
+              return notice(d.tone, d.title,
+                html`${d.detail} <a href="/app/setup">Delivery settings</a>.`);
+            })()
           : ""}
 
         ${!items.length

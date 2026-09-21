@@ -19,8 +19,22 @@ createServer(handle).listen(PORT, async () => {
   console.log(`  ${company ? company.name : "no company yet — run: npm run seed"}`);
   console.log(`  http://localhost:${PORT}/app   (back office)`);
   console.log(`  http://localhost:${PORT}/      (marketing site)`);
-  console.log(`  db: ${DATABASE_URL || "file:data/app.db"}\n`);
+  console.log(`  db: ${redactUrl(DATABASE_URL)}\n`);
 
   // In serverless this is a cron hitting /api/cron instead; see vercel.json.
   startScheduler().catch((err) => console.error("[scheduler] failed to start", err));
 });
+
+/* The boot banner printed the connection string verbatim, password and all,
+   into the terminal and therefore into any scrollback, screen share or CI log
+   that captured it. The host is the useful part; the credential never was. */
+function redactUrl(url) {
+  if (!url) return "not configured";
+  try {
+    const u = new URL(url);
+    if (u.password) u.password = "***";
+    return u.toString();
+  } catch {
+    return "configured";
+  }
+}
