@@ -20,7 +20,11 @@ import { ROOT } from "./db.js";
    storeUpload below. */
 export const DATA_DIR = join(ROOT, "data");
 export const UPLOAD_DIR = join(DATA_DIR, "uploads");
-mkdirSync(UPLOAD_DIR, { recursive: true });
+
+/* Deliberately NOT created at import time. On a serverless host the filesystem
+   is read-only, so an mkdir here throws during module load and takes the whole
+   function down before it can report why. The directory is created on the
+   first local write instead, which is the only time it is needed. */
 import { id } from "./ids.js";
 import { IMAGE_TYPES, DOC_TYPES, LIMITS, BadRequest } from "./http.js";
 
@@ -50,6 +54,7 @@ function sniff(buf) {
 
 const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
 export const USING_BLOB = Boolean(BLOB_TOKEN);
+const SERVERLESS = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 
 /* Resolves what is stored in the database to something a browser can fetch. */
 export function fileUrl(stored) {
@@ -67,6 +72,16 @@ export async function storeUpload(file, { allow = IMAGE_TYPES } = {}) {
 
   const month = new Date().toISOString().slice(0, 7);
   const rel = `${month}/${id()}${EXT[actual] || ".bin"}`;
+
+  /* No blob store on a host with no writable disk: say so, and let the caller
+     keep the rest of the submission. storeMany collects these per file, so a
+     tenant's repair request is still filed even when its photo cannot be. */
+  if (!USING_BLOB && SERVERLESS) {
+    throw new BadRequest(
+      "Photo uploads are not configured yet, so this image was not saved. " +
+      "The rest of your request was received."
+    );
+  }
 
   if (USING_BLOB) {
     // addRandomSuffix is off because the name is already unguessable, and a
