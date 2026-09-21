@@ -35,6 +35,7 @@ export function registerPortfolio(router) {
       staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
       title: "Properties",
       subtitle: `${units.length} unit${units.length === 1 ? "" : "s"} · ${occupied} occupied`,
+      actions: html`<a class="pill outline sm" href="/app/portfolio/labels">Repair QR codes</a>`,
       body: html`
         ${tabs(PROPERTY_TABS, "units")}
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
