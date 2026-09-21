@@ -14,7 +14,9 @@ npm start        # http://localhost:4300
 npm run reset    # wipe the database and re-seed
 ```
 
-Locally it uses a SQLite file at `data/app.db` and needs no configuration.
+There is no local SQLite fallback any more — local development points at the
+same Supabase database via `DATABASE_URL`, so there is only ever one dialect
+to test against. Put it in `.env.local`, which is gitignored.
 
 Sign in at `/app` with `dana@leafridgepm.test` / `columbus2026`.
 
@@ -144,22 +146,33 @@ alive between requests:
 
 | Local | On Vercel |
 |---|---|
-| SQLite file at `data/app.db` | Turso (libSQL) over HTTP |
+| SQLite file at `data/app.db` | Supabase Postgres, via the transaction pooler |
 | `data/uploads/` on disk | Vercel Blob |
 | `setInterval` every 10 minutes | **currently nothing — see below** |
 
-libSQL was chosen over Postgres deliberately: it *is* SQLite, so the schema and
-every query in this codebase are byte-identical either way. A Postgres port
-would have meant rewriting `group_concat`, `date(?, '+N day')` and several
-hundred statements, which is where a silent bug would have hidden.
+The dialect change turned out to be small. The only non-portable SQL in the
+whole codebase was one `PRAGMA`, one `group_concat` and one
+`date(x, '+N day')`; everything else is plain ANSI. The ~700 `?` placeholders
+are converted to Postgres's `$1..$n` inside `toPg()` in `server/lib/db.js`, so
+no call site was rewritten.
 
-## 1. Create the database
+## 1. Get the connection string
 
-```bash
-turso db create property-ops
-turso db show property-ops --url        # libsql://...
-turso db tokens create property-ops     # the auth token
+Supabase → **Project Settings → Database → Connection string → Transaction
+pooler**. It looks like:
+
 ```
+postgresql://postgres.<ref>:<password>@<host>.pooler.supabase.com:6543/postgres
+```
+
+Use the **transaction pooler on port 6543**, not the direct connection.
+Serverless functions open a connection per invocation and will exhaust a
+direct database's connection limit within minutes. The pooler exists for
+exactly this.
+
+Because the pooler runs pgbouncer in transaction mode, prepared statements are
+disabled in `db.js` (`prepare: false`). Without that every query fails with
+"prepared statement already exists".
 
 ## 2. Set the environment variables
 
@@ -167,8 +180,7 @@ In the Vercel project settings:
 
 | Variable | Value |
 |---|---|
-| `DATABASE_URL` | `libsql://<your-db>.turso.io` |
-| `DATABASE_AUTH_TOKEN` | the token from above |
+| `DATABASE_URL` | the transaction pooler string from step 1 |
 | `CRON_SECRET` | any long random string — the cron endpoint refuses to run without it |
 | `BLOB_READ_WRITE_TOKEN` | created for you when you add Vercel Blob to the project |
 
@@ -181,8 +193,7 @@ anyone uploads a photo.
 Point your local machine at the hosted database and run the seed:
 
 ```bash
-DATABASE_URL="libsql://<your-db>.turso.io" \
-DATABASE_AUTH_TOKEN="<token>" \
+DATABASE_URL="postgresql://postgres.<ref>:<password>@<host>.pooler.supabase.com:6543/postgres" \
 npm run seed
 ```
 

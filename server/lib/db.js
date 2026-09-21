@@ -1,27 +1,21 @@
-/* Database access.
+/* Database access — PostgreSQL (Supabase).
 
-   libSQL, which is SQLite with a network protocol. Chosen over Postgres for a
-   specific reason: the dialect is identical, so the 543-line schema and every
-   query in this codebase are unchanged by the move to serverless. A Postgres
-   port would have meant rewriting group_concat, date(?, '+N day') and several
-   hundred statements — which is exactly where a silent bug would hide.
+   The app previously ran on SQLite and then libSQL. Moving to Supabase meant a
+   dialect change, which turned out to be far smaller than it sounds: the only
+   non-portable SQL in the whole codebase was one PRAGMA, one group_concat and
+   one date(x, '+N day'). Everything else is plain ANSI.
 
-   The same client talks to a local file and to a hosted database, so the whole
-   app runs offline against data/app.db and switches to Turso by setting one
-   environment variable. Nothing else changes.
+   The 700-odd `?` placeholders are NOT rewritten by hand. Postgres numbers its
+   parameters, so toPg() below converts `?` to $1..$n in one place, and every
+   call site is left exactly as it was written.
 
-     DATABASE_URL=file:data/app.db          local
-     DATABASE_URL=libsql://<db>.turso.io    hosted, with DATABASE_AUTH_TOKEN
+   Serverless note: Supabase's transaction pooler (port 6543) does not support
+   prepared statements, so `prepare` is off. Without that every query fails
+   under pgbouncer with a confusing "prepared statement already exists".
 
-   Everything here is async, because a network database cannot be otherwise.
-   Transactions are the one place that needed thought: callers write
-
-     await tx(async () => { await insert(...); await update(...); })
-
-   and the inner helpers have to run ON the transaction rather than on the
-   pooled connection. AsyncLocalStorage carries it, so call sites never pass a
-   handle around and nested tx() calls join the outer transaction instead of
-   deadlocking on a second BEGIN. */
+     DATABASE_URL=postgresql://postgres.<ref>:<password>@<pooler-host>:6543/postgres
+*/
+import postgres from "postgres";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -30,33 +24,48 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(here, "..", "..");
 
-const SERVERLESS = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
-const url = process.env.DATABASE_URL || "file:data/app.db";
-export const IS_REMOTE = !url.startsWith("file:");
-
-/* A serverless filesystem is read-only and does not survive the request, so a
-   file: URL there is always a misconfiguration. Saying so plainly beats the
-   opaque crash it would otherwise cause on the first query. */
-if (SERVERLESS && !IS_REMOTE) {
+const url = process.env.DATABASE_URL;
+if (!url) {
   throw new Error(
-    "DATABASE_URL is not set. On a serverless host the filesystem is read-only, " +
-    "so the default file:data/app.db cannot work. Set DATABASE_URL to your " +
-    "libsql:// URL and DATABASE_AUTH_TOKEN to its token."
+    "DATABASE_URL is not set. Copy the Transaction pooler connection string " +
+    "from Supabase → Project Settings → Database → Connection string, and set " +
+    "it as DATABASE_URL."
   );
 }
 
-/* The package's default entry loads a native binding so it can open local
-   SQLite files. That binding is unnecessary for a remote database and is a
-   common cause of cold-start failure on serverless runtimes, so remote URLs
-   use the pure-HTTP client instead. */
-const { createClient } = IS_REMOTE
-  ? await import("@libsql/client/web")
-  : await import("@libsql/client");
-
-export const db = createClient({
-  url,
-  authToken: process.env.DATABASE_AUTH_TOKEN || undefined,
+export const db = postgres(url, {
+  // Required by pgbouncer in transaction mode, which is what port 6543 is.
+  prepare: false,
+  ssl: "require",
+  // A serverless invocation handles one request; a pool of one avoids holding
+  // pooler slots open across a cold fleet.
+  max: Number(process.env.PG_POOL_MAX || (process.env.VERCEL ? 1 : 5)),
+  idle_timeout: 20,
+  connect_timeout: 15,
+  onnotice: () => {},
 });
+
+/* --- placeholder translation --------------------------------------------- */
+
+/* `?` to $1..$n, skipping anything inside a string literal so a `?` in text is
+   left alone. Postgres casts (`::`) are untouched because they contain no `?`. */
+export function toPg(sql) {
+  let out = "";
+  let n = 0;
+  let quote = null;
+  for (let i = 0; i < sql.length; i++) {
+    const c = sql[i];
+    if (quote) {
+      out += c;
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"') { quote = c; out += c; continue; }
+    if (c === "?") { out += "$" + (++n); continue; }
+    out += c;
+  }
+  return out;
+}
 
 /* --- transaction context -------------------------------------------------- */
 
@@ -64,35 +73,30 @@ const txStore = new AsyncLocalStorage();
 const conn = () => txStore.getStore() || db;
 
 export async function tx(fn) {
-  // Already inside one: join it. Opening a second would deadlock.
-  if (txStore.getStore()) return fn();
-
-  const t = await db.transaction("write");
-  try {
-    const out = await txStore.run(t, fn);
-    await t.commit();
-    return out;
-  } catch (err) {
-    try { await t.rollback(); } catch { /* the transaction is already dead */ }
-    throw err;
-  }
+  if (txStore.getStore()) return fn();            // join the outer transaction
+  return db.begin((scoped) => txStore.run(scoped, fn));
 }
 
 /* --- query helpers -------------------------------------------------------- */
 
+async function exec(sql, params) {
+  return conn().unsafe(toPg(sql), params.map(norm));
+}
+
 export async function get(sql, ...params) {
-  const r = await conn().execute({ sql, args: params.map(norm) });
-  return r.rows[0];
+  const rows = await exec(sql, params);
+  return rows[0];
 }
 
 export async function all(sql, ...params) {
-  const r = await conn().execute({ sql, args: params.map(norm) });
-  return r.rows;
+  const rows = await exec(sql, params);
+  // porsager returns an array-like; callers do .map/.filter/.length on it.
+  return Array.from(rows);
 }
 
 export async function run(sql, ...params) {
-  const r = await conn().execute({ sql, args: params.map(norm) });
-  return { changes: Number(r.rowsAffected || 0) };
+  const rows = await exec(sql, params);
+  return { changes: rows.count ?? 0 };
 }
 
 export async function one(sql, ...params) {
@@ -115,8 +119,8 @@ export async function update(table, id, patch) {
   await run(sql, ...keys.map((k) => patch[k]), id);
 }
 
-/* libSQL binds null, number, bigint, string and Uint8Array. Booleans are the
-   one thing this codebase produces that it will not take. */
+/* Postgres is stricter than SQLite about types. Booleans go to the 0/1 the
+   INTEGER columns expect, and undefined becomes a real NULL. */
 function norm(v) {
   if (typeof v === "boolean") return v ? 1 : 0;
   if (v === undefined) return null;
@@ -125,8 +129,6 @@ function norm(v) {
 
 /* --- migrations ----------------------------------------------------------- */
 
-/* Cached so a warm function does not re-check on every request, and so a
-   cold start does not race two migrations against each other. */
 let migrated = null;
 export function ready() {
   if (!migrated) migrated = migrate();
@@ -134,7 +136,7 @@ export function ready() {
 }
 
 export async function migrate() {
-  await db.execute(`CREATE TABLE IF NOT EXISTS schema_migration (
+  await db.unsafe(`CREATE TABLE IF NOT EXISTS schema_migration (
     name TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL
   )`);
@@ -146,10 +148,9 @@ export async function migrate() {
 
   for (const file of pending) {
     const sql = readFileSync(join(dir, file), "utf8");
-    // executeMultiple runs the whole file; a half-applied schema is worse than
-    // a failed start, and libSQL does not allow DDL inside its transactions
-    // on every backend, so this is checked by the marker row instead.
-    await db.executeMultiple(sql);
+    // Postgres runs a whole file in one implicit transaction when sent as a
+    // single simple query, so a failed migration leaves nothing behind.
+    await db.unsafe(sql);
     await run("INSERT INTO schema_migration (name, applied_at) VALUES (?, ?)", file, new Date().toISOString());
     console.log(`[db] applied ${file}`);
   }

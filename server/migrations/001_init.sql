@@ -18,7 +18,8 @@
 -- is not a system of record for client money and must not become one.
 -- ===========================================================================
 
-PRAGMA foreign_keys = ON;
+-- Postgres enforces foreign keys unconditionally, so the PRAGMA that SQLite
+-- needed here is gone. Nothing else in this file is dialect-specific.
 
 -- --- org -------------------------------------------------------------------
 

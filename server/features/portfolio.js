@@ -18,7 +18,7 @@ export function registerPortfolio(router) {
     const units = await all(
       `SELECT u.*, p.line1, p.city, p.zip, o.name AS owner_name, o.id AS owner_id,
               l.id AS lease_id, l.rent_cents, l.end_date, l.start_date,
-              (SELECT group_concat(t.name, ', ') FROM lease_tenant lt
+              (SELECT string_agg(t.name, ', ') FROM lease_tenant lt
                  JOIN tenant t ON t.id = lt.tenant_id WHERE lt.lease_id = l.id) AS tenants
          FROM unit u
          JOIN property p ON p.id = u.property_id

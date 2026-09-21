@@ -10,12 +10,13 @@ Runs on Vercel, or anywhere Node 20+ runs.
 
 ```bash
 npm install
+export DATABASE_URL="postgresql://postgres.<ref>:<pw>@<host>.pooler.supabase.com:6543/postgres"
 npm run seed     # demo company and portfolio (once)
 npm start        # http://localhost:4300
 ```
 
-Locally it uses a SQLite file at `data/app.db` and needs no configuration at
-all. Sign in with the credentials the seed prints.
+Sign in with the credentials the seed prints. `DATABASE_URL` is the Supabase
+**transaction pooler** string; keep it in `.env.local`, which is gitignored.
 
 ## What is in this repository
 
@@ -43,8 +44,8 @@ One origin serves everything:
 
 Two, both forced by serverless, which has no local disk:
 
-- `@libsql/client` — the database. libSQL *is* SQLite, so the schema and every
-  query are identical whether it runs against a local file or hosted Turso.
+- `postgres` — the database driver, talking to Supabase through its
+  transaction pooler.
 - `@vercel/blob` — tenant photos and applicant documents.
 
 Everything else is Node built-ins. No build step, no framework, no CDN.
@@ -58,5 +59,4 @@ Four environment variables, one seed, one deploy. Full instructions, the
 architecture, and the pre-launch checklist are in
 **[server/README.md](server/README.md)**.
 
-The runtime database in `data/` is not tracked — it is the system of record,
-so back it up rather than committing it.
+The database lives in Supabase. Nothing in `data/` is tracked.

@@ -461,7 +461,7 @@ export async function computeStatement(ownerId, from, to) {
     `SELECT l.end_date, u.label, p.line1 FROM lease l
        JOIN unit u ON u.id = l.unit_id JOIN property p ON p.id = u.property_id
       WHERE p.owner_id = ? AND l.status = 'active' AND l.end_date IS NOT NULL
-        AND l.end_date <= date(?, '+90 day') ORDER BY l.end_date`, ownerId, to);
+        AND l.end_date <= ((?)::date + 90)::text ORDER BY l.end_date`, ownerId, to);
   const vacant = await all(
     `SELECT u.label, p.line1 FROM unit u JOIN property p ON p.id = u.property_id
       WHERE p.owner_id = ? AND u.status IN ('vacant','turn')`, ownerId);
