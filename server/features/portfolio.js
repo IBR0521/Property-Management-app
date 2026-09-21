@@ -1,6 +1,6 @@
 /* Portfolio: the properties, units and leases everything else hangs off. */
 import { all, get, insert, update, one, tx } from "../lib/db.js";
-import { id } from "../lib/ids.js";
+import { id, stickerToken } from "../lib/ids.js";
 import { stamp, human, humanStamp, today, daysBetween, monthKey } from "../lib/dates.js";
 import { usd, parseMoney } from "../lib/money.js";
 import { sendHtml, redirect, BadRequest } from "../lib/http.js";
@@ -35,7 +35,9 @@ export function registerPortfolio(router) {
       staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
       title: "Properties",
       subtitle: `${units.length} unit${units.length === 1 ? "" : "s"} · ${occupied} occupied`,
-      actions: html`<a class="pill outline sm" href="/app/portfolio/labels">Repair QR codes</a>`,
+      actions: html`
+        <a class="pill outline sm" href="/app/portfolio/labels">Repair QR codes</a>
+        <a class="pill solid sm" href="/app/portfolio/new">Add a building</a>`,
       body: html`
         ${tabs(PROPERTY_TABS, "units")}
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
@@ -106,6 +108,240 @@ export function registerPortfolio(router) {
 
      Printed, not screen-shown, so the page carries its own print rules and the
      QR is inline SVG — one request, and sharp at any paper size. */
+  /* --- building and apartment records --------------------------------------
+     Everything else in this app operates a portfolio. This is the part that
+     builds one, and it runs in dependency order: an owner exists, then their
+     building, then its apartments, then somebody living in one.
+
+     Registered before any /app/portfolio/:param route, because routes match in
+     registration order and a :param would swallow these literal words. ----- */
+
+  router.get("/app/portfolio/new", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const owners = await all("SELECT id, name FROM owner WHERE company_id = ? ORDER BY name", cid);
+    sendHtml(ctx.res, appPage({
+      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
+      title: "Add a building",
+      subtitle: "A street address. Its apartments come next.",
+      body: owners.length
+        ? propertyForm({ csrf: ctx.csrf, property: null, owners, error: ctx.query.e })
+        : empty("No owners yet", "A building has to belong to somebody. Add the owner first, then come back."),
+    }));
+  });
+
+  router.post("/app/portfolio/new", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const f = ctx.fields;
+    const bad = (msg) => redirect(ctx.res, `/app/portfolio/new?e=${encodeURIComponent(msg)}`);
+
+    const owner = await get("SELECT id FROM owner WHERE id = ? AND company_id = ?", String(f.owner_id || ""), cid);
+    if (!owner) return bad("Pick which owner this building belongs to.");
+    const line1 = String(f.line1 || "").trim();
+    if (line1.length < 3) return bad("A building needs a street address.");
+    const city = String(f.city || "").trim();
+    if (!city) return bad("Which city?");
+
+    const propId = id();
+    const kind = ["single", "multi", "condo"].includes(f.kind) ? f.kind : "single";
+    await tx(async () => {
+      await insert("property", {
+        id: propId, company_id: cid, owner_id: owner.id, line1, city,
+        state: String(f.state || "").trim().toUpperCase().slice(0, 2) || "OH",
+        zip: String(f.zip || "").trim(), kind,
+        year_built: yearOf(f.year_built),
+        notes: String(f.notes || "").trim() || null,
+        created_at: stamp(),
+      });
+      /* A house is one apartment. Making the manager add "the unit" to a
+         single-family home after typing its address is a question with only
+         one answer, so it is not asked. */
+      if (kind === "single") await createUnit({ cid, propertyId: propId, label: "", f });
+    });
+
+    redirect(ctx.res, kind === "single"
+      ? `/app/portfolio?m=${encodeURIComponent("Building added. Open it to set rent and move someone in.")}`
+      : `/app/portfolio/p/${propId}/unit/new?m=${encodeURIComponent("Building added. Now add its apartments.")}`);
+  });
+
+  router.get("/app/portfolio/p/:id/edit", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const property = await one("SELECT * FROM property WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    const owners = await all("SELECT id, name FROM owner WHERE company_id = ? ORDER BY name", cid);
+    sendHtml(ctx.res, appPage({
+      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
+      title: `Edit ${property.line1}`, subtitle: "Building details",
+      body: propertyForm({ csrf: ctx.csrf, property, owners, error: ctx.query.e }),
+    }));
+  });
+
+  router.post("/app/portfolio/p/:id/edit", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const property = await one("SELECT * FROM property WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    const f = ctx.fields;
+    const owner = await get("SELECT id FROM owner WHERE id = ? AND company_id = ?", String(f.owner_id || ""), cid);
+    const line1 = String(f.line1 || "").trim();
+    if (!owner || line1.length < 3) {
+      return redirect(ctx.res, `/app/portfolio/p/${property.id}/edit?e=${encodeURIComponent("An owner and a street address are both required.")}`);
+    }
+    await update("property", property.id, {
+      owner_id: owner.id, line1,
+      city: String(f.city || "").trim(),
+      state: String(f.state || "").trim().toUpperCase().slice(0, 2),
+      zip: String(f.zip || "").trim(),
+      kind: ["single", "multi", "condo"].includes(f.kind) ? f.kind : property.kind,
+      year_built: yearOf(f.year_built),
+      notes: String(f.notes || "").trim() || null,
+    });
+    redirect(ctx.res, `/app/portfolio?m=${encodeURIComponent("Building updated.")}`);
+  });
+
+  router.get("/app/portfolio/p/:id/unit/new", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const property = await one("SELECT * FROM property WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    const existing = await all(
+      "SELECT label FROM unit WHERE property_id = ? ORDER BY label", property.id);
+    sendHtml(ctx.res, appPage({
+      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
+      title: "Add an apartment",
+      subtitle: `${property.line1}${existing.length ? ` · ${existing.length} already added` : ""}`,
+      body: html`
+        ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
+        ${unitForm({ csrf: ctx.csrf, unit: null, property, error: ctx.query.e })}
+        ${existing.length ? html`
+          <div class="panel">
+            <div class="panel__head"><h2>Already in this building</h2></div>
+            <div class="panel__body">
+              <div class="btnrow">
+                ${existing.map((u) => html`<span class="chip chip--plain">Unit ${u.label || "—"}</span>`)}
+              </div>
+            </div>
+          </div>` : ""}`,
+    }));
+  });
+
+  router.post("/app/portfolio/p/:id/unit/new", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const property = await one("SELECT * FROM property WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    const f = ctx.fields;
+    const label = String(f.label || "").trim();
+
+    const clash = await get(
+      "SELECT id FROM unit WHERE property_id = ? AND label = ?", property.id, label);
+    if (clash) {
+      return redirect(ctx.res, `/app/portfolio/p/${property.id}/unit/new?e=${encodeURIComponent(`This building already has a unit ${label || "with no number"}.`)}`);
+    }
+
+    await createUnit({ cid, propertyId: property.id, label, f });
+
+    /* Straight back to a blank form. Adding a twelve-unit building means
+       twelve of these, and returning to a list each time would be twelve
+       extra clicks. */
+    redirect(ctx.res, `/app/portfolio/p/${property.id}/unit/new?m=${encodeURIComponent(`Unit ${label || "added"} saved. Add another, or go back to Properties.`)}`);
+  });
+
+  router.get("/app/portfolio/u/:id/edit", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const unit = await one(
+      `SELECT u.*, p.line1, p.city FROM unit u JOIN property p ON p.id = u.property_id
+        WHERE u.id = ? AND u.company_id = ?`, ctx.params.id, cid);
+    sendHtml(ctx.res, appPage({
+      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
+      title: `Edit ${unit.line1}${unit.label ? ` · unit ${unit.label}` : ""}`,
+      subtitle: "Apartment details",
+      body: unitForm({ csrf: ctx.csrf, unit, property: { id: unit.property_id, line1: unit.line1 }, error: ctx.query.e }),
+    }));
+  });
+
+  router.post("/app/portfolio/u/:id/edit", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const unit = await one("SELECT * FROM unit WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    const f = ctx.fields;
+    const label = String(f.label || "").trim();
+    const clash = await get(
+      "SELECT id FROM unit WHERE property_id = ? AND label = ? AND id <> ?", unit.property_id, label, unit.id);
+    if (clash) {
+      return redirect(ctx.res, `/app/portfolio/u/${unit.id}/edit?e=${encodeURIComponent(`Another unit in this building is already ${label || "unnumbered"}.`)}`);
+    }
+    await update("unit", unit.id, {
+      label,
+      beds: numOf(f.beds), baths: numOf(f.baths),
+      sqft: intOf(f.sqft),
+      market_rent_cents: parseMoney(f.market_rent) ?? null,
+      status: ["occupied", "vacant", "turn", "offline"].includes(f.status) ? f.status : unit.status,
+    });
+    redirect(ctx.res, `/app/portfolio/u/${unit.id}?m=${encodeURIComponent("Apartment updated.")}`);
+  });
+
+  /* Move-in: the mirror of the move-out that already exists. Creates the
+     tenant, the lease and the link between them in one transaction, because a
+     lease with no tenant on it is a row nobody can act on. */
+  router.get("/app/portfolio/u/:id/movein", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const unit = await one(
+      `SELECT u.*, p.line1, p.city FROM unit u JOIN property p ON p.id = u.property_id
+        WHERE u.id = ? AND u.company_id = ?`, ctx.params.id, cid);
+    const active = await get(
+      "SELECT id FROM lease WHERE unit_id = ? AND status = 'active' LIMIT 1", unit.id);
+    sendHtml(ctx.res, appPage({
+      staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
+      title: "Move someone in",
+      subtitle: `${unit.line1}${unit.label ? ` · unit ${unit.label}` : ""}`,
+      body: active
+        ? notice("warn", "Someone already lives here",
+            html`Record the move-out first — two active leases on one apartment would make the rent ledger wrong.
+                 <a href="/app/portfolio/u/${unit.id}">Back to the apartment</a>.`)
+        : moveInForm({ csrf: ctx.csrf, unit, error: ctx.query.e }),
+    }));
+  });
+
+  router.post("/app/portfolio/u/:id/movein", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const unit = await one("SELECT * FROM unit WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    const f = ctx.fields;
+    const bad = (msg) => redirect(ctx.res, `/app/portfolio/u/${unit.id}/movein?e=${encodeURIComponent(msg)}`);
+
+    const name = String(f.tenant_name || "").trim();
+    if (name.length < 2) return bad("Who is moving in?");
+    const rent = parseMoney(f.rent);
+    if (rent == null || rent <= 0) return bad("What is the rent?");
+    const start = String(f.start_date || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return bad("When does the lease start?");
+    const end = String(f.end_date || "").trim();
+    if (end && !/^\d{4}-\d{2}-\d{2}$/.test(end)) return bad("That end date is not a date.");
+    if (end && end <= start) return bad("The lease cannot end before it starts.");
+
+    const existing = await get("SELECT id FROM lease WHERE unit_id = ? AND status = 'active' LIMIT 1", unit.id);
+    if (existing) return bad("Someone already has an active lease on this apartment.");
+
+    await tx(async () => {
+      const tenantId = id();
+      const leaseId = id();
+      await insert("tenant", {
+        id: tenantId, company_id: cid, name,
+        email: String(f.tenant_email || "").trim() || null,
+        phone: String(f.tenant_phone || "").trim() || null,
+        created_at: stamp(),
+      });
+      await insert("lease", {
+        id: leaseId, company_id: cid, unit_id: unit.id,
+        start_date: start, end_date: end || null,
+        rent_cents: rent,
+        deposit_cents: parseMoney(f.deposit) ?? 0,
+        rent_due_day: dueDayOf(f.rent_due_day),
+        grace_days: graceOf(f.grace_days),
+        status: "active", created_at: stamp(),
+      });
+      await insert("lease_tenant", { lease_id: leaseId, tenant_id: tenantId });
+      await update("unit", unit.id, { status: "occupied" });
+      await insert("audit_log", {
+        id: id(), company_id: cid, at: stamp(), actor: ctx.staff.name,
+        entity: "lease", entity_id: leaseId, action: "movein", detail: `${name} from ${start}`,
+      });
+    });
+
+    redirect(ctx.res, `/app/portfolio/u/${unit.id}?m=${encodeURIComponent(`${name} moved in. Rent is now on the ledger.`)}`);
+  });
+
   router.get("/app/portfolio/labels", async (ctx) => {
     const cid = ctx.staff.company_id;
     const only = String(ctx.query.property || "");
@@ -178,9 +414,7 @@ export function registerPortfolio(router) {
     const cid = ctx.staff.company_id;
     const unit = await get("SELECT id FROM unit WHERE id = ? AND company_id = ?", ctx.params.id, cid);
     if (!unit) throw new BadRequest("No such unit.");
-    await one(
-      `UPDATE unit SET report_token = translate(encode(gen_random_bytes(12), 'base64'), '+/=', '-_')
-        WHERE id = ? RETURNING id`, unit.id);
+    await update("unit", unit.id, { report_token: stickerToken() });
     redirect(ctx.res, `/app/portfolio/u/${unit.id}?m=${encodeURIComponent("New QR code generated. Reprint the sticker for this unit — the old one no longer works.")}`);
   });
 
@@ -258,7 +492,8 @@ export function registerPortfolio(router) {
       title: `${u.line1}${u.label ? ` · unit ${u.label}` : ""}`,
       subtitle: `${u.city}, ${u.state} ${u.zip} · owned by ${u.owner_name}`,
       actions: html`
-        <a class="pill outline sm" href="/app/portfolio">All units</a>
+        <a class="pill outline sm" href="/app/portfolio/u/${u.id}/edit">Edit</a>
+        ${lease ? "" : html`<a class="pill outline sm" href="/app/portfolio/u/${u.id}/movein">Move someone in</a>`}
         <a class="pill outline sm" href="/app/portfolio/labels?property=${u.property_id}">QR label</a>
         <a class="pill solid sm" href="/app/maintenance/new">Log a repair</a>`,
       body: html`
@@ -353,6 +588,19 @@ export function registerPortfolio(router) {
             </div>
 
             <div class="panel">
+              <div class="panel__head">
+                <h2>Building</h2>
+                <a class="pill outline sm" href="/app/portfolio/p/${u.property_id}/edit">Edit</a>
+              </div>
+              <div class="panel__body">
+                <dl class="dl">
+                  <div><dt>Address</dt><dd>${u.line1}, ${u.city} ${u.zip}</dd></div>
+                  <div><dt>Apartments</dt><dd><a href="/app/portfolio/p/${u.property_id}/unit/new">Add another to this building</a></dd></div>
+                </dl>
+              </div>
+            </div>
+
+            <div class="panel">
               <div class="panel__head"><h2>Repair QR code</h2></div>
               <div class="panel__body">
                 <p class="lede" style="margin:0 0 0.75rem">
@@ -404,3 +652,288 @@ export function registerPortfolio(router) {
     }));
   });
 }
+
+/* --- record helpers -------------------------------------------------------- */
+
+/* Every apartment gets its repair token in the same statement that creates it,
+   so a unit added through the app is never a unit whose QR sticker cannot be
+   printed. The column is NOT NULL, so this cannot be a follow-up UPDATE. */
+async function createUnit({ cid, propertyId, label, f }) {
+  const unitId = id();
+  await insert("unit", {
+    id: unitId, company_id: cid, property_id: propertyId, label,
+    beds: numOf(f.beds), baths: numOf(f.baths), sqft: intOf(f.sqft),
+    market_rent_cents: parseMoney(f.market_rent) ?? null,
+    status: ["occupied", "vacant", "turn", "offline"].includes(f.status) ? f.status : "vacant",
+    report_token: stickerToken(),
+    created_at: stamp(),
+  });
+  return unitId;
+}
+
+function numOf(v) {
+  const n = parseFloat(String(v ?? "").trim());
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function intOf(v) {
+  const n = parseInt(String(v ?? "").trim(), 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function yearOf(v) {
+  const n = parseInt(String(v ?? "").trim(), 10);
+  return Number.isFinite(n) && n >= 1700 && n <= new Date().getFullYear() + 1 ? n : null;
+}
+
+function dueDayOf(v) {
+  const n = parseInt(String(v || ""), 10);
+  // 28 is the ceiling for the same reason statements use it: February.
+  return Number.isFinite(n) && n >= 1 && n <= 28 ? n : 1;
+}
+
+function graceOf(v) {
+  const n = parseInt(String(v || ""), 10);
+  return Number.isFinite(n) && n >= 0 && n <= 31 ? n : 5;
+}
+
+/* --- record forms ---------------------------------------------------------- */
+
+function propertyForm({ csrf, property, owners, error }) {
+  const action = property ? `/app/portfolio/p/${property.id}/edit` : "/app/portfolio/new";
+  const kind = property ? property.kind : "single";
+  return html`
+    ${error ? notice("warn", null, decodeURIComponent(error)) : ""}
+    <div class="panel">
+      <div class="panel__head"><h2>${property ? "Building details" : "New building"}</h2></div>
+      <div class="panel__body">
+        <form method="post" action="${action}" class="formgrid">
+          <input type="hidden" name="_csrf" value="${csrf}" />
+
+          <div class="field">
+            <label for="owner_id">Owner</label>
+            <select id="owner_id" name="owner_id" required>
+              <option value="">Who owns it?</option>
+              ${owners.map((o) => html`
+                <option value="${o.id}"${attr("selected", property && property.owner_id === o.id)}>${o.name}</option>`)}
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="line1">Street address</label>
+            <input id="line1" name="line1" type="text" required maxlength="160"
+                   value="${property ? property.line1 : ""}" placeholder="1507 Brice Rd" />
+            <span class="field__help">Just the street and number — apartment numbers are added per unit.</span>
+          </div>
+
+          <div class="formgrid formgrid--2">
+            <div class="field">
+              <label for="city">City</label>
+              <input id="city" name="city" type="text" required maxlength="80"
+                     value="${property ? property.city : ""}" />
+            </div>
+            <div class="field">
+              <label for="state">State</label>
+              <input id="state" name="state" type="text" maxlength="2" required
+                     value="${property ? property.state : ""}" placeholder="OH" />
+            </div>
+          </div>
+
+          <div class="formgrid formgrid--2">
+            <div class="field">
+              <label for="zip">ZIP</label>
+              <input id="zip" name="zip" type="text" maxlength="12"
+                     value="${property ? property.zip : ""}" />
+            </div>
+            <div class="field">
+              <label for="year_built">Year built <span style="color:var(--ink-soft);font-weight:400">(optional)</span></label>
+              <input id="year_built" name="year_built" type="number" min="1700" max="2100"
+                     value="${property && property.year_built ? property.year_built : ""}" />
+            </div>
+          </div>
+
+          <div class="field">
+            <span style="display:block;font-size:0.8125rem;font-weight:600;margin-bottom:0.4375rem">What kind of building?</span>
+            <div class="radioset">
+              <label class="radiotile">
+                <input type="radio" name="kind" value="single"${attr("checked", kind === "single")} />
+                <span>A house<small>One home, one address. We will create its single unit for you.</small></span>
+              </label>
+              <label class="radiotile">
+                <input type="radio" name="kind" value="multi"${attr("checked", kind === "multi")} />
+                <span>Apartments<small>Several units at this address. You add them next.</small></span>
+              </label>
+              <label class="radiotile">
+                <input type="radio" name="kind" value="condo"${attr("checked", kind === "condo")} />
+                <span>Condo<small>A single unit inside a building somebody else runs.</small></span>
+              </label>
+            </div>
+          </div>
+
+          ${property ? "" : html`
+            <div class="formgrid formgrid--2">
+              <div class="field">
+                <label for="beds">Bedrooms <span style="color:var(--ink-soft);font-weight:400">(a house only)</span></label>
+                <input id="beds" name="beds" type="number" min="0" step="0.5" />
+              </div>
+              <div class="field">
+                <label for="market_rent">Asking rent <span style="color:var(--ink-soft);font-weight:400">(a house only)</span></label>
+                <input id="market_rent" name="market_rent" type="text" inputmode="decimal" placeholder="1200.00" />
+              </div>
+            </div>`}
+
+          <div class="field">
+            <label for="notes">Notes <span style="color:var(--ink-soft);font-weight:400">(optional)</span></label>
+            <input id="notes" name="notes" type="text" maxlength="400"
+                   value="${property && property.notes ? property.notes : ""}"
+                   placeholder="Boiler serviced annually · parking at the rear" />
+          </div>
+
+          <div class="btnrow">
+            <button class="pill solid" type="submit">${property ? "Save changes" : "Add building"}</button>
+            <a class="pill outline" href="/app/portfolio">Cancel</a>
+          </div>
+        </form>
+      </div>
+    </div>`;
+}
+
+function unitForm({ csrf, unit, property, error }) {
+  const action = unit ? `/app/portfolio/u/${unit.id}/edit` : `/app/portfolio/p/${property.id}/unit/new`;
+  return html`
+    ${error ? notice("warn", null, decodeURIComponent(error)) : ""}
+    <div class="panel">
+      <div class="panel__head"><h2>${unit ? "Apartment details" : "New apartment"}</h2><p>${property.line1}</p></div>
+      <div class="panel__body">
+        <form method="post" action="${action}" class="formgrid">
+          <input type="hidden" name="_csrf" value="${csrf}" />
+
+          <div class="field">
+            <label for="label">Unit number</label>
+            <input id="label" name="label" type="text" maxlength="24"
+                   value="${unit ? unit.label : ""}" placeholder="1, 2, A, Rear" />
+            <span class="field__help">However it is written on the door. Leave blank for a whole house.</span>
+          </div>
+
+          <div class="formgrid formgrid--2">
+            <div class="field">
+              <label for="beds">Bedrooms</label>
+              <input id="beds" name="beds" type="number" min="0" step="0.5"
+                     value="${unit && unit.beds != null ? unit.beds : ""}" />
+            </div>
+            <div class="field">
+              <label for="baths">Bathrooms</label>
+              <input id="baths" name="baths" type="number" min="0" step="0.5"
+                     value="${unit && unit.baths != null ? unit.baths : ""}" />
+            </div>
+          </div>
+
+          <div class="formgrid formgrid--2">
+            <div class="field">
+              <label for="sqft">Square feet <span style="color:var(--ink-soft);font-weight:400">(optional)</span></label>
+              <input id="sqft" name="sqft" type="number" min="1"
+                     value="${unit && unit.sqft ? unit.sqft : ""}" />
+            </div>
+            <div class="field">
+              <label for="market_rent">Asking rent</label>
+              <input id="market_rent" name="market_rent" type="text" inputmode="decimal"
+                     value="${unit && unit.market_rent_cents ? (unit.market_rent_cents / 100).toFixed(2) : ""}"
+                     placeholder="950.00" />
+              <span class="field__help">What you would list it at. The actual rent comes from the lease.</span>
+            </div>
+          </div>
+
+          ${unit ? html`
+            <div class="field">
+              <label for="status">State</label>
+              <select id="status" name="status">
+                ${["occupied", "vacant", "turn", "offline"].map((k) => html`
+                  <option value="${k}"${attr("selected", unit.status === k)}>${
+                    k === "turn" ? "Being turned" : k === "offline" ? "Off the market" : k[0].toUpperCase() + k.slice(1)
+                  }</option>`)}
+              </select>
+            </div>` : ""}
+
+          <div class="btnrow">
+            <button class="pill solid" type="submit">${unit ? "Save changes" : "Add apartment"}</button>
+            <a class="pill outline" href="${unit ? `/app/portfolio/u/${unit.id}` : "/app/portfolio"}">${unit ? "Cancel" : "Done adding"}</a>
+          </div>
+        </form>
+      </div>
+      ${unit ? "" : html`<div class="panel__foot">
+        Each apartment gets its own repair QR code the moment you add it.
+      </div>`}
+    </div>`;
+}
+
+function moveInForm({ csrf, unit, error }) {
+  return html`
+    ${error ? notice("warn", null, decodeURIComponent(error)) : ""}
+    <div class="panel">
+      <div class="panel__head"><h2>New tenancy</h2></div>
+      <div class="panel__body">
+        <form method="post" action="/app/portfolio/u/${unit.id}/movein" class="formgrid">
+          <input type="hidden" name="_csrf" value="${csrf}" />
+
+          <div class="field">
+            <label for="tenant_name">Tenant name</label>
+            <input id="tenant_name" name="tenant_name" type="text" required maxlength="120" />
+          </div>
+
+          <div class="formgrid formgrid--2">
+            <div class="field">
+              <label for="tenant_email">Email</label>
+              <input id="tenant_email" name="tenant_email" type="email" maxlength="160" />
+            </div>
+            <div class="field">
+              <label for="tenant_phone">Phone</label>
+              <input id="tenant_phone" name="tenant_phone" type="tel" inputmode="tel" maxlength="40" />
+            </div>
+          </div>
+
+          <div class="formgrid formgrid--2">
+            <div class="field">
+              <label for="start_date">Lease starts</label>
+              <input id="start_date" name="start_date" type="date" required value="${today()}" />
+            </div>
+            <div class="field">
+              <label for="end_date">Lease ends <span style="color:var(--ink-soft);font-weight:400">(optional)</span></label>
+              <input id="end_date" name="end_date" type="date" />
+              <span class="field__help">Leave blank for month to month.</span>
+            </div>
+          </div>
+
+          <div class="formgrid formgrid--2">
+            <div class="field">
+              <label for="rent">Monthly rent</label>
+              <input id="rent" name="rent" type="text" inputmode="decimal" required
+                     value="${unit.market_rent_cents ? (unit.market_rent_cents / 100).toFixed(2) : ""}" />
+            </div>
+            <div class="field">
+              <label for="deposit">Deposit held</label>
+              <input id="deposit" name="deposit" type="text" inputmode="decimal" placeholder="0.00" />
+              <span class="field__help">The clock on returning this starts at move-out.</span>
+            </div>
+          </div>
+
+          <div class="formgrid formgrid--2">
+            <div class="field">
+              <label for="rent_due_day">Rent due on the</label>
+              <input id="rent_due_day" name="rent_due_day" type="number" min="1" max="28" value="1" />
+            </div>
+            <div class="field">
+              <label for="grace_days">Grace days</label>
+              <input id="grace_days" name="grace_days" type="number" min="0" max="31" value="5" />
+              <span class="field__help">Days after the due date before it counts as late.</span>
+            </div>
+          </div>
+
+          <div class="btnrow">
+            <button class="pill solid" type="submit">Move them in</button>
+            <a class="pill outline" href="/app/portfolio/u/${unit.id}">Cancel</a>
+          </div>
+        </form>
+      </div>
+    </div>`;
+}
+

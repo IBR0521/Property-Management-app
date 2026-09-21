@@ -35,6 +35,7 @@ export function registerOwners(router) {
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "people", counts: await navCounts(cid),
       title: "Owners", subtitle: `${owners.length} owner${owners.length === 1 ? "" : "s"}`,
+      actions: html`<a class="pill solid sm" href="/app/owners/new">Add owner</a>`,
       body: html`
         ${tabs(PEOPLE_TABS, "owners")}
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
@@ -51,9 +52,69 @@ export function registerOwners(router) {
                 <td class="shrink">${o.pending ? html`<span class="chip" data-tone="warn">${o.pending} waiting</span>` : ""}</td>
                 <td class="shrink"><a class="pill outline sm" href="/app/owners/${o.id}">Open</a></td>
               </tr>`)}</tbody>
-          </table></div>` : empty("No owners yet", "Add owners and their properties in Setup.")}
+          </table></div>` : empty("No owners yet", "Add an owner first — a building has to belong to somebody.")}
         </div></div>`,
     }));
+  });
+
+  /* --- add and edit ------------------------------------------------------
+     Registered above /app/owners/:id on purpose: routes match in order, and
+     ":id" would otherwise swallow the literal word "new". ---------------- */
+
+  router.get("/app/owners/new", async (ctx) => {
+    sendHtml(ctx.res, appPage({
+      staff: ctx.staff, csrf: ctx.csrf, active: "people", counts: await navCounts(ctx.staff.company_id),
+      title: "Add an owner",
+      subtitle: "The person or company whose building you manage",
+      body: ownerForm({ csrf: ctx.csrf, owner: null, error: ctx.query.e }),
+    }));
+  });
+
+  router.post("/app/owners/new", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const f = ctx.fields;
+    const name = String(f.name || "").trim();
+    if (name.length < 2) return redirect(ctx.res, `/app/owners/new?e=${encodeURIComponent("An owner needs a name.")}`);
+
+    const ownerId = id();
+    await insert("owner", {
+      id: ownerId, company_id: cid, name,
+      email: String(f.email || "").trim() || null,
+      phone: String(f.phone || "").trim() || null,
+      approval_threshold_cents: thresholdOf(f.threshold),
+      statement_day: statementDayOf(f.statement_day),
+      notes: String(f.notes || "").trim() || null,
+      created_at: stamp(),
+    });
+    redirect(ctx.res, `/app/owners/${ownerId}?m=${encodeURIComponent("Owner added. Add their building next.")}`);
+  });
+
+  router.get("/app/owners/:id/edit", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const owner = await one("SELECT * FROM owner WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    sendHtml(ctx.res, appPage({
+      staff: ctx.staff, csrf: ctx.csrf, active: "people", counts: await navCounts(cid),
+      title: `Edit ${owner.name}`, subtitle: "Owner details",
+      body: ownerForm({ csrf: ctx.csrf, owner, error: ctx.query.e }),
+    }));
+  });
+
+  router.post("/app/owners/:id/edit", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const owner = await one("SELECT * FROM owner WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    const f = ctx.fields;
+    const name = String(f.name || "").trim();
+    if (name.length < 2) return redirect(ctx.res, `/app/owners/${owner.id}/edit?e=${encodeURIComponent("An owner needs a name.")}`);
+
+    await update("owner", owner.id, {
+      name,
+      email: String(f.email || "").trim() || null,
+      phone: String(f.phone || "").trim() || null,
+      approval_threshold_cents: thresholdOf(f.threshold),
+      statement_day: statementDayOf(f.statement_day),
+      notes: String(f.notes || "").trim() || null,
+    });
+    redirect(ctx.res, `/app/owners/${owner.id}?m=${encodeURIComponent("Owner updated.")}`);
   });
 
   /* --- detail ------------------------------------------------------------- */
@@ -472,4 +533,81 @@ export async function computeStatement(ownerId, from, to) {
   ];
 
   return { rent, expenses, fees, other, net, lines, jobs, upcoming };
+}
+
+/* --- add/edit views -------------------------------------------------------- */
+
+/* A blank threshold means "use the default", not "approve everything". Getting
+   that backwards would dispatch unlimited spend without asking anyone. */
+function thresholdOf(v) {
+  const cents = parseMoney(v);
+  return cents != null && cents >= 0 ? cents : 40000;
+}
+
+function statementDayOf(v) {
+  const n = parseInt(String(v || ""), 10);
+  // 29th to 31st do not exist in every month, so the safe ceiling is 28.
+  return Number.isFinite(n) && n >= 1 && n <= 28 ? n : 1;
+}
+
+function ownerForm({ csrf, owner, error }) {
+  const action = owner ? `/app/owners/${owner.id}/edit` : "/app/owners/new";
+  return html`
+    ${error ? notice("warn", null, decodeURIComponent(error)) : ""}
+    <div class="panel">
+      <div class="panel__head"><h2>${owner ? "Owner details" : "New owner"}</h2></div>
+      <div class="panel__body">
+        <form method="post" action="${action}" class="formgrid">
+          <input type="hidden" name="_csrf" value="${csrf}" />
+
+          <div class="field">
+            <label for="name">Name</label>
+            <input id="name" name="name" type="text" required maxlength="120"
+                   value="${owner ? owner.name : ""}" placeholder="Okafor Holdings LLC" />
+            <span class="field__help">A person or a company — whoever the statement is made out to.</span>
+          </div>
+
+          <div class="formgrid formgrid--2">
+            <div class="field">
+              <label for="email">Email</label>
+              <input id="email" name="email" type="email" maxlength="160"
+                     value="${owner && owner.email ? owner.email : ""}" />
+              <span class="field__help">Where approval requests and statements go.</span>
+            </div>
+            <div class="field">
+              <label for="phone">Phone</label>
+              <input id="phone" name="phone" type="tel" inputmode="tel" maxlength="40"
+                     value="${owner && owner.phone ? owner.phone : ""}" />
+            </div>
+          </div>
+
+          <div class="formgrid formgrid--2">
+            <div class="field">
+              <label for="threshold">Approval threshold</label>
+              <input id="threshold" name="threshold" type="text" inputmode="decimal"
+                     value="${owner ? (owner.approval_threshold_cents / 100).toFixed(2) : "400.00"}" />
+              <span class="field__help">A repair costing more than this waits for their yes before anyone is dispatched.</span>
+            </div>
+            <div class="field">
+              <label for="statement_day">Statement day</label>
+              <input id="statement_day" name="statement_day" type="number" min="1" max="28"
+                     value="${owner ? owner.statement_day : 1}" />
+              <span class="field__help">Day of the month. 28 is the highest, because February.</span>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="notes">Notes <span style="color:var(--ink-soft);font-weight:400">(optional)</span></label>
+            <input id="notes" name="notes" type="text" maxlength="400"
+                   value="${owner && owner.notes ? owner.notes : ""}"
+                   placeholder="Prefers a call before any work over $1,000" />
+          </div>
+
+          <div class="btnrow">
+            <button class="pill solid" type="submit">${owner ? "Save changes" : "Add owner"}</button>
+            <a class="pill outline" href="${owner ? `/app/owners/${owner.id}` : "/app/owners"}">Cancel</a>
+          </div>
+        </form>
+      </div>
+    </div>`;
 }

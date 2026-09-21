@@ -504,3 +504,49 @@ it instead.
 There is no print button. This app ships no client JavaScript, and
 `window.print()` would have been the only reason to start; the browser's own
 print command does the same job and works when script is blocked.
+
+---
+
+# Adding and editing records
+
+Until now the app could operate a portfolio but not build one: properties,
+apartments, owners, tenants and leases existed only because `seed.js` created
+them. A firm taking on a new building had no way to enter it.
+
+The data entry runs in dependency order, because that is the order the records
+actually depend on each other:
+
+    owner  ->  building  ->  apartments  ->  somebody living in one
+
+**Owner** — People → Add owner. Name, contact, and the two numbers that drive
+everything else: the approval threshold (spend above it waits for their yes)
+and the statement day. A blank threshold falls back to the default rather than
+to "approve everything", which is the direction that would dispatch unlimited
+spend without asking.
+
+**Building** — Properties → Add a building. Asks who owns it first; with no
+owners on file it says so instead of showing an unusable form. Picking "a
+house" creates its single unit in the same transaction, because asking a
+manager to add "the unit" to a single-family home is a question with one
+answer.
+
+**Apartment** — from a building, or Properties → the unit → Building → Add
+another. Saving returns a blank form rather than a list: a twelve-unit building
+is twelve of these, and a round trip each time is twelve wasted clicks. Unit
+numbers must be unique within a building.
+
+**Move-in** — the mirror of the move-out that already existed. Creates the
+tenant, the lease and the link between them in one transaction, because a
+lease with no tenant on it is a row nobody can act on. Refused if the apartment
+already has an active lease: two would make the rent ledger wrong.
+
+Everything is reachable inside the four destinations that already exist. No new
+nav items.
+
+## Every apartment is born with its QR code
+
+`report_token` is NOT NULL and generated in the same statement that creates the
+unit, so a unit added through the app is never one whose sticker cannot be
+printed. It appears on `/app/portfolio/labels` immediately. `stickerToken()` in
+`lib/ids.js` is the single definition of that token's shape — creation and
+rotation both call it, and it matches what migration 004 backfilled.

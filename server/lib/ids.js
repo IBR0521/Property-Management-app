@@ -17,6 +17,15 @@ export function token() {
   return randomBytes(32).toString("base64url");
 }
 
+/* The token in a unit's repair QR sticker. Shorter than token() on purpose:
+   it identifies a front door rather than unlocking data, and every character
+   becomes more modules in a code that has to scan off a scuffed label. Must
+   stay byte-identical in shape to the SQL that backfilled the first ones —
+   12 bytes, base64url, no padding. */
+export function stickerToken() {
+  return randomBytes(12).toString("base64url");
+}
+
 export function ref(prefix = "WO") {
   let out = "";
   for (let i = 0; i < 4; i++) out += SAFE[randomInt(SAFE.length)];
