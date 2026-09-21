@@ -20,18 +20,25 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DATABASE_URL, DATABASE_CA_CERT, PG_POOL_MAX, assertConfig } from "./config.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(here, "..", "..");
 
-const url = process.env.DATABASE_URL;
+/* The URL comes from config.js, which decides between DATABASE_URL and
+   TEST_DATABASE_URL and refuses to start if the two are the same string. This
+   module used to read process.env directly and build the pool at import time,
+   which meant any test that imported anything got the production pool — there
+   was no seam to point it elsewhere. */
+const url = DATABASE_URL;
 if (!url) {
-  throw new Error(
-    "DATABASE_URL is not set. Copy the Transaction pooler connection string " +
-    "from Supabase → Project Settings → Database → Connection string, and set " +
-    "it as DATABASE_URL."
-  );
+  assertConfig({ exitOnFailure: false });   // throws with the real reason
+  throw new Error("No database URL is configured.");
 }
+
+/* Local Postgres does not speak TLS and does not need to. Anything else is
+   assumed remote and encrypted. */
+const isLocal = /@(localhost|127\.0\.0\.1|\[::1\])[:/]|^postgresql:\/\/(localhost|127\.0\.0\.1)/.test(url);
 
 /* TLS.
 
@@ -44,9 +51,9 @@ if (!url) {
    Download it from Supabase -> Project Settings -> Database -> SSL
    Configuration and pass the contents as DATABASE_CA_CERT. With it set, the
    certificate chain and hostname are both checked. */
-const CA = process.env.DATABASE_CA_CERT;
-const ssl = CA
-  ? { ca: CA, rejectUnauthorized: true }
+const CA = DATABASE_CA_CERT;
+const ssl = isLocal ? false
+  : CA ? { ca: CA, rejectUnauthorized: true }
   : "require";
 
 export const VERIFIED_TLS = Boolean(CA);
@@ -58,7 +65,7 @@ export const db = postgres(url, {
   /* Pages issue their queries concurrently, so a pool of one would serialise
      them again and undo the point. Four is enough for the widest page and
      leaves plenty of headroom against Supabase's 200 client limit. */
-  max: Number(process.env.PG_POOL_MAX || 4),
+  max: PG_POOL_MAX,
   idle_timeout: 20,
   connect_timeout: 15,
   onnotice: () => {},
@@ -180,7 +187,30 @@ export function ready() {
   return migrated;
 }
 
+/* For the test suite, which drops and rebuilds the schema between runs and
+   would otherwise be handed the cached promise from the previous one. */
+export function resetMigrationCache() {
+  migrated = null;
+}
+
+/* node:test does not exit while a pool holds open sockets. */
+export async function closeDb() {
+  await db.end({ timeout: 5 });
+}
+
 export async function migrate() {
+  /* Preconditions, not migrations.
+
+     004 calls gen_random_bytes(), which lives in pgcrypto. Supabase
+     preinstalls it, so the dependency never surfaced — until the migrations
+     are run anywhere else, where 004 fails with "function does not exist".
+
+     This cannot be a numbered migration: a migration to install it would have
+     to sort before 004, and every number below that is already applied in
+     production. It is an environment precondition, so it belongs here beside
+     the migration table itself, and it is idempotent. */
+  await db.unsafe(`CREATE EXTENSION IF NOT EXISTS pgcrypto`);
+
   await db.unsafe(`CREATE TABLE IF NOT EXISTS schema_migration (
     name TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL
