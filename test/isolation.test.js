@@ -197,6 +197,7 @@ describe("company A cannot reach company B's records", () => {
       "schema_migration", "job_run", "rate_hit",
       // Scoped through the row they belong to.
       "session",                 // -> staff
+      "staff_recovery_code",     // -> staff
       "lease_tenant",            // -> lease
       "application_check", "application_doc",   // -> application
       "work_order_event", "work_order_photo",   // -> work_order

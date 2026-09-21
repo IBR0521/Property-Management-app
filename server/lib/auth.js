@@ -104,7 +104,8 @@ export const CAPABILITIES = [
   "queue.view",       // the daily work list
   "property.view",    // units, leases, tenants
   "property.edit",    // adding and changing those records
-  "maintenance.work", // triage, dispatch, close out
+  "maintenance.work", // triage, dispatch, close out, the whole queue
+  "maintenance.own",  // only the jobs assigned to me
   "leasing.work",     // applications, listings, lease documents
   "money.view",       // rent ledgers, owner statements, cash balances, journals
   "money.write",      // post journals, record payments, pay invoices
@@ -118,7 +119,7 @@ const ROLE_CAPABILITIES = {
   admin: new Set(CAPABILITIES),
 
   manager: new Set([
-    "queue.view", "property.view", "property.edit", "maintenance.work",
+    "queue.view", "property.view", "property.edit", "maintenance.work", "maintenance.own",
     "leasing.work", "money.view", "money.write", "bank.link",
     "vendor.manage", "settings.manage",
   ]),
@@ -139,7 +140,15 @@ const ROLE_CAPABILITIES = {
   /* Work orders and the contractors who do them. Can see that a job was
      approved; cannot see the cash it came out of. */
   maintenance: new Set([
-    "queue.view", "property.view", "maintenance.work", "vendor.manage",
+    "queue.view", "property.view", "maintenance.work", "maintenance.own", "vendor.manage",
+  ]),
+
+  /* The person in the van, not the coordinator at the desk. They see the jobs
+     assigned to them and the addresses those jobs are at, and nothing else —
+     not the rest of the queue, not the portfolio, not a tenant they are not
+     visiting. Phase 5 builds the phone view this role exists for. */
+  technician: new Set([
+    "maintenance.own", "property.view",
   ]),
 };
 
@@ -157,7 +166,7 @@ export function can(staff, capability) {
 export function roleLabel(role) {
   return {
     admin: "Administrator", manager: "Property manager", accountant: "Accountant",
-    leasing: "Leasing agent", maintenance: "Maintenance",
+    leasing: "Leasing agent", maintenance: "Maintenance", technician: "Technician",
   }[role] || role;
 }
 
@@ -168,6 +177,12 @@ export function roleLabel(role) {
    runs: a handler that forgets to check is the normal way an authorisation
    model fails, so handlers are not asked to check. */
 const ROUTE_CAPABILITY = [
+  /* The dashboard is the entire company's queue. Without this entry it needed
+     no capability at all, so a technician — who should see only their own
+     jobs — could read every open matter in the company. */
+  ["/app", "queue.view"],
+  ["/app/jobs", "maintenance.own"],
+  ["/app/account", null],
   ["/app/accounting", "money.view"],
   ["/app/banking", "bank.link"],
   ["/app/owners", "money.view"],
@@ -200,6 +215,11 @@ const WRITE_CAPABILITY = [
 function longestMatch(table, path) {
   let best = null;
   for (const [prefix, capability] of table) {
+    if (capability === null && (path === prefix || path.startsWith(prefix + "/"))) {
+      // An explicit "signed in is enough", overriding a broader prefix above.
+      if (!best || prefix.length > best[0].length) best = [prefix, null];
+      continue;
+    }
     if (path === prefix || path.startsWith(prefix + "/")) {
       if (!best || prefix.length > best[0].length) best = [prefix, capability];
     }
