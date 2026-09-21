@@ -17,6 +17,8 @@
 import { DELIVERY_MODE } from "../config.js";
 import { drains, reachesRecipients, describe } from "./mode.js";
 import * as logProvider from "./log.js";
+import * as resend from "./resend.js";
+import * as twilio from "./twilio.js";
 import { blockedReason } from "./consent.js";
 
 export { drains, reachesRecipients, describe };
@@ -27,7 +29,15 @@ export { drains, reachesRecipients, describe };
    boot. */
 export function providerFor(channel, forMode = DELIVERY_MODE) {
   if (!drains(forMode)) return null;
-  // live and sandbox adapters register here as they land.
+  if (forMode === "log") return logProvider;
+
+  /* sandbox and live use the same adapters. The difference is entirely in the
+     credentials: a Resend test key and Twilio's magic test SID accept requests
+     and discard them, which exercises the real HTTP path, the real auth and
+     the real error shapes without anything being delivered or charged. Having
+     sandbox take a different code path would defeat the purpose of having it. */
+  if (channel === "email") return resend;
+  if (channel === "sms") return twilio;
   return logProvider;
 }
 

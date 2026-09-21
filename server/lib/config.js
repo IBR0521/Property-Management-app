@@ -117,7 +117,57 @@ export const BLOB_READ_WRITE_TOKEN = raw("BLOB_READ_WRITE_TOKEN");
 
 /* --- delivery and providers ----------------------------------------------- */
 
-export const DELIVERY_MODE = raw("DELIVERY_MODE") || "off";
+/* off queues and sends nothing, log drains to the console, sandbox posts to a
+   provider's test credentials which accept and discard, live actually sends.
+   An unrecognised value is refused rather than defaulted: a typo here would
+   otherwise read as "some mode is set" and the UI would stop warning. */
+export const DELIVERY_MODE = (() => {
+  const v = raw("DELIVERY_MODE") || "off";
+  if (!["off", "log", "sandbox", "live"].includes(v)) {
+    problems.push(
+      `DELIVERY_MODE is "${v}", which is not a mode.\n` +
+      `    Use one of: off, log, sandbox, live.`);
+    return "off";
+  }
+  return v;
+})();
+
+export const EMAIL_FROM = raw("EMAIL_FROM");
+export const RESEND_API_KEY = raw("RESEND_API_KEY");
+export const RESEND_WEBHOOK_SECRET = raw("RESEND_WEBHOOK_SECRET");
+
+export const TWILIO_ACCOUNT_SID = raw("TWILIO_ACCOUNT_SID");
+export const TWILIO_AUTH_TOKEN = raw("TWILIO_AUTH_TOKEN");
+export const TWILIO_FROM_NUMBER = raw("TWILIO_FROM_NUMBER");
+export const TWILIO_MESSAGING_SERVICE_SID = raw("TWILIO_MESSAGING_SERVICE_SID");
+
+/* Twilio signs over the full public URL, so this cannot be derived from the
+   request: behind a proxy the app sees an internal host and the signature
+   never matches. It is also what outbound links in messages are built from. */
+export const APP_BASE_URL = (raw("APP_BASE_URL") || "").replace(/\/+$/, "") || null;
+
+/* A mode that claims to send and cannot is the exact failure this phase
+   exists to remove, so live is refused without the keys to back it. */
+if (DELIVERY_MODE === "live") {
+  if (!RESEND_API_KEY) {
+    problems.push(
+      "DELIVERY_MODE=live but RESEND_API_KEY is not set.\n" +
+      "    Email would fail every attempt and dead-letter.");
+  }
+  if (!EMAIL_FROM) {
+    problems.push("DELIVERY_MODE=live but EMAIL_FROM is not set.");
+  }
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
+    problems.push(
+      "DELIVERY_MODE=live but Twilio is not configured.\n" +
+      "    The emergency on-call alert is SMS; without it that path is silent.");
+  }
+  if (!APP_BASE_URL) {
+    problems.push(
+      "DELIVERY_MODE=live but APP_BASE_URL is not set.\n" +
+      "    Twilio signs webhooks over the full URL, so verification would reject every callback.");
+  }
+}
 
 export const PLAID = {
   clientId: raw("PLAID_CLIENT_ID"),
@@ -168,6 +218,8 @@ export function configSummary() {
     encryption: APP_ENCRYPTION_KEY ? "configured" : "unset",
     blob: BLOB_READ_WRITE_TOKEN ? "configured" : "local-disk",
     delivery: DELIVERY_MODE,
+    email: RESEND_API_KEY ? "resend" : "unset",
+    sms: TWILIO_ACCOUNT_SID ? "twilio" : "unset",
     plaid: PLAID.configured ? PLAID.env : "unset",
     errorReporting: SENTRY_DSN ? "configured" : "unset",
   };
