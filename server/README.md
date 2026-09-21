@@ -18,7 +18,11 @@ There is no local SQLite fallback any more — local development points at the
 same Supabase database via `DATABASE_URL`, so there is only ever one dialect
 to test against. Put it in `.env.local`, which is gitignored.
 
-Sign in at `/app` with `dana@leafridgepm.test` / `columbus2026`.
+Sign in at `/app` as `dana@leafridgepm.test`. `npm run seed` generates a
+random password and prints it once — it is not stored anywhere else and it
+is not in this file, because a password written into a public repository is
+not a password. Lost it? Re-run `npm run reset`, or change it at
+`/app/account`.
 
 ## What is where
 
