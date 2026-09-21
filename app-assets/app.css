@@ -528,3 +528,19 @@ table.data a:hover{ text-decoration:underline; }
 .filterbar .field label{ margin-bottom:0.25rem; }
 .filterbar .pill{ margin-bottom:0.0625rem; }
 .filterbar__note{ margin-left:auto; font-size:0.75rem; color:var(--ink-soft); }
+
+/* --- support session banner ------------------------------------------------
+   Deliberately loud and at the very top of the document, above the shell. A
+   customer must be able to tell at a glance that somebody else is looking at
+   their account — a subtle indicator for this would be the wrong kind of
+   tasteful. */
+.impersonating{
+  display:flex; gap:1rem; align-items:center; justify-content:space-between;
+  flex-wrap:wrap;
+  padding:0.625rem 1.25rem;
+  background:var(--warn-wash); color:var(--warn);
+  border-bottom:1px solid var(--warn-line);
+  font-size:0.8125rem; line-height:1.4;
+}
+.impersonating b{ color:var(--warn); }
+.impersonating .pill{ flex:none; }

@@ -177,6 +177,14 @@ export const PLAID = {
   get configured() { return Boolean(this.clientId && this.secret); },
 };
 
+/* --- platform administration ---------------------------------------------- */
+
+/* The one address that may see across companies. An environment variable
+   rather than a role, because a role is a column somebody can change and this
+   capability must not be grantable from inside the product. Unset means the
+   platform area does not exist, which is the right default. */
+export const PLATFORM_OPERATOR_EMAIL = (raw("PLATFORM_OPERATOR_EMAIL") || "").toLowerCase() || null;
+
 /* --- subscription billing ------------------------------------------------- */
 
 export const STRIPE_SECRET_KEY = raw("STRIPE_SECRET_KEY");
@@ -244,6 +252,7 @@ export function configSummary() {
     sms: TWILIO_ACCOUNT_SID ? "twilio" : "unset",
     plaid: PLAID.configured ? PLAID.env : "unset",
     errorReporting: SENTRY_DSN ? "configured" : "unset",
+    platformAdmin: PLATFORM_OPERATOR_EMAIL ? "configured" : "unset",
     billing: STRIPE_SECRET_KEY
       ? (STRIPE_SECRET_KEY.startsWith("sk_live_") ? "live" : "test")
       : "unset",

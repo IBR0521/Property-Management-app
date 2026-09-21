@@ -10,7 +10,7 @@
      /report /t/ /apply /a/ /o/ tokenised public pages, no account
      /app/...                   the back office, staff session required
 */
-import { ready, NotFound } from "./lib/db.js";
+import { ready, NotFound, run } from "./lib/db.js";
 import { newRequestId, forRequest } from "./lib/logger.js";
 import { captureError } from "./lib/errors.js";
 import { DATABASE_URL, DATABASE_CA_CERT, BLOB_READ_WRITE_TOKEN, configSummary } from "./lib/config.js";
@@ -43,6 +43,7 @@ import { registerStaff } from "./features/staff.js";
 import { registerTwoFactor } from "./features/twofactor.js";
 import { registerCompany } from "./features/company.js";
 import { registerBilling, companyIsReadOnly, readOnlyExempt } from "./features/billing.js";
+import { registerPlatform, activeImpersonation, impersonationForbids } from "./features/platform.js";
 
 const router = createRouter();
 
@@ -69,6 +70,7 @@ registerStaff(router);
 registerTwoFactor(router);
 registerCompany(router);
 registerBilling(router);
+registerPlatform(router);
 
 /* Routes that need a signed-in staff member. Everything under /app except the
    sign-in pages, which register themselves as public. */
@@ -203,6 +205,29 @@ export async function handle(req, res) {
             "Your session needs a second factor before it can change anything. Sign in again."), 403);
         }
         return redirect(res, elevate);
+      }
+
+      /* A borrowed view is read-only, and cannot be used to take over an
+         account. Checked before everything else it could otherwise bypass. */
+      ctx.impersonation = await activeImpersonation(ctx.staff);
+      /* Carried on ctx.staff, which every page already receives, so the banner
+         reaches all of them without threading a new argument through forty
+         call sites — and so a page added later cannot forget it. */
+      ctx.staff.impersonation = ctx.impersonation;
+      if (ctx.impersonation) {
+        const forbidden = impersonationForbids(path, req.method);
+        if (forbidden) {
+          ctx.log.warn("impersonation refused", {
+            impersonationId: ctx.impersonation.id, forbidden, path, method: req.method,
+          });
+          return sendHtml(res, errorPage(403,
+            "This is a read-only support session. It cannot change anything, alter an "
+            + "account, or touch billing."), 403);
+        }
+        /* Counted rather than recorded path by path: a support session should
+           not become a second copy of the customer's data. */
+        await run("UPDATE impersonation SET pages_viewed = pages_viewed + 1 WHERE id = ?",
+          ctx.impersonation.id);
       }
 
       /* A lapsed subscription makes a company read-only: every screen loads,

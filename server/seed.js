@@ -1,3 +1,13 @@
+/* Demo data, for development only.
+
+   This file drops nothing and creates a company from scratch, which is
+   harmless on a laptop and unrecoverable against a live database. It is in a
+   public repository, so a reader cannot tell from the code which one they are
+   pointed at — the connection string is in an environment variable they set
+   twenty minutes ago.
+
+   Hence the refusal below. It is deliberately hard to bypass: SEED_ANYWAY has
+   to be set on purpose, and the message says what would have happened. */
 /* Demo data.
    One management company with a small Columbus portfolio, wired far enough
    that every feature has something real to show: rent partly collected so a
@@ -12,6 +22,11 @@ import { hashPassword } from "./lib/auth.js";
 import { randomBytes } from "node:crypto";
 import { stamp, today, addDays, monthKey, prevMonthRange } from "./lib/dates.js";
 import { tick } from "./lib/scheduler.js";
+
+/* Before migrate(), and before anything else opens a connection. A guard that
+   runs after the database has already been touched is a guard that has
+   already lost. */
+await refuseAgainstProduction();
 
 await migrate();
 
@@ -415,3 +430,41 @@ console.log(`
   ${units.length} units · ${leases.length} active leases · ${vendors.length} vendors
   scheduler: ${Object.entries(result).filter(([, v]) => typeof v === "number" && v > 0).map(([k, v]) => `${k}=${v}`).join(" ") || "nothing due"}
 `);
+
+/* --- the guard ------------------------------------------------------------ */
+
+async function refuseAgainstProduction() {
+  const { APP_ENV, IS_SERVERLESS, DATABASE_URL, NODE_ENV } = await import("./lib/config.js");
+
+  const reasons = [];
+  if (APP_ENV === "production") reasons.push("APP_ENV is production");
+  if (IS_SERVERLESS) reasons.push("this is a deployed environment");
+  /* A pooler host is a hosted database. Local development points at
+     localhost, and anything else is somebody else's data until proven
+     otherwise. */
+  if (DATABASE_URL && /pooler\.|\.supabase\.|amazonaws\.com|neon\.tech|render\.com/i.test(DATABASE_URL)) {
+    reasons.push("DATABASE_URL points at a hosted database, not localhost");
+  }
+
+  if (!reasons.length) return;
+
+  if (process.env.SEED_ANYWAY === "yes-i-mean-it") {
+    console.warn(
+      `\n  Seeding anyway, against: ${reasons.join("; ")}.\n` +
+      `  You set SEED_ANYWAY. This creates a demo company with demo tenants,\n` +
+      `  demo work orders and a demo portfolio in that database.\n`);
+    return;
+  }
+
+  console.error(
+    `\n  Refusing to seed.\n\n` +
+    `  ${reasons.map((r) => `- ${r}`).join("\n  ")}\n\n` +
+    `  This script creates a demo company with invented tenants, leases and work\n` +
+    `  orders. In a real database that is somebody else's portfolio with fiction\n` +
+    `  mixed into it, and there is no undo.\n\n` +
+    `  For a real customer, add their company through /signup and their portfolio\n` +
+    `  through the app.\n\n` +
+    `  If you genuinely want demo data here:\n` +
+    `    SEED_ANYWAY=yes-i-mean-it npm run seed\n`);
+  process.exit(1);
+}

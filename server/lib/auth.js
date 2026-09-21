@@ -58,7 +58,7 @@ export async function currentStaff(req) {
   const row = await get(
     `SELECT s.*, c.name AS company_name, c.emergency_phone, c.phone AS company_phone,
             c.slug AS company_slug, c.require_2fa, c.verified_at AS company_verified_at,
-            sess.id AS session_id, sess.totp_at
+            sess.id AS session_id, sess.totp_at, sess.impersonation_id
        FROM session sess
        JOIN staff s ON s.id = sess.staff_id
        JOIN company c ON c.id = s.company_id

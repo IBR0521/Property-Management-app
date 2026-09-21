@@ -44,6 +44,7 @@ const NAV = [
     { href: "/app/staff", key: "staff", icon: "users", label: "People", need: "staff.manage" },
     { href: "/app/company", key: "company", icon: "home", label: "Company", need: "settings.manage" },
     { href: "/app/billing", key: "billing", icon: "cash", label: "Billing", need: "settings.manage" },
+    { href: "/app/company/access", key: "access", icon: "shield", label: "Support access", need: "settings.manage" },
     { href: "/app/setup", key: "setup", icon: "cog", label: "Setup", need: "settings.manage" },
   ] },
 ];
@@ -76,10 +77,19 @@ function navBadge(counts, key) {
 }
 
 export function appPage({ staff, active, title, subtitle, actions, body, counts = {}, csrf }) {
+  const impersonation = staff?.impersonation || null;
   return doc(html`
 <html lang="en">
 <head>${HEAD(`${title} · ${staff.company_name}`)}</head>
 <body class="antialiased">
+${impersonation ? html`
+  <div class="impersonating">
+    <span>
+      <b>Support is viewing this account.</b>
+      ${impersonation.operator} &mdash; ${impersonation.reason}. Read-only.
+    </span>
+    <a class="pill outline sm" href="/app/platform/stop">End session</a>
+  </div>` : ""}
 <div class="shell">
   <nav class="shell__nav" aria-label="Sections">
     <div class="shell__brand">
