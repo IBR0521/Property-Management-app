@@ -30,13 +30,13 @@ const NAV = [
     { href: "/app/owners", key: "people", icon: "users", label: "People", badge: "people", need: "money.view" },
   ] },
   { group: "Money", items: [
-    { href: "/app/accounting", key: "accounting", icon: "cog", label: "Accounting", need: "money.view" },
-    { href: "/app/banking", key: "banking", icon: "cog", label: "Banking", need: "bank.link" },
-    { href: "/app/vendors", key: "vendors", icon: "users", label: "Contractors", need: "vendor.manage" },
+    { href: "/app/accounting", key: "accounting", icon: "cash", label: "Accounting", need: "money.view" },
+    { href: "/app/banking", key: "banking", icon: "loop", label: "Banking", need: "bank.link" },
+    { href: "/app/vendors", key: "vendors", icon: "wrench", label: "Contractors", need: "vendor.manage" },
   ] },
   { group: "Leasing", items: [
-    { href: "/app/listings", key: "listings", icon: "home", label: "Vacancies", need: "leasing.work" },
-    { href: "/app/leases", key: "leases", icon: "inbox", label: "Lease documents", need: "leasing.work" },
+    { href: "/app/listings", key: "listings", icon: "key", label: "Vacancies", need: "leasing.work" },
+    { href: "/app/leases", key: "leases", icon: "doc", label: "Lease documents", need: "leasing.work" },
   ] },
   { group: null, items: [
     { href: "/app/setup", key: "setup", icon: "cog", label: "Setup", need: "settings.manage" },
@@ -160,11 +160,11 @@ export function signInPage({ error, company, csrf, next }) {
         ${next ? html`<input type="hidden" name="next" value="${next}" />` : ""}
         <div class="field">
           <label for="email">Email</label>
-          <input class="input" id="email" name="email" type="email" autocomplete="username" required />
+          <input id="email" name="email" type="email" autocomplete="username" required />
         </div>
         <div class="field">
           <label for="password">Password</label>
-          <input class="input" id="password" name="password" type="password" autocomplete="current-password" required />
+          <input id="password" name="password" type="password" autocomplete="current-password" required />
         </div>
         <button class="pill solid" type="submit">Sign in</button>
       </form>

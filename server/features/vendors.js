@@ -289,6 +289,7 @@ export function registerVendors(router) {
                 WHERE i.vendor_id = v.id AND i.status IN ('received','approved','blocked'))::int AS open_invoices
          FROM vendor v WHERE v.company_id = ? ORDER BY v.active DESC, v.name`,
       Number(today().slice(0, 4)), cid);
+    const year = Number(today().slice(0, 4));
 
     const states = vendors.map((v) => ({ v, s: complianceState(v) }));
     const blocked = states.filter((x) => !x.s.canDispatch || !x.s.canBePaid);
@@ -303,20 +304,19 @@ export function registerVendors(router) {
         ${blocked.length ? notice("warn", `${blocked.length} contractor(s) cannot be used`,
           "Expired cover or a hold. They stay on the list, but dispatch and payment are refused until it is fixed.") : ""}
         <div class="panel"><div class="panel__body panel__body--flush">
-          ${vendors.length ? html`<div class="tablewrap"><table class="data">
-            <thead><tr><th>Contractor</th><th>Trade</th><th>Workers comp</th><th>Liability</th>
-              <th class="num">Paid this year</th><th>State</th><th class="shrink"></th></tr></thead>
+          ${vendors.length ? html`<div class="tablewrap tablewrap--narrow"><table class="data">
+            <thead><tr><th>Contractor</th><th>Cover</th>
+              <th class="num">Paid in ${year}</th><th>State</th><th class="shrink"></th></tr></thead>
             <tbody>${states.map(({ v, s }) => html`
               <tr>
                 <td><a href="/app/vendors/${v.id}">${v.name}</a>
-                  ${v.open_invoices ? html`<span class="cellsub">${v.open_invoices} open invoice(s)</span>` : ""}</td>
-                <td>${v.trade}</td>
-                <td>${coverCell(v.wc_expires, v.wc_exempt)}</td>
-                <td>${coverCell(v.gl_expires, 0)}</td>
+                  <span class="cellsub">${v.trade}${v.open_invoices ? ` · ${v.open_invoices} open invoice(s)` : ""}</span></td>
+                <td>${coverCell(v.wc_expires, v.wc_exempt)} <span class="cellsub">workers comp</span>
+                  <div style="margin-top:0.25rem">${coverCell(v.gl_expires, 0)} <span class="cellsub">liability</span></div></td>
                 <td class="num">${usd(Number(v.paid_ytd))}</td>
                 <td>${s.canDispatch && s.canBePaid
                   ? html`<span class="chip" data-tone="ok">clear</span>`
-                  : html`<span class="chip" data-tone="danger">blocked</span>`}</td>
+                  : html`<span class="chip" data-tone="danger">${s.canDispatch ? "no payouts" : "blocked"}</span>`}</td>
                 <td class="shrink"><a class="pill outline sm" href="/app/vendors/${v.id}">Open</a></td>
               </tr>`)}</tbody></table></div>`
             : empty("No contractors yet", "Add the trades you actually call.")}
@@ -367,7 +367,7 @@ export function registerVendors(router) {
         ${tabs(VENDOR_TABS, "invoices")}
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
         <div class="panel"><div class="panel__body panel__body--flush">
-          ${rows.length ? html`<div class="tablewrap"><table class="data">
+          ${rows.length ? html`<div class="tablewrap tablewrap--narrow"><table class="data">
             <thead><tr><th>Contractor</th><th>Invoice</th><th>Date</th><th class="num">Amount</th>
               <th>Status</th><th class="shrink"></th></tr></thead>
             <tbody>${rows.map((r) => html`
@@ -463,7 +463,7 @@ export function registerVendors(router) {
           </div>
         </div>
         <div class="panel"><div class="panel__body panel__body--flush">
-          ${data.recipients.length ? html`<div class="tablewrap"><table class="data">
+          ${data.recipients.length ? html`<div class="tablewrap tablewrap--narrow"><table class="data">
             <thead><tr><th>Recipient</th><th>TIN</th><th>Class</th>
               <th class="num">Box 1</th><th>Reportable</th><th>Missing</th></tr></thead>
             <tbody>${data.recipients.map((r) => html`
@@ -517,7 +517,7 @@ export function registerVendors(router) {
             <div class="panel">
               <div class="panel__head"><h2>Invoices</h2><p>${invoices.length}</p></div>
               <div class="panel__body panel__body--flush">
-                ${invoices.length ? html`<div class="tablewrap"><table class="data">
+                ${invoices.length ? html`<div class="tablewrap tablewrap--narrow"><table class="data">
                   <thead><tr><th>Date</th><th>Number</th><th class="num">Amount</th><th>Status</th></tr></thead>
                   <tbody>${invoices.map((i) => html`
                     <tr><td>${human(i.invoice_date)}</td><td>${i.invoice_no || "—"}</td>
@@ -529,7 +529,7 @@ export function registerVendors(router) {
             <div class="panel">
               <div class="panel__head"><h2>Payments</h2><p>${payouts.length}</p></div>
               <div class="panel__body panel__body--flush">
-                ${payouts.length ? html`<div class="tablewrap"><table class="data">
+                ${payouts.length ? html`<div class="tablewrap tablewrap--narrow"><table class="data">
                   <thead><tr><th>Date</th><th>Method</th><th class="num">Amount</th><th>1099</th></tr></thead>
                   <tbody>${payouts.map((p) => html`
                     <tr><td>${human(p.paid_date)}</td><td>${p.method}</td>

@@ -217,7 +217,7 @@ export function registerListings(router) {
           <div class="panel">
             <div class="panel__head"><h2>Empty, not advertised</h2></div>
             <div class="panel__body panel__body--flush">
-              <div class="tablewrap"><table class="data">
+              <div class="tablewrap tablewrap--narrow"><table class="data">
                 <tbody>${unlisted.map((u) => html`
                   <tr>
                     <td>${u.line1}${u.label ? ` · Unit ${u.label}` : ""}<span class="cellsub">${u.city}</span></td>
@@ -234,7 +234,7 @@ export function registerListings(router) {
           <div class="panel__head"><h2>Listings</h2>
             <a class="pill outline sm" href="/feeds/listings.xml">View the feed</a></div>
           <div class="panel__body panel__body--flush">
-            ${rows.length ? html`<div class="tablewrap"><table class="data">
+            ${rows.length ? html`<div class="tablewrap tablewrap--narrow"><table class="data">
               <thead><tr><th>Unit</th><th>Headline</th><th class="num">Rent</th>
                 <th>Status</th><th>Syndicated</th><th class="shrink"></th></tr></thead>
               <tbody>${rows.map((l) => html`

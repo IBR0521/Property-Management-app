@@ -177,7 +177,7 @@ export function registerLeases(router) {
         <div class="panel">
           <div class="panel__body doc">${raw(markdownToHtml(doc.body_md))}</div>
           <div class="panel__foot">
-            Document reference ${doc.id.slice(-8)} · fingerprint ${doc.body_hash.slice(0, 16)}
+            Document reference ${doc.id.slice(-8)} · fingerprint ${doc.body_hash.slice(0, 16)}…
           </div>
         </div>
 
@@ -185,13 +185,19 @@ export function registerLeases(router) {
           <div class="panel">
             <div class="panel__head"><h2>Signed by</h2></div>
             <div class="panel__body">
-              <dl class="dl">
+              <div class="sig">
                 ${state.signatures.map((s) => html`
-                  <div>
-                    <dt>${PARTY_LABEL[s.party_type] || s.party_type}</dt>
-                    <dd>${s.typed_name}<span class="cellsub">${humanStamp(s.signed_at)} · ${s.party_email}</span></dd>
+                  <div class="sig__row">
+                    <div class="sig__who">
+                      <b>${s.typed_name}</b>
+                      <span class="sig__role">${PARTY_LABEL[s.party_type] || s.party_type}</span>
+                    </div>
+                    <div class="sig__meta">
+                      <span>${humanStamp(s.signed_at)}</span>
+                      <span>${s.party_email}</span>
+                    </div>
                   </div>`)}
-              </dl>
+              </div>
             </div>
           </div>` : ""}
 
@@ -281,7 +287,7 @@ export function registerLeases(router) {
         ${tabs(LEASE_TABS, "documents")}
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
         <div class="panel"><div class="panel__body panel__body--flush">
-          ${docs.length ? html`<div class="tablewrap"><table class="data">
+          ${docs.length ? html`<div class="tablewrap tablewrap--narrow"><table class="data">
             <thead><tr><th>Document</th><th>Property</th><th>Status</th><th class="num">Signatures</th><th class="shrink"></th></tr></thead>
             <tbody>${docs.map((d) => html`
               <tr>
@@ -374,20 +380,29 @@ export function registerLeases(router) {
             <div class="panel">
               <div class="panel__head"><h2>Signatures</h2><p>${state.signatures.length} of ${state.required.length}</p></div>
               <div class="panel__body">
-                ${state.signatures.length ? html`<dl class="dl">
-                  ${state.signatures.map((s) => html`
-                    <div>
-                      <dt>${PARTY_LABEL[s.party_type] || s.party_type}</dt>
-                      <dd>${s.typed_name}
-                        <span class="cellsub">${humanStamp(s.signed_at)}</span>
-                        <span class="cellsub">${s.party_email}</span>
-                        <span class="cellsub">from ${s.ip}</span>
-                        <span class="cellsub">mark ${s.signature_hash.slice(0, 16)}…</span>
-                        <span class="cellsub">${hashesMatch(s.document_hash, doc.body_hash)
-                          ? "matches this document" : "SIGNED A DIFFERENT VERSION"}</span>
-                      </dd>
-                    </div>`)}
-                </dl>` : html`<p class="lede" style="margin:0">Nobody has signed yet.</p>`}
+                ${state.signatures.length ? html`<div class="sig">
+                  ${state.signatures.map((s) => {
+                    const ok = hashesMatch(s.document_hash, doc.body_hash);
+                    return html`
+                    <div class="sig__row">
+                      <div class="sig__who">
+                        <b>${s.typed_name}</b>
+                        <span class="sig__role">${PARTY_LABEL[s.party_type] || s.party_type}</span>
+                      </div>
+                      <div class="sig__meta">
+                        <span>${humanStamp(s.signed_at)}</span>
+                        <span>${s.party_email}</span>
+                        <span>IP ${s.ip}</span>
+                        <span class="sig__mark">mark ${s.signature_hash.slice(0, 24)}…</span>
+                      </div>
+                      <div style="margin-top:0.5rem">
+                        ${ok
+                          ? html`<span class="chip" data-tone="ok">matches this document</span>`
+                          : html`<span class="chip" data-tone="danger">signed a different version</span>`}
+                      </div>
+                    </div>`;
+                  })}
+                </div>` : html`<p class="lede" style="margin:0">Nobody has signed yet.</p>`}
                 ${state.outstanding.length ? html`
                   <p class="lede" style="margin:0.75rem 0 0">
                     Waiting on: ${state.outstanding.map((o) => PARTY_LABEL[o] || o).join(", ")}
@@ -400,7 +415,7 @@ export function registerLeases(router) {
               <div class="panel__body">
                 ${doc.token ? html`
                   <p class="lede" style="margin:0 0 0.5rem">Send this to whoever still has to sign.</p>
-                  <code style="font-size:0.75rem;word-break:break-all">${origin}/sign/${doc.token}</code>`
+                  <span class="longval">${origin}/sign/${doc.token}</span>`
                 : html`
                   <p class="lede" style="margin:0 0 0.75rem">
                     No link yet. Issuing one freezes this text as the version being signed.
@@ -413,7 +428,7 @@ export function registerLeases(router) {
                       <button class="pill solid" type="submit">Issue signing link</button>
                     </form>`}`}
               </div>
-              <div class="panel__foot">Fingerprint ${doc.body_hash.slice(0, 32)}…</div>
+              <div class="panel__foot">Fingerprint ${doc.body_hash.slice(0, 24)}…</div>
             </div>
 
             ${doc.status === "void" ? "" : html`
@@ -483,7 +498,7 @@ export function registerLeases(router) {
         ${tabs(LEASE_TABS, "templates")}
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
         <div class="panel"><div class="panel__body panel__body--flush">
-          ${rows.length ? html`<div class="tablewrap"><table class="data">
+          ${rows.length ? html`<div class="tablewrap tablewrap--narrow"><table class="data">
             <thead><tr><th>Name</th><th>Kind</th><th>Fields used</th><th class="shrink"></th></tr></thead>
             <tbody>${rows.map((t) => html`
               <tr>

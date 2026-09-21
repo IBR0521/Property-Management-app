@@ -62,6 +62,27 @@ export const db = postgres(url, {
   idle_timeout: 20,
   connect_timeout: 15,
   onnotice: () => {},
+  /* A pool that cannot reach the database emits an error on no particular
+     request, so there is nothing to await it and Node treats it as an
+     unhandled rejection — which kills the process. A dropped connection is
+     normal (a pooler recycling, a network blip, a laptop waking up) and must
+     degrade into a failed request, not a dead server. postgres.js retries on
+     its own; this only stops the rejection from being fatal. */
+  onclose: () => {},
+});
+
+db.options.onclose = () => {};
+
+/* Belt and braces for the same class of failure arriving through a path the
+   driver does not own. Logged loudly, because a connection that keeps dying is
+   worth knowing about, but never fatal. */
+process.on("unhandledRejection", (err) => {
+  const msg = err && err.message ? err.message : String(err);
+  if (/CONNECT_TIMEOUT|CONNECTION_|ECONNRESET|ETIMEDOUT|terminating connection/i.test(msg)) {
+    console.error(`[db] connection problem, continuing: ${msg}`);
+    return;
+  }
+  throw err;
 });
 
 /* --- placeholder translation --------------------------------------------- */

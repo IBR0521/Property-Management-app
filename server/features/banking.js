@@ -29,6 +29,7 @@ import { postJournal, ACCT } from "./accounting.js";
 
 const BANK_TABS = [
   { key: "reconcile", href: "/app/banking", label: "Reconcile" },
+  { key: "import", href: "/app/banking/import", label: "Import" },
   { key: "accounts", href: "/app/banking/accounts", label: "Accounts" },
 ];
 
@@ -338,6 +339,140 @@ async function verifyWebhook({ headers, rawBody }) {
   }
 }
 
+/* --- manual statements ----------------------------------------------------
+
+   Plaid Link is a browser widget: it needs client-side JavaScript to run, and
+   this app deliberately ships none. So the aggregator path cannot be the only
+   way in, or reconciliation is a screen that can never have anything on it.
+
+   Pasting statement lines is the path that works today, needs no credentials,
+   and produces exactly the same bank_txn rows the sync writes — so the matcher,
+   the journals and the audit trail are identical whichever way the data
+   arrived. */
+
+export async function createManualAccount({ companyId, name, mask, isTrust, createdBy }) {
+  const itemId = id();
+  await insert("bank_item", {
+    id: itemId, company_id: companyId, provider: "manual",
+    institution_name: name, status: "active",
+    created_at: stamp(), created_by: createdBy,
+  });
+  const acctId = id();
+  await insert("bank_account", {
+    id: acctId, company_id: companyId, item_id: itemId,
+    external_id: `manual:${acctId}`, name,
+    mask: mask || null, type: "depository", subtype: "checking",
+    is_trust: isTrust ? 1 : 0, active: 1, created_at: stamp(),
+  });
+  return acctId;
+}
+
+/* Accepts what people actually have: lines copied out of a statement or a CSV
+   export. Date, description, amount — in that order, comma or tab separated.
+   Quoted fields are handled, because descriptions contain commas.
+
+   Returns per-line results rather than throwing on the first bad row: a paste
+   of forty lines with one typo should import thirty-nine and say which one
+   failed, not reject the lot. */
+export function parseStatement(text) {
+  const rows = [];
+  const errors = [];
+  const lines = String(text || "").split(/\r?\n/);
+
+  lines.forEach((raw, i) => {
+    const line = raw.trim();
+    if (!line) return;
+    const cells = splitLine(line);
+    if (cells.length < 3) {
+      errors.push({ line: i + 1, text: line, why: "needs date, description and amount" });
+      return;
+    }
+
+    const date = normaliseDate(cells[0]);
+    if (!date) {
+      // A header row is the usual first line of a CSV export; skip it quietly.
+      if (i === 0 && /date/i.test(cells[0])) return;
+      errors.push({ line: i + 1, text: line, why: `"${cells[0]}" is not a date` });
+      return;
+    }
+    const amountCell = cells[cells.length - 1];
+    const cents = parseAmount(amountCell);
+    if (cents == null) {
+      errors.push({ line: i + 1, text: line, why: `"${amountCell}" is not an amount` });
+      return;
+    }
+    rows.push({ date, name: cells.slice(1, -1).join(" ").trim() || "(no description)", cents });
+  });
+  return { rows, errors };
+}
+
+function splitLine(line) {
+  if (line.includes("\t")) return line.split("\t").map((c) => c.trim());
+  const out = [];
+  let cur = "", quoted = false;
+  for (const ch of line) {
+    if (ch === '"') { quoted = !quoted; continue; }
+    if (ch === "," && !quoted) { out.push(cur.trim()); cur = ""; continue; }
+    cur += ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
+
+/* Banks export dates every way there is. ISO passes through; the ambiguous
+   slash forms are read US-style, which is what a US bank statement means. */
+function normaliseDate(v) {
+  const s = String(v || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const slash = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+  if (slash) {
+    const [, a, b, y] = slash;
+    const year = y.length === 2 ? `20${y}` : y;
+    return `${year}-${a.padStart(2, "0")}-${b.padStart(2, "0")}`;
+  }
+  return null;
+}
+
+/* Positive means money in, matching the convention the rest of this file uses.
+   Parentheses are how a statement writes a negative, and are respected. */
+function parseAmount(v) {
+  let s = String(v || "").trim();
+  let negative = false;
+  if (/^\(.*\)$/.test(s)) { negative = true; s = s.slice(1, -1); }
+  if (s.startsWith("-")) { negative = true; s = s.slice(1); }
+  s = s.replace(/[$,\s]/g, "");
+  if (!/^\d+(\.\d{1,2})?$/.test(s)) return null;
+  const cents = Math.round(Number(s) * 100);
+  return negative ? -cents : cents;
+}
+
+export async function importStatement({ companyId, bankAccountId, text }) {
+  const account = await one(
+    "SELECT * FROM bank_account WHERE id = ? AND company_id = ?", bankAccountId, companyId);
+  const { rows, errors } = parseStatement(text);
+  let added = 0, duplicates = 0;
+
+  for (const r of rows) {
+    /* Statements carry no transaction id, so one is derived from the line
+       itself. Importing the same statement twice therefore changes nothing —
+       the same guarantee the Plaid path gets from its provider id. */
+    const external =
+      `manual:${account.id}:${sha256([r.date, r.name, r.cents].join("|")).slice(0, 32)}`;
+    try {
+      await insert("bank_txn", {
+        id: id(), company_id: companyId, bank_account_id: account.id,
+        external_id: external, posted_date: r.date, amount_cents: r.cents,
+        name_raw: r.name, pending: 0, state: "unmatched", created_at: stamp(),
+      });
+      added++;
+    } catch (err) {
+      if (String(err.message).includes("duplicate key")) duplicates++;
+      else throw err;
+    }
+  }
+  return { added, duplicates, errors, parsed: rows.length };
+}
+
 /* --- routes --------------------------------------------------------------- */
 
 export function registerBanking(router) {
@@ -363,8 +498,19 @@ export function registerBanking(router) {
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
         ${sealingAvailable() ? "" : notice("danger", "Encryption is not configured",
           "APP_ENCRYPTION_KEY is unset, so bank credentials cannot be stored. Linking is disabled until it is.")}
-        ${withProposals.length === 0 ? empty("Nothing to reconcile",
-            "Either every bank line is matched, or no account is linked yet.") : ""}
+        ${withProposals.length === 0 ? html`
+          <div class="panel">
+            <div class="panel__head"><h2>Nothing to reconcile</h2></div>
+            <div class="panel__body">
+              <p class="lede" style="margin:0 0 0.875rem">
+                Either every bank line is matched, or nothing has been imported yet.
+              </p>
+              <div class="btnrow">
+                <a class="pill solid sm" href="/app/banking/import">Import a statement</a>
+                <a class="pill outline sm" href="/app/banking/accounts">Set up an account</a>
+              </div>
+            </div>
+          </div>` : ""}
         ${withProposals.map(({ txn, proposals }) => html`
           <div class="panel">
             <div class="panel__head">
@@ -424,6 +570,52 @@ export function registerBanking(router) {
     redirect(ctx.res, `/app/banking?m=${encodeURIComponent("Line ignored.")}`);
   });
 
+
+  router.post("/app/banking/accounts/manual", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const name = String(ctx.fields.name || "").trim();
+    if (name.length < 2) {
+      return redirect(ctx.res, `/app/banking/accounts?m=${encodeURIComponent("Give the account a name.")}`);
+    }
+    await createManualAccount({
+      companyId: cid, name, mask: String(ctx.fields.mask || "").replace(/\D/g, "").slice(-4),
+      isTrust: ctx.fields.is_trust === "yes", createdBy: ctx.staff.id,
+    });
+    redirect(ctx.res, `/app/banking/import?m=${encodeURIComponent("Account added. Paste a statement to start reconciling.")}`);
+  });
+
+  router.get("/app/banking/import", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const accounts = await all(
+      "SELECT id, name, mask FROM bank_account WHERE company_id = ? AND active = 1 ORDER BY name", cid);
+    sendHtml(ctx.res, appPage({
+      staff: ctx.staff, csrf: ctx.csrf, active: "banking", counts: await navCounts(cid),
+      title: "Import a statement", subtitle: "Paste the lines from your bank",
+      body: html`
+        ${tabs(BANK_TABS, "import")}
+        ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
+        ${accounts.length
+          ? importForm({ csrf: ctx.csrf, accounts, error: ctx.query.e })
+          : empty("No account yet", "Add one under Accounts first, then paste a statement against it.")}`,
+    }));
+  });
+
+  router.post("/app/banking/import", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const f = ctx.fields;
+    const text = String(f.statement || "");
+    if (!text.trim()) {
+      return redirect(ctx.res, `/app/banking/import?e=${encodeURIComponent("Paste some statement lines first.")}`);
+    }
+    const res = await importStatement({
+      companyId: cid, bankAccountId: String(f.bank_account_id || ""), text,
+    });
+    const parts = [`${res.added} line(s) imported`];
+    if (res.duplicates) parts.push(`${res.duplicates} already there`);
+    if (res.errors.length) parts.push(`${res.errors.length} could not be read`);
+    redirect(ctx.res, `/app/banking?m=${encodeURIComponent(parts.join(" · "))}`);
+  });
+
   router.get("/app/banking/accounts", async (ctx) => {
     const cid = ctx.staff.company_id;
     const items = await all("SELECT * FROM bank_item WHERE company_id = ? ORDER BY created_at", cid);
@@ -453,8 +645,37 @@ export function registerBanking(router) {
                 <td>${a.subtype || a.type || "—"}</td>
                 <td class="num">${a.balance_cents == null ? "—" : usd(Number(a.balance_cents))}</td>
               </tr>`)}</tbody></table></div>`
-            : empty("No accounts linked", "Link a bank to start importing transactions.")}
+            : empty("No accounts yet", "Add one below, then paste a statement against it.")}
         </div></div>
+        <div class="panel">
+          <div class="panel__head"><h2>Add an account</h2></div>
+          <div class="panel__body">
+            <p class="lede" style="margin:0 0 0.875rem">
+              An account you reconcile by pasting statements. No credentials, nothing to connect.
+            </p>
+            <form method="post" action="/app/banking/accounts/manual" class="formgrid">
+              <input type="hidden" name="_csrf" value="${ctx.csrf}" />
+              <div class="formgrid formgrid--2">
+                <div class="field">
+                  <label for="name">Account name</label>
+                  <input id="name" name="name" type="text" required maxlength="80"
+                         placeholder="Operating — Huntington" />
+                </div>
+                <div class="field">
+                  <label for="mask">Last four digits</label>
+                  <input id="mask" name="mask" type="text" inputmode="numeric" maxlength="4" />
+                </div>
+              </div>
+              <div class="field">
+                <label class="consent">
+                  <input type="checkbox" name="is_trust" value="yes" />
+                  <span>This is a trust account holding client money</span>
+                </label>
+              </div>
+              <button class="pill solid" type="submit">Add account</button>
+            </form>
+          </div>
+        </div>
         <div class="panel">
           <div class="panel__head"><h2>How linking works</h2></div>
           <div class="panel__body">
@@ -467,4 +688,41 @@ export function registerBanking(router) {
         </div>`,
     }));
   });
+}
+
+function importForm({ csrf, accounts, error }) {
+  return html`
+    ${error ? notice("warn", null, decodeURIComponent(error)) : ""}
+    <div class="panel">
+      <div class="panel__head"><h2>Paste statement lines</h2></div>
+      <div class="panel__body">
+        <form method="post" action="/app/banking/import" class="formgrid">
+          <input type="hidden" name="_csrf" value="${csrf}" />
+          <div class="field">
+            <label for="bank_account_id">Account</label>
+            <select id="bank_account_id" name="bank_account_id" required>
+              ${accounts.map((a) => html`
+                <option value="${a.id}">${a.name}${a.mask ? ` ••${a.mask}` : ""}</option>`)}
+            </select>
+          </div>
+          <div class="field">
+            <label for="statement">Lines</label>
+            <textarea id="statement" name="statement" rows="12" required
+                      style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.8125rem"
+                      placeholder="2026-09-03, RENT ACH PRIYA ANAND, 1450.00
+09/05/2026, BRIGHTWIRE ELECTRIC INV BW-1, -1800.00
+2026-09-07, MONTHLY SERVICE CHARGE, (12.50)"></textarea>
+            <span class="field__help">
+              Date, description, amount — one per line, comma or tab separated. Straight from a
+              CSV export or copied out of online banking. A header row is ignored.
+            </span>
+          </div>
+          <button class="pill solid" type="submit">Import</button>
+        </form>
+      </div>
+      <div class="panel__foot">
+        Money in is positive, money out negative — brackets and a leading minus both work.
+        Importing the same statement twice changes nothing.
+      </div>
+    </div>`;
 }

@@ -150,10 +150,22 @@ const VENDORS = [
 const vendors = [];
 for (const v of VENDORS) {
   const vid = id();
+  /* Compliance, because a demo where every contractor is blocked is a demo of
+     a broken app. Most are in date; one is deliberately lapsed so the barrier
+     is visible doing its job rather than only described in the README. */
+  const lapsed = v.trade === "pest";
   await insert("vendor", {
     id: vid, company_id: companyId, name: v.name, trade: v.trade,
     phone: v.phone, email: `dispatch@${v.trade}.test`,
     after_hours: v.afterHours, active: 1, created_at: now,
+    legal_name: `${v.name} LLC`,
+    address: "Columbus, OH",
+    license_no: `OH-${String(1000 + vendors.length * 7)}`,
+    license_expires: lapsed ? "2025-04-30" : "2028-03-31",
+    gl_carrier: "Buckeye Mutual", gl_expires: lapsed ? "2025-06-30" : "2028-01-31",
+    wc_carrier: "Ohio Employers", wc_expires: lapsed ? "2025-02-28" : "2027-11-30",
+    w9_received_at: "2025-01-10", tax_classification: "llc", is_1099: 1,
+    onboarding_state: lapsed ? "documents_pending" : "approved",
   });
   for (const c of v.cats) {
     await insert("routing_rule", { id: id(), company_id: companyId, category: c, vendor_id: vid, rank: 1 });

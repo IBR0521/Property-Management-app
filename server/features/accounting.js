@@ -234,32 +234,30 @@ export function registerAccounting(router) {
         ${totalDr !== totalCr ? notice("danger", "The book does not balance",
           "This should be impossible — the database rejects unbalanced journals. Investigate before trusting any report on this page.") : ""}
         <div class="panel">
-          <div class="panel__head"><h2>Period</h2></div>
-          <div class="panel__body">
-            <form method="get" action="/app/accounting" class="formgrid formgrid--2">
-              <div class="field"><label for="from">From</label>
-                <input id="from" name="from" type="date" value="${from}" /></div>
-              <div class="field"><label for="to">To</label>
-                <input id="to" name="to" type="date" value="${to}" /></div>
-              <button class="pill outline" type="submit">Apply</button>
-            </form>
-          </div>
-        </div>
-        <div class="panel"><div class="panel__body panel__body--flush">
-          <div class="tablewrap"><table class="data">
-            <thead><tr><th>Code</th><th>Account</th><th>Type</th>
+          <form method="get" action="/app/accounting" class="filterbar">
+            <div class="field"><label for="from">From</label>
+              <input id="from" name="from" type="date" value="${from}" /></div>
+            <div class="field"><label for="to">To</label>
+              <input id="to" name="to" type="date" value="${to}" /></div>
+            <button class="pill outline sm" type="submit">Apply</button>
+            ${from || to ? html`<a class="pill outline sm" href="/app/accounting">Clear</a>` : ""}
+            <span class="filterbar__note">${from || to ? "filtered" : "all time"}</span>
+          </form>
+          <div class="panel__body panel__body--flush">
+          <div class="tablewrap tablewrap--narrow"><table class="data">
+            <thead><tr><th>Account</th>
               <th class="num">Debits</th><th class="num">Credits</th><th class="num">Balance</th></tr></thead>
             <tbody>${rows.map((r) => html`
               <tr>
-                <td>${r.code}</td>
-                <td>${r.name}${r.is_trust ? html` <span class="chip" data-tone="brand">trust</span>` : ""}</td>
-                <td>${r.type}</td>
+                <td><b>${r.code}</b> ${r.name}
+                  ${r.is_trust ? html` <span class="chip" data-tone="brand">trust</span>` : ""}
+                  <span class="cellsub">${r.type}</span></td>
                 <td class="num">${r.debits ? usd(r.debits) : "—"}</td>
                 <td class="num">${r.credits ? usd(r.credits) : "—"}</td>
                 <td class="num"><b>${usd(r.balance)}</b></td>
               </tr>`)}</tbody>
             <tfoot><tr>
-              <td colspan="3"><b>Total</b></td>
+              <td><b>Total</b></td>
               <td class="num"><b>${usd(totalDr)}</b></td>
               <td class="num"><b>${usd(totalCr)}</b></td>
               <td class="num">${totalDr === totalCr ? "—" : html`<b>${usd(totalDr - totalCr)}</b>`}</td>
@@ -286,7 +284,7 @@ export function registerAccounting(router) {
         ${tabs(ACCOUNTING_TABS, "journals")}
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
         <div class="panel"><div class="panel__body panel__body--flush">
-          ${rows.length ? html`<div class="tablewrap"><table class="data">
+          ${rows.length ? html`<div class="tablewrap tablewrap--narrow"><table class="data">
             <thead><tr><th>Date</th><th>Memo</th><th>Source</th><th class="num">Amount</th><th class="shrink"></th></tr></thead>
             <tbody>${rows.map((r) => html`
               <tr>
@@ -322,7 +320,7 @@ export function registerAccounting(router) {
             <span class="tile__note">must be zero</span></div>
         </div>
         <div class="panel"><div class="panel__body panel__body--flush">
-          <div class="tablewrap"><table class="data">
+          <div class="tablewrap tablewrap--narrow"><table class="data">
             <thead><tr><th>Code</th><th>Account</th><th class="num">Balance</th></tr></thead>
             <tbody>${pos.rows.map((r) => html`
               <tr><td>${r.code}</td><td>${r.name}</td><td class="num">${usd(r.balance)}</td></tr>`)}</tbody>
@@ -395,7 +393,7 @@ export function registerAccounting(router) {
         ${j.reverses_id ? notice(null, "This is a reversal",
           html`It undoes <a href="/app/accounting/j/${j.reverses_id}">the original journal</a>.`) : ""}
         <div class="panel"><div class="panel__body panel__body--flush">
-          <div class="tablewrap"><table class="data">
+          <div class="tablewrap tablewrap--narrow"><table class="data">
             <thead><tr><th>Account</th><th>Memo</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead>
             <tbody>${splits.map((s) => html`
               <tr>

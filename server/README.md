@@ -725,3 +725,72 @@ To turn it on, add to `vercel.json` (Hobby allows daily granularity):
     "crons": [{ "path": "/api/cron", "schedule": "0 9 * * *" }]
 
 and set `CRON_SECRET`, without which the handler refuses to run on Vercel.
+
+---
+
+# Polish pass
+
+A walk through every screen, finding what was broken rather than guessing.
+
+## Things that were actually broken
+
+**The lease document had no styling at all.** `.doc` was referenced in
+`features/leases.js` and defined nowhere, so a compiled lease rendered with
+browser-default headings — an `h1` twice the size of anything else in the app,
+headings jammed against the paragraph above, no measure. It looked like a
+broken web page, which is a poor thing for a legal instrument to look like at
+the moment somebody decides whether to sign it. Now it uses the app's own type
+scale with a 44rem measure.
+
+**The column carrying the answer fell off the edge.** `table.data` sets
+`min-width: 46rem`, sized for the seven-column queue tables. The trial
+balance's Balance column and the contractor list's State column were both cut
+off. Fixed twice over: fewer columns (6→4 and 7→5, by folding type and trade
+into the cell they describe), and `.tablewrap--narrow` on the tables that do
+not need the wide minimum. `.tablewrap` also grew a scroll shadow, so a table
+that *is* wider than its column now says so instead of just looking truncated.
+
+**Signature records were unreadable.** Seven facts per signature rendered as a
+`.dl` in a sidebar: a 9rem label column against a 6rem value column, with a
+64-character hash overflowing it. Replaced with a stacked record, and long
+values (signing URLs, hashes) now use `.longval`, which wraps instead of
+pushing the panel wider than the page.
+
+**Banking had no entry point.** `storeItem()` existed and nothing called it.
+Plaid Link is a browser widget needing client-side JavaScript, which this app
+deliberately does not ship — so the aggregator could never have been the only
+way in. Statement import fixes that: paste lines from a CSV export or online
+banking, in whatever date format the bank uses, and get the same `bank_txn`
+rows the sync would write. Same matcher, same journals, same audit trail. The
+line's own content is hashed into its id, so importing the same statement twice
+changes nothing.
+
+**Every contractor was blocked.** Migration 009 added the insurance columns as
+NULL, so all eight seeded vendors came out with no cover on file and the list
+read "8 contractors cannot be used". The barrier was right; the data was
+missing. `seed.js` now records compliance, and the existing rows were
+backfilled — two are lapsed on purpose, so the barrier is visible doing its job
+rather than only described here.
+
+**A dropped database connection killed the process.** A pool error arrives
+attached to no particular request, so Node saw an unhandled rejection and
+exited. A connection dropping is normal — a pooler recycling, a laptop waking
+up — and has to degrade into a failed request, not a dead server.
+
+**`.input` was a dead class** on the sign-in fields, styled by `.field input`
+all along.
+
+## Smaller things
+
+- Five new nav items shared two icons, which made the sidebar unscannable.
+  `cash`, `loop`, `wrench`, `key` and `doc` already existed and are now used.
+- The accounting date filter was a full panel above the data it filters,
+  pushing the table below the fold. It is one row on the panel it belongs to.
+- "Paid this year" read `$0.00` for anyone paid in a previous year, which looks
+  like a bug rather than a date range. The column names the year.
+- Both banking empty states were dead ends. They now offer the next step.
+
+## Verified
+
+33 routes green, no 500s, ledger balanced, no undefined CSS classes left in the
+app. Checked at 1440px, 1024px and 375px.
