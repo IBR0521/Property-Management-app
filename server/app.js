@@ -11,6 +11,9 @@
      /app/...                   the back office, staff session required
 */
 import { ready, NotFound } from "./lib/db.js";
+import { newRequestId, forRequest } from "./lib/logger.js";
+import { captureError } from "./lib/errors.js";
+import { DATABASE_URL, DATABASE_CA_CERT, BLOB_READ_WRITE_TOKEN, configSummary } from "./lib/config.js";
 import { createRouter } from "./lib/router.js";
 import { serveFromRoot, serveUpload } from "./lib/static.js";
 import { currentStaff, can, requiredCapability, roleLabel } from "./lib/auth.js";
@@ -64,6 +67,17 @@ export async function handle(req, res) {
   /* Scheme from the proxy, not assumed. This was hardcoded to http://, which
      meant ctx.url.protocol never read https and the session cookie never got
      its Secure flag in production. */
+  /* Before anything that can throw, so every log line and every error page
+     from this request — including the ones that never reach a handler — can be
+     traced to the same id. */
+  const requestId = newRequestId();
+  res.setHeader("X-Request-Id", requestId);
+
+  /* Declared out here so the catch can say which route failed and for whom.
+     Inside the try they would be out of scope exactly when they are wanted. */
+  let routePattern = null;
+  let actor = {};
+
   const scheme = isHttps(req) ? "https" : "http";
   const url = new URL(req.url, `${scheme}://${req.headers.host || "localhost"}`);
   const path = url.pathname.replace(/\/+$/, "") || "/";
@@ -103,12 +117,13 @@ export async function handle(req, res) {
           at: new Date().toISOString(),
           db: {
             reachable: dbOk,
-            remote: Boolean(process.env.DATABASE_URL),
+            remote: Boolean(DATABASE_URL),
             // encrypted always; verified only once a CA is supplied
-            tls: process.env.DATABASE_CA_CERT ? "verified" : "encrypted-unverified",
+            tls: DATABASE_CA_CERT ? "verified" : "encrypted-unverified",
             error: dbError,
           },
-          blob: Boolean(process.env.BLOB_READ_WRITE_TOKEN),
+          blob: Boolean(BLOB_READ_WRITE_TOKEN),
+          config: configSummary(),
         }, dbOk ? 200 : 503);
       }
     }
@@ -124,8 +139,12 @@ export async function handle(req, res) {
       return sendText(res, "Not found", 404);
     }
 
+    routePattern = hit.pattern;
+
     const ctx = {
       req, res, url, path,
+      requestId,
+      log: forRequest(requestId, { method: req.method, path }),
       params: hit.params,
       query: Object.fromEntries(url.searchParams),
       staff: null,
@@ -151,6 +170,8 @@ export async function handle(req, res) {
          handlers and missing in the twenty-first, and nothing tells you which.
          A route that needs a capability its holder lacks never reaches its
          handler. */
+      actor = { companyId: ctx.staff.company_id, staffId: ctx.staff.id };
+
       const needed = requiredCapability(path, req.method);
       if (needed && !can(ctx.staff, needed)) {
         console.warn(`[403] ${req.method} ${path} — ${ctx.staff.email} (${ctx.staff.role}) lacks ${needed}`);
@@ -184,8 +205,13 @@ export async function handle(req, res) {
     const status = err instanceof HttpError ? err.status
       : err instanceof NotFound ? 404
       : 500;
-    if (status >= 500) console.error(`[500] ${req.method} ${path}`, err);
-    else console.warn(`[${status}] ${req.method} ${path} — ${err.message}`);
+    const rlog = forRequest(requestId, { method: req.method, path });
+    if (status >= 500) {
+      rlog.error("request failed", { status, err });
+      captureError(err, { requestId, route: routePattern, ...actor });
+    } else {
+      rlog.warn("request rejected", { status, reason: err.message });
+    }
 
     if (res.headersSent) return res.end();
 
@@ -200,12 +226,18 @@ export async function handle(req, res) {
       : "Something went wrong at our end. Try again, or call us if it keeps happening.";
 
     const wantsJson = (req.headers.accept || "").includes("application/json");
-    if (wantsJson) return sendJson(res, { error: safe }, status);
-    sendHtml(res, errorPage(status, safe), status);
+    if (wantsJson) return sendJson(res, { error: safe, requestId }, status);
+    sendHtml(res, errorPage(status, safe, requestId), status);
   }
 }
 
-function errorPage(status, message) {
-  const safe = String(message).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${status}</title><link rel="stylesheet" href="/assets/css/styles.css"><link rel="stylesheet" href="/app-assets/app.css"></head><body><div class="pub" style="max-width:30rem"><h1>${status === 404 ? "Not found" : status === 403 ? "Expired" : "Something broke"}</h1><p class="lede">${safe}</p><p style="margin-top:1.5rem"><a class="pill solid" href="/app">Back to the app</a></p></div></body></html>`;
+function errorPage(status, message, requestId) {
+  const esc = (v) => String(v).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+  const safe = esc(message);
+  /* Only on a server fault. A 404 needs no reference number, and printing one
+     on every expired form trains people to ignore it. */
+  const ref = status >= 500 && requestId
+    ? `<p style="margin-top:1rem;font-size:0.75rem;color:var(--ink-soft)">Reference <code>${esc(requestId)}</code> — quote this if you contact us.</p>`
+    : "";
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${status}</title><link rel="stylesheet" href="/assets/css/styles.css"><link rel="stylesheet" href="/app-assets/app.css"></head><body><div class="pub" style="max-width:30rem"><h1>${status === 404 ? "Not found" : status === 403 ? "Expired" : "Something broke"}</h1><p class="lede">${safe}</p>${ref}<p style="margin-top:1.5rem"><a class="pill solid" href="/app">Back to the app</a></p></div></body></html>`;
 }

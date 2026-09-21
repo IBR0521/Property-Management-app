@@ -7,8 +7,11 @@ import { createServer } from "node:http";
 import { handle } from "./app.js";
 import { startScheduler } from "./lib/scheduler.js";
 import { get } from "./lib/db.js";
+import { PORT, DATABASE_URL, assertConfig } from "./lib/config.js";
 
-const PORT = Number(process.env.PORT || 4300);
+
+
+assertConfig();
 
 createServer(handle).listen(PORT, async () => {
   const company = await get("SELECT name FROM company LIMIT 1");
@@ -16,7 +19,7 @@ createServer(handle).listen(PORT, async () => {
   console.log(`  ${company ? company.name : "no company yet — run: npm run seed"}`);
   console.log(`  http://localhost:${PORT}/app   (back office)`);
   console.log(`  http://localhost:${PORT}/      (marketing site)`);
-  console.log(`  db: ${process.env.DATABASE_URL || "file:data/app.db"}\n`);
+  console.log(`  db: ${DATABASE_URL || "file:data/app.db"}\n`);
 
   // In serverless this is a cron hitting /api/cron instead; see vercel.json.
   startScheduler().catch((err) => console.error("[scheduler] failed to start", err));

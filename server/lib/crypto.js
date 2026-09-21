@@ -16,6 +16,7 @@
    The version prefix is there so the format can change without a migration
    that has to guess what it is looking at. */
 import { createCipheriv, createDecipheriv, randomBytes, createHash, timingSafeEqual } from "node:crypto";
+import { APP_ENCRYPTION_KEY } from "./config.js";
 
 const ALGO = "aes-256-gcm";
 const IV_BYTES = 12;          // 96 bits, the size GCM is specified for
@@ -27,7 +28,7 @@ let cached;
    secret manager produces can be pasted in without a conversion step. */
 function key() {
   if (cached) return cached;
-  const raw = process.env.APP_ENCRYPTION_KEY;
+  const raw = APP_ENCRYPTION_KEY;
   if (!raw) {
     throw new Error(
       "APP_ENCRYPTION_KEY is not set. Generate one with:\n" +

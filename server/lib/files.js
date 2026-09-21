@@ -27,6 +27,7 @@ export const UPLOAD_DIR = join(DATA_DIR, "uploads");
    first local write instead, which is the only time it is needed. */
 import { id } from "./ids.js";
 import { IMAGE_TYPES, DOC_TYPES, LIMITS, BadRequest } from "./http.js";
+import { BLOB_READ_WRITE_TOKEN, IS_SERVERLESS } from "./config.js";
 
 const EXT = {
   "image/jpeg": ".jpg",
@@ -52,9 +53,9 @@ function sniff(buf) {
   return null;
 }
 
-const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN;
+const BLOB_TOKEN = BLOB_READ_WRITE_TOKEN;
 export const USING_BLOB = Boolean(BLOB_TOKEN);
-const SERVERLESS = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const SERVERLESS = IS_SERVERLESS;
 
 /* Resolves what is stored in the database to something a browser can fetch. */
 export function fileUrl(stored) {

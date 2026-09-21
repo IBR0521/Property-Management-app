@@ -9,16 +9,18 @@
 import { tick } from "../server/lib/scheduler.js";
 import { runLateFeeSweep } from "../server/lib/latefees.js";
 import { ready } from "../server/lib/db.js";
+import { CRON_SECRET, IS_SERVERLESS } from "../server/lib/config.js";
 
 export default async function handler(req, res) {
   /* Vercel signs its cron requests with CRON_SECRET. Without this check the
      endpoint is an open trigger for everyone's reminders. */
-  const secret = process.env.CRON_SECRET;
-  if (secret && req.headers.authorization !== `Bearer ${secret}`) {
+  /* config.js already refuses to boot a deployed environment with no
+     CRON_SECRET, so by the time this runs the only case left is a laptop. */
+  if (CRON_SECRET && req.headers.authorization !== `Bearer ${CRON_SECRET}`) {
     res.statusCode = 401;
     return res.end("unauthorized");
   }
-  if (!secret && process.env.VERCEL) {
+  if (!CRON_SECRET && IS_SERVERLESS) {
     res.statusCode = 500;
     return res.end("CRON_SECRET is not set — refusing to run an unprotected scheduler");
   }

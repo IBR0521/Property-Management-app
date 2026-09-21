@@ -12,6 +12,8 @@
    (sealing, storage, matching, the webhook's idempotency and verification
    path) is exercised by the test suite and does not depend on this file. */
 
+import { PLAID } from "./config.js";
+
 const ENVS = {
   sandbox: "https://sandbox.plaid.com",
   development: "https://development.plaid.com",
@@ -19,16 +21,16 @@ const ENVS = {
 };
 
 export function plaidConfigured() {
-  return Boolean(process.env.PLAID_CLIENT_ID && process.env.PLAID_SECRET);
+  return PLAID.configured;
 }
 
 function config() {
-  const clientId = process.env.PLAID_CLIENT_ID;
-  const secret = process.env.PLAID_SECRET;
+  const clientId = PLAID.clientId;
+  const secret = PLAID.secret;
   if (!clientId || !secret) {
     throw new Error("Plaid is not configured — set PLAID_CLIENT_ID and PLAID_SECRET.");
   }
-  const env = process.env.PLAID_ENV || "sandbox";
+  const env = PLAID.env;
   const base = ENVS[env];
   if (!base) throw new Error(`PLAID_ENV must be one of ${Object.keys(ENVS).join(", ")}`);
   return { clientId, secret, base, env };

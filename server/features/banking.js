@@ -26,6 +26,7 @@ import { navCounts } from "../lib/counts.js";
 import { seal, open as unseal, sealingAvailable, sha256 } from "../lib/crypto.js";
 import * as plaid from "../lib/plaid.js";
 import { postJournal, ACCT } from "./accounting.js";
+import { IS_SERVERLESS, PLAID as PLAID_CFG } from "../lib/config.js";
 
 const BANK_TABS = [
   { key: "reconcile", href: "/app/banking", label: "Reconcile" },
@@ -276,7 +277,7 @@ export async function handleWebhook({ body, headers, rawBody }) {
     : sha256(String(rawBody || JSON.stringify(body)));
 
   const verified = await verifyWebhook({ headers, rawBody });
-  if (!verified && process.env.VERCEL) {
+  if (!verified && IS_SERVERLESS) {
     return { status: 401, outcome: "unverified" };
   }
 
@@ -320,7 +321,7 @@ export async function handleWebhook({ body, headers, rawBody }) {
    tested here; the JWT path needs Plaid's key endpoint and is marked as the
    boundary it is. */
 async function verifyWebhook({ headers, rawBody }) {
-  const shared = process.env.PLAID_WEBHOOK_SECRET;
+  const shared = PLAID_CFG.webhookSecret;
   if (shared) {
     const given = String(headers["x-webhook-secret"] || "");
     return given.length === shared.length && sha256(given) === sha256(shared);

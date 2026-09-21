@@ -14,13 +14,14 @@ import { today, addDays, stamp, monthKey, dueDateFor, human, daysBetween } from 
 import { usd } from "./money.js";
 import { pruneSessions } from "./auth.js";
 import { prune as pruneRateHits } from "./ratelimit.js";
+import { DELIVERY_MODE } from "./config.js";
 
 const EVERY_MS = 10 * 60 * 1000;
 
 /* Delivery is off until someone wires a provider. Queued messages stay queued
    and the app says so, rather than marking them sent and quietly dropping a
    late-rent notice. See setup screen. */
-export const DELIVERY = { mode: process.env.DELIVERY_MODE || "none" };
+export const DELIVERY = { mode: DELIVERY_MODE };
 
 export async function startScheduler() {
   const result = await tick("boot");
