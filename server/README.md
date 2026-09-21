@@ -337,3 +337,44 @@ Three causes, all invisible on SQLite:
    concurrent queries are not serialised back into a queue.
 
 The remaining time is round trips, and co-location is what removes those.
+
+---
+
+# Database exposure
+
+Supabase publishes every table in the `public` schema through PostgREST, and by
+default grants `anon` and `authenticated` full privileges on all of them. The
+`anon` role is reached with the **publishable key**, which is designed to be
+public and normally ships in client-side code.
+
+For this application that default meant anyone holding that key could read:
+
+- `session.id` — and therefore impersonate a signed-in manager
+- `staff.password_hash`
+- every tenant's name, email and phone
+- the `token` columns on `work_order`, `owner_approval`, `owner_statement` and
+  `application` — which *are* the credentials for the tenant and owner links
+
+and write to any of it.
+
+`002_lockdown.sql` closes this with two independent layers:
+
+1. **RLS enabled on every table, with no policies.** Any role that does not
+   bypass RLS gets zero rows, always.
+2. **Privileges revoked from `anon` and `authenticated`**, including default
+   privileges so future tables do not inherit them. Even if a permissive policy
+   were added later by mistake, there is no grant behind it.
+
+This application is unaffected. It never uses PostgREST — it connects directly
+as `postgres`, which owns the tables and has `rolbypassrls`.
+
+`migrate()` re-runs the RLS sweep whenever a migration applies, so a table
+added later cannot arrive unprotected.
+
+Verified after applying: 36 of 36 tables with RLS, zero grants to anon or
+authenticated, and the REST API returning `401 / 42501 insufficient privilege`
+on every read and write attempt with the publishable key.
+
+**Still worth doing:** rotate the database password and the `sb_secret_…`
+service-role key. The service-role key bypasses RLS by design, so it is the one
+credential this lockdown does not defend against.

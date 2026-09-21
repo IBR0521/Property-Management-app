@@ -155,7 +155,28 @@ export async function migrate() {
     await run("INSERT INTO schema_migration (name, applied_at) VALUES (?, ?)", file, new Date().toISOString());
     console.log(`[db] applied ${file}`);
   }
+
+  /* A migration that adds a table would otherwise leave it exposed to the
+     REST API until someone remembered. Idempotent, and only runs when the
+     schema actually changed. */
+  if (pending.length) await enforceRowLevelSecurity();
   return pending.length;
+}
+
+async function enforceRowLevelSecurity() {
+  const unprotected = await all(
+    `SELECT tablename FROM pg_tables t
+      WHERE schemaname = 'public'
+        AND NOT EXISTS (SELECT 1 FROM pg_class c
+                         JOIN pg_namespace n ON n.oid = c.relnamespace
+                        WHERE n.nspname = 'public' AND c.relname = t.tablename
+                          AND c.relrowsecurity)`);
+  for (const row of unprotected) {
+    await db.unsafe(`ALTER TABLE public."${row.tablename}" ENABLE ROW LEVEL SECURITY`);
+  }
+  if (unprotected.length) {
+    console.log(`[db] row level security enabled on ${unprotected.length} table(s)`);
+  }
 }
 
 export class NotFound extends Error {}
