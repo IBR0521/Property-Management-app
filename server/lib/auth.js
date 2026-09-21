@@ -56,7 +56,9 @@ export async function currentStaff(req) {
   const sid = cookies(req)[SESSION_COOKIE];
   if (!sid) return null;
   const row = await get(
-    `SELECT s.*, c.name AS company_name, c.emergency_phone, c.phone AS company_phone
+    `SELECT s.*, c.name AS company_name, c.emergency_phone, c.phone AS company_phone,
+            c.slug AS company_slug, c.require_2fa, c.verified_at AS company_verified_at,
+            sess.id AS session_id, sess.totp_at
        FROM session sess
        JOIN staff s ON s.id = sess.staff_id
        JOIN company c ON c.id = s.company_id
@@ -238,3 +240,56 @@ export function requiredCapability(path, method = "GET") {
   return read ? read[1] : null;
 }
 
+/* --- the second factor ----------------------------------------------------
+
+   A session is created the moment a password checks out, but it is only half
+   authenticated until a second factor is presented. Keeping it as one session
+   rather than a separate "pending" object means there is one thing to expire,
+   one cookie, and no window where a half-finished login is a row nobody owns.
+
+   Two questions, deliberately separate. Whether this person *has* a second
+   factor, and whether *this session* has presented it. */
+export function hasSecondFactor(staff) {
+  return Boolean(staff?.totp_confirmed_at);
+}
+
+export function sessionIsElevated(staff) {
+  return Boolean(staff?.totp_at);
+}
+
+/* What the gate should do about it. Returns a path to send them to, or null
+   when they may proceed.
+
+   Enrolment comes before the challenge: a company that has just turned on
+   mandatory 2FA has staff who do not have it yet, and bouncing them to a
+   challenge they cannot answer would lock out everyone at once. */
+export function secondFactorRedirect(staff, path) {
+  if (!staff) return null;
+  // The pages that exist to resolve this must not themselves require it.
+  if (path.startsWith("/app/2fa") || path.startsWith("/app/account/2fa") || path === "/app/sign-out") {
+    return null;
+  }
+  if (hasSecondFactor(staff)) {
+    return sessionIsElevated(staff) ? null : "/app/2fa";
+  }
+  if (staff.require_2fa) return "/app/account/2fa?required=1";
+  return null;
+}
+
+export async function markSessionElevated(sessionId) {
+  await run("UPDATE session SET totp_at = ? WHERE id = ?", new Date().toISOString(), sessionId);
+}
+
+/* Every active staff row with this address, across companies.
+
+   The same person may legitimately work for two management firms — staff is
+   unique on (company_id, email), not on email — and sign-in used to take
+   whichever row came back first. That is the same class of bug as the public
+   pages taking the first company. */
+export async function staffByEmail(email) {
+  return await all(
+    `SELECT s.*, c.name AS company_name, c.slug AS company_slug
+       FROM staff s JOIN company c ON c.id = s.company_id
+      WHERE lower(s.email) = lower(?) AND s.active = 1
+      ORDER BY c.name`, String(email || ""));
+}

@@ -16,7 +16,7 @@ import { captureError } from "./lib/errors.js";
 import { DATABASE_URL, DATABASE_CA_CERT, BLOB_READ_WRITE_TOKEN, configSummary } from "./lib/config.js";
 import { createRouter } from "./lib/router.js";
 import { serveFromRoot, serveUpload } from "./lib/static.js";
-import { currentStaff, can, requiredCapability, roleLabel } from "./lib/auth.js";
+import { currentStaff, can, requiredCapability, roleLabel, secondFactorRedirect } from "./lib/auth.js";
 import {
   parseRequestBody, sendHtml, sendText, sendJson, redirect,
   HttpError, csrfToken, checkCsrf, Forbidden, isHttps,
@@ -40,6 +40,7 @@ import { registerListings } from "./features/listings.js";
 import { registerMessages } from "./features/messages.js";
 import { registerSignup } from "./features/signup.js";
 import { registerStaff } from "./features/staff.js";
+import { registerTwoFactor } from "./features/twofactor.js";
 
 const router = createRouter();
 
@@ -63,6 +64,7 @@ registerListings(router);
 registerMessages(router);
 registerSignup(router);
 registerStaff(router);
+registerTwoFactor(router);
 
 /* Routes that need a signed-in staff member. Everything under /app except the
    sign-in pages, which register themselves as public. */
@@ -183,6 +185,21 @@ export async function handle(req, res) {
          A route that needs a capability its holder lacks never reaches its
          handler. */
       actor = { companyId: ctx.staff.company_id, staffId: ctx.staff.id };
+
+      /* A session with a password but no second factor is half authenticated.
+         Checked here, before the capability gate, for the same reason the
+         capability gate is here: a handler that has to remember is a handler
+         that eventually does not. */
+      const elevate = secondFactorRedirect(ctx.staff, path);
+      if (elevate) {
+        if (req.method !== "GET") {
+          /* A POST cannot be replayed after the detour, so it is refused
+             rather than silently dropped on the way to a login page. */
+          return sendHtml(res, errorPage(403,
+            "Your session needs a second factor before it can change anything. Sign in again."), 403);
+        }
+        return redirect(res, elevate);
+      }
 
       const needed = requiredCapability(path, req.method);
       if (needed && !can(ctx.staff, needed)) {
