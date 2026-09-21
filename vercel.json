@@ -1,12 +1,22 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-
+  "regions": [
+    "pdx1"
+  ],
   "functions": {
-    "api/index.js": { "memory": 512, "maxDuration": 15 },
-    "api/cron.js":  { "memory": 512, "maxDuration": 60 }
+    "api/index.js": {
+      "memory": 512,
+      "maxDuration": 15
+    },
+    "api/cron.js": {
+      "memory": 512,
+      "maxDuration": 60
+    }
   },
-
   "rewrites": [
-    { "source": "/((?!api/).*)", "destination": "/api/index" }
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/api/index"
+    }
   ]
 }

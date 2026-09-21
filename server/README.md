@@ -290,3 +290,50 @@ comfortably.
 
 **Nothing in this app costs money to run.** There is no payment API, no paid
 third-party service, and no metered call anywhere in the code.
+
+
+---
+
+# Latency and region
+
+This app makes many small queries per page. On SQLite that cost nothing. On a
+network database each one is a round trip, and the difference is the whole
+performance story.
+
+**Put the function in the same region as the database.** `vercel.json` pins
+`regions: ["pdx1"]` (Oregon) because the Supabase project is in `us-west-2`.
+Vercel otherwise defaults to `iad1` in Washington DC — the opposite coast, and
+roughly 70ms per query. Page rendering fifteen queries would spend a second
+waiting on the network before writing a byte.
+
+If you move the database, move this too:
+
+| Supabase region | Vercel region |
+|---|---|
+| us-west-2 | `pdx1` |
+| us-east-1 | `iad1` |
+| eu-west-1, eu-west-2 | `dub1` or `lhr1` |
+| eu-central-1 | `fra1` |
+| ap-southeast-1 | `sin1` |
+
+**What was fixed to get here**, measured against the live database from a
+high-latency link (~500ms per round trip, which exaggerates everything and so
+makes the differences obvious):
+
+| Page | Before | After |
+|---|---|---|
+| `/app` | 31.1s | 9.7s |
+| `/app/compliance` | 34.1s | 5.2s |
+| `/app/portfolio` | 17.1s | 4.9s |
+
+Three causes, all invisible on SQLite:
+
+1. **`buildQueue` ran twice per page.** `navCounts` called it to read two
+   numbers off the end. It now issues eight `COUNT`s concurrently instead.
+2. **An N+1 on obligations.** The queue resolved each overdue obligation's
+   address with its own query. Three queries now build a lookup for the page.
+3. **Everything was sequential.** The queue's eight datasets, and compliance's
+   three, are fetched with `Promise.all`. The connection pool is sized 4 so
+   concurrent queries are not serialised back into a queue.
+
+The remaining time is round trips, and co-location is what removes those.

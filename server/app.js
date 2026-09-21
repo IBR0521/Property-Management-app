@@ -74,9 +74,11 @@ export async function handle(req, res) {
       if (path === "/health") {
         let dbOk = false, dbError = null;
         try {
-          const { db } = await import("./lib/db.js");
-          await db.execute("SELECT 1");
-          dbOk = true;
+          // Uses the app's own helper rather than a driver method, so this
+          // check keeps working whatever the driver underneath is.
+          const { get } = await import("./lib/db.js");
+          const row = await get("SELECT 1 AS ok");
+          dbOk = row?.ok === 1;
         } catch (err) {
           dbError = err.message;
         }

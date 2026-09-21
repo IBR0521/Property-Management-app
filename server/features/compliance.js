@@ -30,22 +30,21 @@ const KINDS = [
 export function registerCompliance(router) {
   router.get("/app/compliance", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const rows = await all(
-      `SELECT o.*, r.label, r.kind, r.authority_note
-         FROM obligation o JOIN compliance_rule r ON r.id = o.rule_id
-        WHERE o.company_id = ? AND o.status IN ('open','overdue')
-        ORDER BY o.due_date`, cid);
-
-    // Subject labels are resolved in one pass rather than per row, so a long
-    // list stays one query per subject type instead of N.
-    const label = await subjectLabeller(cid);
+    /* Three independent reads, issued together. Sequentially this page cost
+       three full round trips before it rendered anything. */
+    const [rows, label, doneRecently] = await Promise.all([
+      all(`SELECT o.*, r.label, r.kind, r.authority_note
+             FROM obligation o JOIN compliance_rule r ON r.id = o.rule_id
+            WHERE o.company_id = ? AND o.status IN ('open','overdue')
+            ORDER BY o.due_date`, cid),
+      subjectLabeller(cid),
+      all(`SELECT o.*, r.label FROM obligation o JOIN compliance_rule r ON r.id = o.rule_id
+            WHERE o.company_id = ? AND o.status IN ('done','waived')
+            ORDER BY o.completed_at DESC LIMIT 10`, cid),
+    ]);
     const overdue = rows.filter((r) => r.status === "overdue");
     const dueSoon = rows.filter((r) => r.status === "open" && daysBetween(today(), r.due_date) <= 14);
     const later = rows.filter((r) => r.status === "open" && daysBetween(today(), r.due_date) > 14);
-    const doneRecently = await all(
-      `SELECT o.*, r.label FROM obligation o JOIN compliance_rule r ON r.id = o.rule_id
-        WHERE o.company_id = ? AND o.status IN ('done','waived')
-        ORDER BY o.completed_at DESC LIMIT 10`, cid);
 
     const group = (title, list, tone) => list.length ? html`
       <div class="panel">
@@ -242,21 +241,25 @@ function safeLeads(json) {
   }
 }
 
-/* Resolves an obligation's subject to something a human recognises. */
+/* Resolves an obligation's subject to something a human recognises.
+   Three lookups for the whole page, fetched together, rather than one query
+   per obligation. */
 async function subjectLabeller(companyId) {
-  const leases = new Map((await all(
-    `SELECT l.id, p.line1, u.label FROM lease l JOIN unit u ON u.id = l.unit_id
-       JOIN property p ON p.id = u.property_id WHERE l.company_id = ?`, companyId))
-    .map((r) => [r.id, `${r.line1}${r.label ? ` unit ${r.label}` : ""}`]));
-  const units = new Map((await all(
-    `SELECT u.id, p.line1, u.label FROM unit u JOIN property p ON p.id = u.property_id
-      WHERE u.company_id = ?`, companyId))
-    .map((r) => [r.id, `${r.line1}${r.label ? ` unit ${r.label}` : ""}`]));
-  const props = new Map((await all(
-    "SELECT id, line1 FROM property WHERE company_id = ?", companyId)).map((r) => [r.id, r.line1]));
+  const [leaseRows, unitRows, propRows] = await Promise.all([
+    all(`SELECT l.id, p.line1, u.label FROM lease l JOIN unit u ON u.id = l.unit_id
+           JOIN property p ON p.id = u.property_id WHERE l.company_id = ?`, companyId),
+    all(`SELECT u.id, p.line1, u.label FROM unit u JOIN property p ON p.id = u.property_id
+          WHERE u.company_id = ?`, companyId),
+    all("SELECT id, line1 FROM property WHERE company_id = ?", companyId),
+  ]);
 
-  return (type, sid) => {
-    const m = type === "lease" ? leases : type === "unit" ? units : type === "property" ? props : null;
-    return (m && m.get(sid)) || `${type} ${String(sid).slice(0, 8)}`;
+  const place = (line1, label) => `${line1}${label ? ` unit ${label}` : ""}`;
+  const maps = {
+    lease: new Map(leaseRows.map((r) => [r.id, place(r.line1, r.label)])),
+    unit: new Map(unitRows.map((r) => [r.id, place(r.line1, r.label)])),
+    property: new Map(propRows.map((r) => [r.id, r.line1])),
   };
+
+  return (type, sid) =>
+    (maps[type] && maps[type].get(sid)) || `${type} ${String(sid).slice(0, 8)}`;
 }

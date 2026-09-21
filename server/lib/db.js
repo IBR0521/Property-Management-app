@@ -37,9 +37,10 @@ export const db = postgres(url, {
   // Required by pgbouncer in transaction mode, which is what port 6543 is.
   prepare: false,
   ssl: "require",
-  // A serverless invocation handles one request; a pool of one avoids holding
-  // pooler slots open across a cold fleet.
-  max: Number(process.env.PG_POOL_MAX || (process.env.VERCEL ? 1 : 5)),
+  /* Pages issue their queries concurrently, so a pool of one would serialise
+     them again and undo the point. Four is enough for the widest page and
+     leaves plenty of headroom against Supabase's 200 client limit. */
+  max: Number(process.env.PG_POOL_MAX || 4),
   idle_timeout: 20,
   connect_timeout: 15,
   onnotice: () => {},
