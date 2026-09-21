@@ -41,6 +41,7 @@ import { registerMessages } from "./features/messages.js";
 import { registerSignup } from "./features/signup.js";
 import { registerStaff } from "./features/staff.js";
 import { registerTwoFactor } from "./features/twofactor.js";
+import { registerCompany } from "./features/company.js";
 
 const router = createRouter();
 
@@ -65,6 +66,7 @@ registerMessages(router);
 registerSignup(router);
 registerStaff(router);
 registerTwoFactor(router);
+registerCompany(router);
 
 /* Routes that need a signed-in staff member. Everything under /app except the
    sign-in pages, which register themselves as public. */

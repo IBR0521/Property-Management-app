@@ -21,6 +21,7 @@
    no fee — inventing a charge because a field was blank is how a company ends
    up refunding a year of them. */
 import { all, get, one, run, insert, tx } from "./db.js";
+import { todayIn } from "./timezone.js";
 import { id } from "./ids.js";
 import { stamp, today, monthKey, daysBetween } from "./dates.js";
 
@@ -71,44 +72,67 @@ export function feeFor(lease, { rentCents, daysLate, graceDays }) {
 /* Which leases are late and unpaid, with everything the calculation needs. One
    query rather than a loop of them: a serverless function pays a round trip for
    each, and this runs over the whole portfolio. */
-async function candidates(asOf) {
-  const period = monthKey(asOf);
+/* Every active lease, with the timezone of the company that manages it.
+
+   The date filtering that used to happen here now happens per lease, because
+   "today" is not one date. A sweep running at 09:00 UTC is at 04:00 in
+   Columbus — still the previous day — and on the first of the month that is
+   the difference between a fee charged a day early and one charged correctly.
+   Rent is due on a calendar date where the building is. */
+async function candidates() {
   return await all(
     `SELECT l.*, u.id AS unit_id2, p.owner_id, p.id AS property_id,
-            l.company_id AS cid,
-            COALESCE((SELECT SUM(e.amount_cents) FROM ledger_entry e
-                       WHERE e.lease_id = l.id AND e.kind = 'rent_payment'
-                         AND e.date >= ?), 0)::bigint AS paid
+            l.company_id AS cid, c.timezone AS company_timezone
        FROM lease l
        JOIN unit u ON u.id = l.unit_id
        JOIN property p ON p.id = u.property_id
-      WHERE l.status = 'active'
-        AND l.start_date <= ?
-        AND NOT EXISTS (SELECT 1 FROM late_fee f WHERE f.lease_id = l.id AND f.period = ?)`,
-    `${period}-01`, asOf, period);
+       JOIN company c ON c.id = l.company_id
+      WHERE l.status = 'active'`);
+}
+
+/* Rent recorded against this lease for the period it is being judged on. Per
+   lease rather than in the sweep query, because each lease's period is derived
+   from its own company's calendar. */
+async function paidInPeriod(leaseId, period) {
+  const row = await get(
+    `SELECT COALESCE(SUM(amount_cents), 0)::bigint AS paid FROM ledger_entry
+      WHERE lease_id = ? AND kind = 'rent_payment' AND date >= ?`,
+    leaseId, `${period}-01`);
+  return Number(row?.paid || 0);
 }
 
 /* Runs the sweep. Returns counts; the caller decides what to do with them.
 
    `postJournal` is imported lazily because features/accounting.js imports from
    lib/*, and importing it at module scope here would close the loop. */
-export async function sweepLateFees({ asOf = today(), postedBy = "system" } = {}) {
-  const period = monthKey(asOf);
-  const out = { period, considered: 0, charged: 0, amountCents: 0, skipped: 0, duplicates: 0, noPolicy: 0 };
+/* `asOf` overrides every company's local date, which only a test wants. Left
+   undefined in production so each lease is judged on its own calendar. */
+export async function sweepLateFees({ asOf = null, postedBy = "system", now = new Date() } = {}) {
+  const out = { charged: 0, amountCents: 0, skipped: 0, duplicates: 0, noPolicy: 0, considered: 0 };
 
-  const rows = await candidates(asOf);
+  const rows = await candidates();
   out.considered = rows.length;
   if (!rows.length) return out;
 
   const { postJournal, ACCT } = await import("../features/accounting.js");
 
   for (const lease of rows) {
+    /* The company's date, not the server's. */
+    const localToday = asOf || todayIn(lease.company_timezone, now);
+    const period = monthKey(localToday);
+
+    if (lease.start_date > localToday) { out.skipped++; continue; }
+
+    const already = await get(
+      "SELECT id FROM late_fee WHERE lease_id = ? AND period = ?", lease.id, period);
+    if (already) { out.skipped++; continue; }
+
     const dueDay = Math.min(Math.max(Number(lease.rent_due_day) || 1, 1), 28);
     const dueDate = `${period}-${String(dueDay).padStart(2, "0")}`;
-    if (asOf <= dueDate) { out.skipped++; continue; }
+    if (localToday <= dueDate) { out.skipped++; continue; }
 
-    const daysLate = daysBetween(dueDate, asOf);
-    const outstanding = Number(lease.rent_cents) - Number(lease.paid);
+    const daysLate = daysBetween(dueDate, localToday);
+    const outstanding = Number(lease.rent_cents) - await paidInPeriod(lease.id, period);
     if (outstanding <= 0) { out.skipped++; continue; }
 
     const fee = feeFor(lease, {
@@ -128,20 +152,20 @@ export async function sweepLateFees({ asOf = today(), postedBy = "system" } = {}
 
         await insert("late_fee", {
           id: feeId, company_id: lease.cid, lease_id: lease.id, unit_id: lease.unit_id,
-          period, assessed_date: asOf, amount_cents: fee.amount, basis: fee.basis,
+          period, assessed_date: localToday, amount_cents: fee.amount, basis: fee.basis,
           rent_cents: lease.rent_cents, days_late: daysLate, created_at: stamp(),
         });
 
         await insert("ledger_entry", {
           id: entryId, company_id: lease.cid, owner_id: lease.owner_id,
           property_id: lease.property_id, unit_id: lease.unit_id, lease_id: lease.id,
-          date: asOf, kind: "other", amount_cents: fee.amount,
+          date: localToday, kind: "other", amount_cents: fee.amount,
           memo: `Late fee ${period} — ${fee.basis}`,
           source: "system", created_at: stamp(),
         });
 
         const jid = await postJournal({
-          companyId: lease.cid, date: asOf,
+          companyId: lease.cid, date: localToday,
           memo: `Late fee ${period}`,
           source: "late_fee", sourceType: "late_fee", sourceId: feeId, postedBy,
           splits: [

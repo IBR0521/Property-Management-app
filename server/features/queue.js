@@ -10,6 +10,7 @@ import { navCounts } from "../lib/counts.js";
 import { buildQueue } from "../lib/queue.js";
 import { outboxPending, DELIVERY, lastTickAt, tickIsStale, STALE_AFTER_HOURS } from "../lib/scheduler.js";
 import { describe as describeDelivery } from "../lib/delivery/mode.js";
+import { onboardingState } from "./signup.js";
 import { humanStamp } from "../lib/dates.js";
 import { human, today } from "../lib/dates.js";
 
@@ -41,6 +42,7 @@ export function registerQueue(router) {
         </span>
       </li>`;
 
+    const onboarding = await onboardingState(cid);
     const lastRun = await lastTickAt();
     const schedulerStale = tickIsStale(lastRun);
 
@@ -52,6 +54,29 @@ export function registerQueue(router) {
         <a class="pill outline" href="/report" target="_blank">Tenant form</a>
         <a class="pill solid" href="/app/maintenance/new">Log a repair</a>`,
       body: html`
+        ${onboarding.complete ? "" : html`
+          <div class="panel">
+            <div class="panel__head">
+              <h2>Getting set up</h2>
+              <p>${onboarding.done} of ${onboarding.total}</p>
+            </div>
+            <div class="panel__body panel__body--flush">
+              ${onboarding.steps.map((step) => html`
+                <div class="minirow">
+                  <div class="minirow__main">
+                    <b>${step.done ? "✓ " : ""}${step.label}</b>
+                    <span class="cellsub">${step.hint}</span>
+                  </div>
+                  ${step.done
+                    ? html`<span class="chip" data-tone="ok">done</span>`
+                    : html`<a class="pill outline sm" href="${step.href}">Do it</a>`}
+                </div>`)}
+            </div>
+            <div class="panel__foot">
+              This disappears once everything is ticked. Nothing here blocks you from working.
+            </div>
+          </div>`}
+
         ${(() => {
           /* Nothing else in the app can tell a manager the clocks have
              stopped. Obligations stop ageing, the delinquency ladder stops
