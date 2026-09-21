@@ -25,6 +25,7 @@ import { appPage, publicPage, notice, empty, tabs, PEOPLE_TABS } from "../views/
 import { navCounts } from "../lib/counts.js";
 import { storeMany, DOC_TYPES, fileUrl } from "../lib/files.js";
 import { check, clientIp } from "../lib/ratelimit.js";
+import { resolvePublicCompany, companyForToken } from "../lib/tenancy.js";
 
 const STATUS_TONE = {
   received: "warn", incomplete: "warn", screening: "brand",
@@ -33,8 +34,16 @@ const STATUS_TONE = {
 
 export function registerApplications(router) {
   /* --- public: apply ----------------------------------------------------- */
-  router.get("/apply", async (ctx) => {
-    const company = await one("SELECT * FROM company LIMIT 1");
+  router.get("/apply", async (ctx) => renderApply(ctx));
+  router.get("/c/:slug/apply", async (ctx) => renderApply(ctx));
+
+  async function renderApply(ctx) {
+    /* No token on this page — an applicant arrives from a listing or an
+       advert, not from a record. The slug in the path is what says whose
+       vacancies these are; without it, /apply served the first company's
+       units to everyone. */
+    const { company, reason } = await resolvePublicCompany(ctx);
+    if (!company) return sendHtml(ctx.res, applyNoCompanyPage(reason), reason === "none" ? 500 : 404);
     const units = await all(
       `SELECT u.id, u.label, u.beds, u.baths, u.market_rent_cents, p.line1, p.city
          FROM unit u JOIN property p ON p.id = u.property_id
@@ -110,14 +119,27 @@ export function registerApplications(router) {
           </div>
         </div>` : ""}`,
     }));
-  });
+  }
 
-  router.post("/apply", async (ctx) => {
+  router.post("/apply", async (ctx) => handleApply(ctx));
+  router.post("/c/:slug/apply", async (ctx) => handleApply(ctx));
+
+  async function handleApply(ctx) {
     const gate = await check("apply", clientIp(ctx.req));
     if (!gate.allowed) {
       return sendHtml(ctx.res, "Too many applications from this connection. Please call us instead.", 429);
     }
-    const company = await one("SELECT * FROM company LIMIT 1");
+    /* The chosen unit names its company; the slug covers the case where no
+       unit was picked and the form comes back with an error. */
+    const { company } = await resolvePublicCompany(ctx, {
+      tokenLookup: async () => {
+        const unitId = String(ctx.fields.unit_id || "");
+        if (!unitId) return null;
+        return await get(
+          `SELECT c.* FROM unit u JOIN company c ON c.id = u.company_id WHERE u.id = ?`, unitId);
+      },
+    });
+    if (!company) throw new BadRequest("We could not tell which company this application is for.");
     const f = ctx.fields;
     const unit = await get(
       "SELECT * FROM unit WHERE id = ? AND company_id = ?", String(f.unit_id || ""), company.id);
@@ -168,7 +190,7 @@ export function registerApplications(router) {
       }
     });
     redirect(ctx.res, `/a/${tok}`);
-  });
+  }
 
   /* --- public: applicant's own page, for documents ------------------------- */
   router.get("/a/:tok", async (ctx) => {
@@ -459,4 +481,21 @@ function safeItems(json) {
   } catch {
     return [];
   }
+}
+
+/* Named no company on purpose. Listing every company on the platform so a
+   visitor can choose is the portfolio-enumeration mistake one level up — the
+   applicant arrived from somewhere, and that somewhere should have carried
+   the answer. */
+function applyNoCompanyPage(reason) {
+  const message = reason === "none"
+    ? "This installation has no company set up yet."
+    : reason === "unknown-slug"
+    ? "That web address does not match a company we know."
+    : "This link is missing the company it belongs to. Use the link from the advert or the agent you spoke to.";
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">`
+    + `<meta name="viewport" content="width=device-width,initial-scale=1"><title>Not found</title>`
+    + `<link rel="stylesheet" href="/assets/css/styles.css"><link rel="stylesheet" href="/app-assets/app.css">`
+    + `</head><body><div class="pub" style="max-width:32rem"><h1>We need a little more</h1>`
+    + `<p class="lede">${message}</p></div></body></html>`;
 }

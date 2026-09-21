@@ -11,6 +11,7 @@
 import { insert, run, get } from "../../server/lib/db.js";
 import { id, token, stickerToken, ref } from "../../server/lib/ids.js";
 import { hashPassword } from "../../server/lib/auth.js";
+import { uniqueSlug } from "../../server/lib/slug.js";
 
 const now = () => new Date().toISOString();
 const today = () => now().slice(0, 10);
@@ -22,6 +23,11 @@ export async function makeCompany(name = "Test Property Co", extra = {}) {
   await insert("company", {
     id: cid, name, phone: "(614) 555-0100",
     emergency_phone: "(614) 555-0911",
+    slug: extra.slug || await uniqueSlug(name),
+    /* Fixtures are verified by default. A test about verification says so
+       explicitly; every other test would otherwise be testing the unverified
+       path by accident. */
+    verified_at: now(),
     created_at: now(), ...extra,
   });
   return cid;

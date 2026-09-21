@@ -25,6 +25,7 @@ import { storeMany, fileUrl } from "../lib/files.js";
 import { CATEGORIES, category, assess } from "../lib/triage.js";
 import { check, clientIp } from "../lib/ratelimit.js";
 import { sendNow } from "../lib/delivery/now.js";
+import { resolvePublicCompany, companyForUnitToken, publicPath } from "../lib/tenancy.js";
 import { complianceState } from "./vendors.js";
 
 const STATUS_TONE = {
@@ -44,9 +45,18 @@ export function registerMaintenance(router) {
     return redirect(ctx.res, `/report?u=${encodeURIComponent(ctx.params.tok)}`);
   });
 
-  router.get("/report", async (ctx) => {
-    const company = await get("SELECT * FROM company LIMIT 1");
-    if (!company) return sendHtml(ctx.res, "Not configured", 500);
+  router.get("/report", async (ctx) => renderReport(ctx));
+  router.get("/c/:slug/report", async (ctx) => renderReport(ctx));
+
+  async function renderReport(ctx) {
+    /* The sticker token names a unit, and a unit names its company. Resolving
+       in that order is the whole fix: the old code chose a company first and
+       then looked for the token inside it, so every sticker outside the first
+       company found nothing. */
+    const { company, reason } = await resolvePublicCompany(ctx, {
+      tokenLookup: () => companyForUnitToken(ctx.query.u),
+    });
+    if (!company) return sendHtml(ctx.res, whichCompanyPage(reason), reason === "none" ? 500 : 404);
 
     const unit = await unitByToken(company.id, ctx.query.u);
 
@@ -104,9 +114,12 @@ export function registerMaintenance(router) {
       lede: `${unit.line1}${unit.label ? `, unit ${unit.label}` : ""}`,
       body,
     }));
-  });
+  }
 
-  router.post("/report", async (ctx) => {
+  router.post("/report", async (ctx) => handleReport(ctx));
+  router.post("/c/:slug/report", async (ctx) => handleReport(ctx));
+
+  async function handleReport(ctx) {
     /* Anyone can reach this form, so anyone can script it. Generous enough for
        a real block of flats reporting a burst outage, tight enough that nobody
        fills the queue with thousands of jobs. */
@@ -114,7 +127,10 @@ export function registerMaintenance(router) {
     if (!gate.allowed) {
       return sendHtml(ctx.res, "Too many requests from this connection. Please call us instead.", 429);
     }
-    const company = await one("SELECT * FROM company LIMIT 1");
+    const { company } = await resolvePublicCompany(ctx, {
+      tokenLookup: () => companyForUnitToken(ctx.fields.unit_token),
+    });
+    if (!company) throw new BadRequest("We could not tell which company this form belongs to.");
     const f = ctx.fields;
     /* The unit arrives as its sticker token, never as a row id. A posted id
        would let anyone file against any unit by guessing a primary key; the
@@ -234,7 +250,7 @@ export function registerMaintenance(router) {
 
     const q = problems.length ? `?m=${encodeURIComponent(problems.join(" "))}` : "";
     redirect(ctx.res, `/t/${publicToken}${q}`);
-  });
+  }
 
   /* Tenant status page. The tokenised URL is the credential, which is why the
      token is 32 bytes and the page shows no other tenant's data. */
@@ -765,6 +781,23 @@ async function autoRoute({ company, woId, cat, unit, severity }) {
   }
   await update("work_order", woId, { status: "triaged", vendor_id: rule.vendor_id });
   await event(woId, "system", "triaged", `Routed to ${rule.name} (${rule.trade}) by category rule.`, 0);
+}
+
+/* Shown when a public page cannot tell which company it belongs to. It names
+   no company: listing every company on the platform so a visitor can pick is
+   the portfolio-enumeration mistake one level up. The person following a link
+   has one, and the link is what should have carried the answer. */
+function whichCompanyPage(reason) {
+  const message = reason === "none"
+    ? "This installation has no company set up yet."
+    : reason === "unknown-slug"
+    ? "That web address does not match a company we know."
+    : "This link is missing the company it belongs to. Use the link your property manager gave you, or scan the code inside your home.";
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">`
+    + `<meta name="viewport" content="width=device-width,initial-scale=1"><title>Not found</title>`
+    + `<link rel="stylesheet" href="/assets/css/styles.css"><link rel="stylesheet" href="/app-assets/app.css">`
+    + `</head><body><div class="pub" style="max-width:32rem"><h1>We need a little more</h1>`
+    + `<p class="lede">${message}</p></div></body></html>`;
 }
 
 /* --- resolving a unit without listing the portfolio ------------------------ */

@@ -8,7 +8,11 @@ import { signInPage } from "../views/layout.js";
 export function registerAuthRoutes(router) {
   router.get("/app/sign-in", async (ctx) => {
     if (ctx.staff) return redirect(ctx.res, "/app");
-    const company = await get("SELECT name FROM company LIMIT 1");
+    /* Branding only. With several companies there is no way to know whose
+       sign-in page this is until credentials arrive, so it shows the product
+       rather than guessing a customer's name at them. */
+    const { soleCompany } = await import("../lib/tenancy.js");
+    const company = await soleCompany();
     sendHtml(ctx.res, signInPage({
       company,
       csrf: ctx.csrf,
