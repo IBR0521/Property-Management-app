@@ -45,6 +45,14 @@ export function createRouter() {
       return routes.filter((r) => r.rx.test(pathname)).map((r) => r.method);
     },
     get size() { return routes.length; },
+
+    /* The registered table, for anything that must reason about every route
+       rather than one. The isolation test enumerates this instead of keeping
+       its own list, so a route added tomorrow is covered tomorrow rather than
+       whenever somebody remembers to add it twice. */
+    list() {
+      return routes.map((r) => ({ method: r.method, pattern: r.pattern, keys: [...r.keys] }));
+    },
   };
 }
 

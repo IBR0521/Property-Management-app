@@ -62,6 +62,12 @@ registerListings(router);
    sign-in pages, which register themselves as public. */
 const PUBLIC_APP_PATHS = new Set(["/app/sign-in", "/app/sign-out"]);
 
+/* Exported for the test suite, which asserts properties over every registered
+   route. Nothing in the application reads it. */
+export function registeredRoutes() {
+  return router.list();
+}
+
 export async function handle(req, res) {
 
   /* Scheme from the proxy, not assumed. This was hardcoded to http://, which

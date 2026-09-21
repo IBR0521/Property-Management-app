@@ -794,3 +794,128 @@ all along.
 
 33 routes green, no 500s, ledger balanced, no undefined CSS classes left in the
 app. Checked at 1440px, 1024px and 375px.
+
+---
+
+# Tests
+
+    npm test
+
+There was no automated test before this. Every property below had been
+verified once, by hand, at the moment it was written — which is another way of
+saying it was verified until the next refactor. 57 tests now run in about four
+seconds.
+
+## What they cover
+
+**The nine invariants**, one test each, named after the promise rather than the
+function. An emergency escalates during the request and shows the stop card; a
+routine repair does not. Spend over an owner's threshold parks the job and
+records a pending approval. Lapsed liability blocks dispatch, lapsed workers'
+comp blocks payment but not the accrual. The journal refuses an unbalanced
+entry, a single split, a delete and an amendment. A late fee is never charged
+without a written policy and never twice for the same period. No column
+anywhere stores an applicant score.
+
+**Cross-company isolation**, which is the one that matters for what comes next.
+Two companies are seeded and every parameterised `/app/` route is driven as
+company A holding company B's ids. No GET may answer 200 and no POST may change
+anything — asserted by fingerprinting company B's rows before and after. The
+route list is read from the router's own table rather than kept in the test, so
+a route registered tomorrow is covered tomorrow instead of whenever somebody
+remembers to add it in two places.
+
+**The security properties** from the security pass: CSRF on staff and public
+forms, the sign-in rate limit, the role gate returning 403 for leasing and
+maintenance on every money route, tokenised pages refusing junk tokens, the
+address lookup listing nothing, the headers, RLS on every table, and zero
+grants to `anon` or `authenticated`.
+
+**Configuration**, each case in its own process, because config.js reads the
+environment at load and that is the point of it.
+
+## The suite can fail
+
+A suite that cannot fail is decoration. Three regressions were introduced
+deliberately and each was caught:
+
+| Regression | Caught by |
+|---|---|
+| `company_id` dropped from an owner lookup | isolation |
+| emergencies queued instead of escalated | invariants |
+| a late fee charged with no policy on the lease | invariants |
+
+## How it runs
+
+A real server on an ephemeral port, driven with `fetch` and a cookie jar,
+rather than `handle(req, res)` with mock objects. Mocks skip the parts most
+likely to be wrong — header casing, cookie round-trips, redirect handling — so
+they test the handler rather than the application. A socket costs milliseconds.
+
+CSRF tokens are read out of the page carrying the form, the way a browser
+would, so a broken CSRF pipeline fails the test rather than being bypassed by
+it.
+
+Sign-in success is the `Location`, not the status: both outcomes are a 303, to
+`/app` on success and back to the form on failure. Reading the status alone
+would call every rejection a success. The helper exposes `signedIn` rather than
+`ok` because `Response.ok` is a read-only getter — assigning to it silently
+does nothing, which cost an hour.
+
+Each run drops the public schema and rebuilds it from the migrations. Slower
+than truncating, and correct: a suite that inherits yesterday's schema passes
+against a shape production does not have.
+
+## The test database
+
+`TEST_DATABASE_URL`, and `config.js` refuses to start if it is missing under
+`NODE_ENV=test` or if it equals `DATABASE_URL` — the suite drops the public
+schema on whatever it is handed, and that mistake costs the dataset.
+
+    createdb propops_test
+    NODE_ENV=test TEST_DATABASE_URL=postgresql://localhost:5432/propops_test npm test
+
+CI uses a `postgres:16` service container, on Node 20 and 22, because
+`package.json` claims `>=20` and a claim nothing exercises is not a claim.
+
+## One thing CI cannot check
+
+A plain Postgres is not Supabase: no pooler, no `anon` or `authenticated`
+roles, different extensions. Two of those already bit and are handled — the
+lockdown migration is guarded on role existence, and pgcrypto is created by the
+migration runner. A future Supabase-specific behaviour could still pass CI and
+fail in production, so point `TEST_DATABASE_URL` at a scratch Supabase project
+before a release.
+
+---
+
+# Environment
+
+Every variable is read in exactly one place, `server/lib/config.js`, which
+validates at boot and fails with the fix in the message. Shape, not just
+presence: a key that is set but 16 bytes long is a boot failure here rather
+than a decryption failure months later.
+
+| Variable | Required | What it is |
+|---|---|---|
+| `DATABASE_URL` | yes | Supabase transaction pooler string, port 6543. Port 5432 under serverless is warned about: it works until connections are exhausted. |
+| `TEST_DATABASE_URL` | tests | Throwaway database for the suite. Refused if equal to `DATABASE_URL`. |
+| `DATABASE_CA_CERT` | no | Supabase's CA. Without it TLS is encrypted but unverified; `/health` says which. |
+| `PG_POOL_MAX` | no | Pool size, default 4. |
+| `APP_ENCRYPTION_KEY` | for banking, TINs | 32 bytes, base64 or hex. Losing it makes sealed fields unrecoverable. |
+| `CRON_SECRET` | on Vercel | Refused at boot if missing in a deployed environment: `/api/cron` would be an open trigger. |
+| `BLOB_READ_WRITE_TOKEN` | for uploads | Vercel Blob. Without it uploads go to local disk, which on Vercel means they vanish. |
+| `DELIVERY_MODE` | no | `off` queues without sending. `log` drains to the console. |
+| `PLAID_CLIENT_ID` `PLAID_SECRET` `PLAID_ENV` `PLAID_WEBHOOK_SECRET` | no | Unset means no aggregator and the UI says so. |
+| `SENTRY_DSN` | no | Unset means no error reporting and no outbound calls at all. |
+| `LOG_FORMAT` | no | `json` for a log drain; human-readable otherwise. Defaults to json when deployed. |
+| `APP_ENV` | no | Tags errors. Defaults to `production` when deployed. |
+| `NODE_ENV` | no | `test` switches which database URL is used. |
+| `PORT` | no | Local dev server, default 4300. |
+
+## Request ids
+
+Every request gets one before anything can throw, so even a 404 or a failed
+body parse carries it. It appears on every log line that request produces, in
+`X-Request-Id`, and on the 500 page for a user to quote — but not on a 404,
+because a reference number on every expired form trains people to ignore it.
