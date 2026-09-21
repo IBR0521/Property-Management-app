@@ -49,7 +49,7 @@ export function providerFor(channel, forMode = DELIVERY_MODE) {
    write to the outbox, because a check every producer has to remember is a
    check one of them will not. */
 export async function deliver(
-  { channel, to, subject, body, from, companyId, kind = "transactional" },
+  { channel, to, subject, body, from, replyTo, companyId, kind = "transactional" },
   forMode = DELIVERY_MODE
 ) {
   if (companyId) {
@@ -69,7 +69,7 @@ export async function deliver(
     return { ok: false, providerMessageId: null, error: "delivery is off", retryable: true, provider: null };
   }
   try {
-    const result = await provider.send({ channel, to, subject, body, from, companyId });
+    const result = await provider.send({ channel, to, subject, body, from, replyTo, companyId });
     return { ...result, provider: provider.name };
   } catch (err) {
     return {

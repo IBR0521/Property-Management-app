@@ -30,7 +30,7 @@ const PERMANENT = new Set([
   "daily_quota_exceeded",
 ]);
 
-export async function send({ to, subject, body, from }) {
+export async function send({ to, subject, body, from, replyTo }) {
   if (!RESEND_API_KEY) {
     return { ok: false, providerMessageId: null, error: "RESEND_API_KEY is not set", retryable: false };
   }
@@ -56,6 +56,9 @@ export async function send({ to, subject, body, from }) {
            sending it as HTML would mean escaping tenant-supplied content into
            markup for no gain. */
         text: body,
+        /* Where a tenant's reply goes. Without it, replies land on a
+           no-reply address and the tenant believes nobody read them. */
+        ...(replyTo ? { reply_to: replyTo } : {}),
       }),
       /* Shorter than the function's own budget, so a hanging provider fails as
          one slow message rather than taking the whole drain with it. */

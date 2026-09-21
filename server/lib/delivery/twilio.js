@@ -31,11 +31,15 @@ const PERMANENT_CODES = new Set([
   30006,  // landline or unreachable carrier
 ]);
 
-export async function send({ to, body }) {
+export async function send({ to, body, from }) {
   if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
     return { ok: false, providerMessageId: null, error: "Twilio is not configured", retryable: false };
   }
-  if (!TWILIO_FROM_NUMBER && !TWILIO_MESSAGING_SERVICE_SID) {
+  /* The company's own number wins. A platform-wide number is the fallback
+     for a company that has not registered one of its own. */
+  const sender = from || TWILIO_FROM_NUMBER;
+
+  if (!sender && !TWILIO_MESSAGING_SERVICE_SID) {
     return {
       ok: false, providerMessageId: null,
       error: "neither TWILIO_FROM_NUMBER nor TWILIO_MESSAGING_SERVICE_SID is set",
@@ -47,7 +51,8 @@ export async function send({ to, body }) {
   form.set("To", to);
   /* A messaging service is preferred when present: it handles number pooling
      and carrier registration, which is what US A2P traffic needs. */
-  if (TWILIO_MESSAGING_SERVICE_SID) form.set("MessagingServiceSid", TWILIO_MESSAGING_SERVICE_SID);
+  if (from) form.set("From", from);
+  else if (TWILIO_MESSAGING_SERVICE_SID) form.set("MessagingServiceSid", TWILIO_MESSAGING_SERVICE_SID);
   else form.set("From", TWILIO_FROM_NUMBER);
   form.set("Body", body);
 

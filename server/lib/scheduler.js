@@ -18,6 +18,7 @@ import { DELIVERY_MODE } from "./config.js";
 import { drains, reachesRecipients } from "./delivery/mode.js";
 import { deliver } from "./delivery/index.js";
 import { outcomeFor, MAX_ATTEMPTS } from "./delivery/retry.js";
+import { senderFor } from "./outbox.js";
 import { log } from "./logger.js";
 
 const EVERY_MS = 10 * 60 * 1000;
@@ -454,9 +455,14 @@ export async function drainOutbox({ send = deliver, now = () => new Date(), mode
   const out = { sent: 0, failed: 0, dead: 0, suppressed: 0 };
 
   for (const m of due) {
+    /* Resolved per message: mail leaves as the company, not as the platform.
+       Without this every customer's notices would come from one address. */
+    const sender = await senderFor(m.company_id, m.channel);
+
     const result = await send({
       channel: m.channel, to: m.to_contact, subject: m.subject,
       body: m.body, companyId: m.company_id, kind: m.kind || "transactional",
+      from: sender.from, replyTo: sender.replyTo,
     });
 
     const attempts = Number(m.attempts || 0) + 1;

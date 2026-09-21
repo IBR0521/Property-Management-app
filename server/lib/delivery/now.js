@@ -28,6 +28,7 @@ import { log } from "../logger.js";
 import { deliver } from "./index.js";
 import { DELIVERY_MODE } from "../config.js";
 import { drains } from "./mode.js";
+import { senderFor } from "../outbox.js";
 
 const stamp = () => new Date().toISOString();
 
@@ -58,8 +59,10 @@ export async function sendNow({
 
   let result;
   try {
+    const sender = await senderFor(companyId, channel);
     result = await Promise.race([
-      send({ channel, to, subject, body, companyId, kind: "transactional" }),
+      send({ channel, to, subject, body, companyId, kind: "transactional",
+             from: sender.from, replyTo: sender.replyTo }),
       new Promise((resolve) =>
         setTimeout(() => resolve({
           ok: false, error: `no answer from provider in ${URGENT_TIMEOUT_MS}ms`, retryable: true,

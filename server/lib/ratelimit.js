@@ -17,6 +17,9 @@ export const LIMITS = {
   // that nobody scripts thousands of work orders.
   report: { max: 12, windowMinutes: 60 },
   apply: { max: 8, windowMinutes: 60 },
+  /* An open signup form creates rows in somebody else's database, and a
+     legitimate person does this once. */
+  signup: { max: 5, windowMinutes: 60 },
 };
 
 /* Best-effort client address. Vercel and most proxies set x-forwarded-for;
