@@ -10,10 +10,10 @@
      /report /t/ /apply /a/ /o/ tokenised public pages, no account
      /app/...                   the back office, staff session required
 */
-import { ready } from "./lib/db.js";
+import { ready, NotFound } from "./lib/db.js";
 import { createRouter } from "./lib/router.js";
 import { serveFromRoot, serveUpload } from "./lib/static.js";
-import { currentStaff } from "./lib/auth.js";
+import { currentStaff, can, requiredCapability, roleLabel } from "./lib/auth.js";
 import {
   parseRequestBody, sendHtml, sendText, sendJson, redirect,
   HttpError, csrfToken, checkCsrf, Forbidden, isHttps,
@@ -29,6 +29,11 @@ import { registerApplications } from "./features/applications.js";
 import { registerPortfolio } from "./features/portfolio.js";
 import { registerSetup } from "./features/setup.js";
 import { registerAccount } from "./features/account.js";
+import { registerAccounting } from "./features/accounting.js";
+import { registerLeases } from "./features/leases.js";
+import { registerBanking } from "./features/banking.js";
+import { registerVendors } from "./features/vendors.js";
+import { registerListings } from "./features/listings.js";
 
 const router = createRouter();
 
@@ -44,6 +49,11 @@ registerApplications(router);
 registerPortfolio(router);
 registerSetup(router);
 registerAccount(router);
+registerAccounting(router);
+registerLeases(router);
+registerBanking(router);
+registerVendors(router);
+registerListings(router);
 
 /* Routes that need a signed-in staff member. Everything under /app except the
    sign-in pages, which register themselves as public. */
@@ -135,6 +145,19 @@ export async function handle(req, res) {
         const back = encodeURIComponent(url.pathname + url.search);
         return redirect(res, `/app/sign-in?next=${back}`);
       }
+
+      /* Authorisation, once, here. Asking each handler to check its own role is
+         how an authorisation model fails: the check is correct in twenty
+         handlers and missing in the twenty-first, and nothing tells you which.
+         A route that needs a capability its holder lacks never reaches its
+         handler. */
+      const needed = requiredCapability(path, req.method);
+      if (needed && !can(ctx.staff, needed)) {
+        console.warn(`[403] ${req.method} ${path} — ${ctx.staff.email} (${ctx.staff.role}) lacks ${needed}`);
+        return sendHtml(res, errorPage(403,
+          `Your account is a ${roleLabel(ctx.staff.role).toLowerCase()} account, which does not have access to this. ` +
+          `If you need it, an administrator can change your role.`), 403);
+      }
     } else if (isAppRoute) {
       ctx.staff = await currentStaff(req);
     }
@@ -153,7 +176,14 @@ export async function handle(req, res) {
     ctx.csrf = csrfToken(req, res);
     await hit.handler(ctx);
   } catch (err) {
-    const status = err instanceof HttpError ? err.status : 500;
+    /* db.one() raises NotFound when a row the URL named does not exist. That is
+       a dead link, not a server fault, and reporting it as a 500 both misleads
+       the visitor and buries real faults in the log. Its message is fixed
+       ("Not found") and the SQL it carries stays on err.query, which is never
+       rendered. */
+    const status = err instanceof HttpError ? err.status
+      : err instanceof NotFound ? 404
+      : 500;
     if (status >= 500) console.error(`[500] ${req.method} ${path}`, err);
     else console.warn(`[${status}] ${req.method} ${path} — ${err.message}`);
 
@@ -165,6 +195,8 @@ export async function handle(req, res) {
        real error is already in the server log above. */
     const safe = err instanceof HttpError && status < 500
       ? err.message
+      : status === 404
+      ? "We could not find that. The link may be old, or the record may have been removed."
       : "Something went wrong at our end. Try again, or call us if it keeps happening.";
 
     const wantsJson = (req.headers.accept || "").includes("application/json");

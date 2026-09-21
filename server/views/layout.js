@@ -5,6 +5,7 @@
    only adds layout on top. */
 import { html, doc, raw, attr } from "../lib/render.js";
 import { icons } from "./icons.js";
+import { can, roleLabel } from "../lib/auth.js";
 
 const HEAD = (title) => html`
 <meta charset="utf-8" />
@@ -19,13 +20,27 @@ const HEAD = (title) => html`
 
 /* --- navigation ----------------------------------------------------------- */
 
+/* Four destinations, plus the two sections that only some roles hold. Items
+   carry the capability they need so the sidebar shows a person what they can
+   actually open — a nav full of links that 403 is worse than a shorter nav. */
 const NAV = [
   { group: null, items: [
     { href: "/app", key: "queue", icon: "inbox", label: "Queue", badge: "queue" },
     { href: "/app/portfolio", key: "properties", icon: "home", label: "Properties", badge: "properties" },
-    { href: "/app/owners", key: "people", icon: "users", label: "People", badge: "people" },
+    { href: "/app/owners", key: "people", icon: "users", label: "People", badge: "people", need: "money.view" },
   ] },
-  { group: null, items: [{ href: "/app/setup", key: "setup", icon: "cog", label: "Setup" }] },
+  { group: "Money", items: [
+    { href: "/app/accounting", key: "accounting", icon: "cog", label: "Accounting", need: "money.view" },
+    { href: "/app/banking", key: "banking", icon: "cog", label: "Banking", need: "bank.link" },
+    { href: "/app/vendors", key: "vendors", icon: "users", label: "Contractors", need: "vendor.manage" },
+  ] },
+  { group: "Leasing", items: [
+    { href: "/app/listings", key: "listings", icon: "home", label: "Vacancies", need: "leasing.work" },
+    { href: "/app/leases", key: "leases", icon: "inbox", label: "Lease documents", need: "leasing.work" },
+  ] },
+  { group: null, items: [
+    { href: "/app/setup", key: "setup", icon: "cog", label: "Setup", need: "settings.manage" },
+  ] },
 ];
 
 /* Secondary views. These used to be top-level destinations, which meant a
@@ -67,22 +82,26 @@ export function appPage({ staff, active, title, subtitle, actions, body, counts 
       <span><b>${staff.company_name}</b><span>Property operations</span></span>
     </div>
 
-    ${NAV.map(
-      (group) => html`
+    ${NAV.map((group) => {
+      // Hidden, not disabled: the routing gate is the enforcement, this just
+      // stops showing people doors that will not open for them.
+      const items = group.items.filter((item) => !item.need || can(staff, item.need));
+      if (!items.length) return "";
+      return html`
       <div class="navgroup">
         ${group.group ? html`<h3>${group.group}</h3>` : ""}
-        ${group.items.map(
+        ${items.map(
           (item) => html`
           <a class="navlink" href="${item.href}"${attr("aria-current", active === item.key ? "page" : null)}>
             ${icons[item.icon]}<span>${item.label}</span>${item.badge ? navBadge(counts, item.badge) : ""}
           </a>`
         )}
-      </div>`
-    )}
+      </div>`;
+    })}
 
     <div class="shell__foot">
       <a class="shell__who" href="/app/account" style="display:block;text-decoration:none">
-        <b>${staff.name}</b>${staff.email}
+        <b>${staff.name}</b>${roleLabel(staff.role)}
       </a>
       <form method="post" action="/app/sign-out">
         <input type="hidden" name="_csrf" value="${csrf}" />

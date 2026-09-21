@@ -86,3 +86,135 @@ export async function byToken(table, tokenColumn, tokenValue, extra = "") {
 export async function staffList(companyId) {
   return await all("SELECT id, name, email, role, active FROM staff WHERE company_id = ? ORDER BY name", companyId);
 }
+
+/* --- roles and what each one may see -------------------------------------
+
+   The original CHECK allowed two roles because there were two jobs. A leasing
+   agent showing flats and a maintenance tech closing work orders both need the
+   queue, and neither has any business seeing what is in the trust account —
+   which is not a comment about trust, it is how you keep a cash-handling
+   allegation from being a question of somebody's word.
+
+   Capabilities rather than role names at the call site. `role === "admin"`
+   scattered through the codebase is how a new role ends up silently holding
+   permissions nobody granted it; asking `can(staff, "money.view")` does not
+   have that failure mode. */
+
+export const CAPABILITIES = [
+  "queue.view",       // the daily work list
+  "property.view",    // units, leases, tenants
+  "property.edit",    // adding and changing those records
+  "maintenance.work", // triage, dispatch, close out
+  "leasing.work",     // applications, listings, lease documents
+  "money.view",       // rent ledgers, owner statements, cash balances, journals
+  "money.write",      // post journals, record payments, pay invoices
+  "bank.link",        // connect a bank, see reconciliation
+  "vendor.manage",    // contractor compliance records
+  "staff.manage",     // other people's accounts
+  "settings.manage",  // company settings, routing rules, templates
+];
+
+const ROLE_CAPABILITIES = {
+  admin: new Set(CAPABILITIES),
+
+  manager: new Set([
+    "queue.view", "property.view", "property.edit", "maintenance.work",
+    "leasing.work", "money.view", "money.write", "bank.link",
+    "vendor.manage", "settings.manage",
+  ]),
+
+  /* Books and banking, but not the operational side — an accountant has no
+     reason to dispatch a plumber. */
+  accountant: new Set([
+    "queue.view", "property.view", "money.view", "money.write",
+    "bank.link", "vendor.manage",
+  ]),
+
+  /* Shows units, takes applications, prepares leases. No money at all: not the
+     ledger, not the bank, not an owner statement. */
+  leasing: new Set([
+    "queue.view", "property.view", "leasing.work",
+  ]),
+
+  /* Work orders and the contractors who do them. Can see that a job was
+     approved; cannot see the cash it came out of. */
+  maintenance: new Set([
+    "queue.view", "property.view", "maintenance.work", "vendor.manage",
+  ]),
+};
+
+export function capabilitiesFor(role) {
+  return ROLE_CAPABILITIES[role] || ROLE_CAPABILITIES.leasing;
+}
+
+/* The one question every gate asks. Unknown role means the least privilege on
+   offer, never the most — a typo in a role name must not open the books. */
+export function can(staff, capability) {
+  if (!staff || !staff.active) return false;
+  return capabilitiesFor(staff.role).has(capability);
+}
+
+export function roleLabel(role) {
+  return {
+    admin: "Administrator", manager: "Property manager", accountant: "Accountant",
+    leasing: "Leasing agent", maintenance: "Maintenance",
+  }[role] || role;
+}
+
+/* --- the routing gate -----------------------------------------------------
+
+   Ordered longest-prefix-first and matched on path segments, so /app/rent
+   never matches /app/rental-something. Enforced in app.js before any handler
+   runs: a handler that forgets to check is the normal way an authorisation
+   model fails, so handlers are not asked to check. */
+const ROUTE_CAPABILITY = [
+  ["/app/accounting", "money.view"],
+  ["/app/banking", "bank.link"],
+  ["/app/owners", "money.view"],
+  ["/app/rent", "money.view"],
+  ["/app/vendors/1099", "money.view"],
+  ["/app/vendors/invoices", "money.view"],
+  ["/app/vendors", "vendor.manage"],
+  ["/app/leases", "leasing.work"],
+  ["/app/listings", "leasing.work"],
+  ["/app/applications", "leasing.work"],
+  ["/app/maintenance", "maintenance.work"],
+  ["/app/turns", "maintenance.work"],
+  ["/app/compliance", "property.view"],
+  ["/app/portfolio", "property.view"],
+  ["/app/setup", "settings.manage"],
+  ["/app/staff", "staff.manage"],
+];
+
+/* Write paths need more than read paths on the same prefix. Checked in
+   addition to the table above, not instead of it. */
+const WRITE_CAPABILITY = [
+  ["/app/accounting", "money.write"],
+  ["/app/banking", "money.write"],
+  ["/app/rent", "money.write"],
+  ["/app/owners", "money.write"],
+  ["/app/vendors/invoices", "money.write"],
+  ["/app/portfolio", "property.edit"],
+];
+
+function longestMatch(table, path) {
+  let best = null;
+  for (const [prefix, capability] of table) {
+    if (path === prefix || path.startsWith(prefix + "/")) {
+      if (!best || prefix.length > best[0].length) best = [prefix, capability];
+    }
+  }
+  return best;
+}
+
+/* Returns the capability this request needs, or null if it needs none beyond
+   being signed in. */
+export function requiredCapability(path, method = "GET") {
+  if (method === "POST") {
+    const write = longestMatch(WRITE_CAPABILITY, path);
+    if (write) return write[1];
+  }
+  const read = longestMatch(ROUTE_CAPABILITY, path);
+  return read ? read[1] : null;
+}
+

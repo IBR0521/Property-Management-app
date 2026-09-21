@@ -550,3 +550,178 @@ unit, so a unit added through the app is never one whose sticker cannot be
 printed. It appears on `/app/portfolio/labels` immediately. `stickerToken()` in
 `lib/ids.js` is the single definition of that token's shape — creation and
 rotation both call it, and it matches what migration 004 backfilled.
+
+---
+
+# Phase 2 modules
+
+Six additions. What follows is what each one guarantees and where that
+guarantee actually lives, because "the controller checks it" and "the database
+refuses it" are very different promises.
+
+Three things in the brief did not match the codebase and were built to the
+codebase instead: this is not Express (a hand-rolled router over `node:http`,
+three dependencies), roles were `admin`/`manager` only and the CHECK constraint
+had to be widened before `lib/auth.js` could mean anything by "role", and a
+`{{placeholder}}` engine plus a single-entry `ledger_entry` already existed, so
+both were extended rather than duplicated.
+
+## Double-entry accounting — `features/accounting.js`
+
+`postJournal()` is the only writer. Rent, maintenance bills, owner
+distributions, late fees and bank matches all go through it.
+
+The guarantees are in `005_accounting.sql`, not in the controller:
+
+- **Debits equal credits**, checked by a `DEFERRABLE INITIALLY DEFERRED`
+  constraint trigger. Deferred is the whole point — the check runs once at
+  COMMIT, when every split of the journal is in. A normal trigger would fire on
+  the first split and reject every journal ever written.
+- **At least two splits.** One split that nets to zero is not double entry.
+- **Nothing is deleted or amended.** `DELETE` on a journal or a split raises,
+  `UPDATE` on a split raises, and a posted journal accepts an update only to
+  record that it was reversed. A mistake is corrected by posting the mirror,
+  which is what an auditor expects to find.
+
+Verified by trying to break it: an unbalanced journal, a single split, a split
+with both sides filled, and a negative credit faking a balance are all refused,
+as are delete and update on posted rows.
+
+`ledger_entry` is untouched and still drives owner statements. It answers "what
+does this owner see"; the journal answers "does the company balance".
+
+## Leases and e-signatures — `features/leases.js`
+
+What makes an electronic signature defensible is being able to show which bytes
+somebody agreed to. So:
+
+- A document is compiled **once** and frozen. The template can change tomorrow;
+  the document cannot.
+- A document with unresolved `{{tokens}}` **cannot be sent**. A lease that still
+  says `{{rent_amount}}` is not a lease.
+- Every signature stores the document hash it was applied to, and the page
+  recomputes that hash on every read. Altering stored text is detected rather
+  than silent — verified by tampering with a signed document and watching the
+  check fail.
+- Signatures are immutable in the database. A document that should not stand is
+  voided, which leaves the signatures visible.
+
+The trail per signature: party type, typed name, email, timestamp, IP,
+user-agent, ESIGN consent recorded as its own field, and a mark hashing all of
+it together with the document.
+
+Markdown renders through an escape-first pipeline, so a tenant name containing
+`<script>` becomes text, not markup, inside a signed instrument.
+
+## Bank feeds — `features/banking.js`, `lib/plaid.js`
+
+Access tokens are sealed with AES-256-GCM (`lib/crypto.js`) before they touch
+the database and unsealed only inside the Plaid boundary. GCM authenticates as
+well as encrypts, so a tampered ciphertext refuses to open rather than
+decrypting to something plausible.
+
+Syncing is idempotent at the database: provider transaction ids and webhook
+delivery ids both carry unique indexes, so a replayed webhook does nothing.
+
+The matcher **proposes and a person decides**. Amounts must match to the cent;
+the score only separates equals, by date proximity and whether any word of the
+internal record appears in the bank's clearing string. A wrong automatic match
+in a trust ledger is worse than no match, because it looks reconciled.
+
+**Nothing here has run against Plaid's live API** — this project has no Plaid
+credentials. The request shapes follow the documented API; treat the first live
+call as the test. Everything that does not need Plaid — sealing, storage,
+matching, webhook idempotency — is exercised and does not depend on it.
+
+## Syndication feed — `/feeds/listings.xml` and `api/feeds/listings.xml.js`
+
+Public, unauthenticated, cached 15 minutes. Served at both paths from one
+builder so the two cannot drift; the `api/` file exists because `vercel.json`
+rewrites everything except `/api/*` into the main handler.
+
+Syndication is **opt-in per listing and off by default**. Publishing an address
+to every aggregator on the internet is a decision somebody makes on purpose.
+
+There is no single "ILD" schema every aggregator accepts — Zillow,
+Apartments.com and the ILS networks each take a dialect. This produces the
+common shape (provider envelope, one `Property` per address, nested `ILS_Unit`)
+with correct escaping and stable identifiers. Expect to map field names when
+onboarding a specific network.
+
+## Vendor compliance — `features/vendors.js`
+
+The barrier is the point. `complianceState()` is called from the work-order
+dispatch path and from every payout path, so an expired certificate refuses
+rather than warning on a dashboard nobody reads on a Tuesday.
+
+- **Expired workers compensation blocks payment.**
+- **Expired liability or licence blocks dispatch.**
+- The split is deliberate: refusing to pay for completed work because a
+  certificate lapsed afterwards creates a dispute, not compliance.
+
+An invoice from a lapsed contractor is still **recorded and accrued** —
+`Dr Repairs / Cr Payable` — because the liability is real whether or not the
+paperwork is. What is withheld is the money.
+
+1099 extraction returns data, not a file, because filing formats differ by
+transmitter. Vendors under the $600 threshold are returned too, marked, so the
+filer can see what was excluded and why. Taxpayer IDs are sealed; only the last
+four ever leave the function.
+
+## Roles and the late-fee sweep
+
+`lib/auth.js` holds capabilities, not role names. `role === "admin"` scattered
+through a codebase is how a new role silently acquires permissions nobody
+granted it.
+
+Enforced **once**, in `app.js`, before any handler runs. Asking each handler to
+check its own role is how authorisation models fail: correct in twenty handlers
+and missing in the twenty-first, with nothing to tell you which. Verified over
+real HTTP — leasing and maintenance accounts get 403 on accounting, banking,
+owners, rent and 1099.
+
+The nav hides what a role cannot open. That is cosmetic; the gate is the
+enforcement.
+
+### The lock, and why it is not an advisory lock
+
+Advisory locks cannot do this job through Supabase's pooler on port 6543, which
+is pgbouncer in transaction mode. A session-scoped `pg_advisory_lock` is taken
+on a backend connection the next statement may not be given; a transaction-
+scoped one is released the instant its statement ends. Either way you get a
+no-op that reads like a guarantee. **The first version of this file made exactly
+that mistake.**
+
+What is there instead: a partial unique index allowing one unfinished `job_run`
+per job name, plus a stale-run reclaim for a function killed mid-sweep.
+
+The real protection against a double charge is `UNIQUE (lease_id, period)` on
+`late_fee`. The sweep inserts and lets the database refuse a duplicate rather
+than checking first — a check-then-insert has a window between the two, and
+that window is where the double charge lives.
+
+Nothing is charged without a policy. A lease with no late-fee terms gets no
+fee; inventing a charge because a field was blank is how a company ends up
+refunding a year of them.
+
+## What you have to do
+
+**Set `APP_ENCRYPTION_KEY`** in every environment, or bank linking and taxpayer
+IDs refuse to store. Generate one with:
+
+    node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+
+Losing this key makes sealed fields unrecoverable. It belongs in a secret
+manager, not in the repository.
+
+**Plaid, when you want it:** `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV`,
+and `PLAID_WEBHOOK_SECRET` for the testable webhook verification path.
+
+**Cron is not scheduled.** `api/cron.js` runs both sweeps and reports each
+separately — a failure in the housekeeping tick can no longer silently skip the
+billing. It is left unscheduled because a cron block broke the deploy before.
+To turn it on, add to `vercel.json` (Hobby allows daily granularity):
+
+    "crons": [{ "path": "/api/cron", "schedule": "0 9 * * *" }]
+
+and set `CRON_SECRET`, without which the handler refuses to run on Vercel.

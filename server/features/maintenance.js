@@ -24,6 +24,7 @@ import { navCounts } from "../lib/counts.js";
 import { storeMany, fileUrl } from "../lib/files.js";
 import { CATEGORIES, category, assess } from "../lib/triage.js";
 import { check, clientIp } from "../lib/ratelimit.js";
+import { complianceState } from "./vendors.js";
 
 const STATUS_TONE = {
   new: "warn", triaged: "warn", awaiting_owner: "warn",
@@ -579,6 +580,17 @@ export function registerMaintenance(router) {
     const wo = await loadForWrite(ctx.params.id, cid);
     const vendorId = String(ctx.fields.vendor_id || "");
     const vendor = await one("SELECT * FROM vendor WHERE id = ? AND company_id = ?", vendorId, cid);
+
+    /* The compliance barrier, in the dispatch path rather than on a dashboard.
+       Sending an uninsured contractor to somebody's home is the manager's
+       liability the moment they arrive, so this refuses instead of warning. */
+    const compliance = complianceState(vendor);
+    if (!compliance.canDispatch) {
+      return redirect(ctx.res, `/app/maintenance/${wo.id}?m=${encodeURIComponent(
+        `${vendor.name} cannot be dispatched: ${compliance.dispatchReasons.join(" ")} ` +
+        `Update their record under Contractors first.`)}`);
+    }
+
     const estimate = parseMoney(ctx.fields.estimate);
 
     const owner = await one(
