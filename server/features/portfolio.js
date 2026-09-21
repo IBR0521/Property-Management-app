@@ -4,11 +4,12 @@ import { id } from "../lib/ids.js";
 import { stamp, human, humanStamp, today, daysBetween, monthKey } from "../lib/dates.js";
 import { usd, parseMoney } from "../lib/money.js";
 import { sendHtml, redirect, BadRequest } from "../lib/http.js";
-import { html, attr } from "../lib/render.js";
+import { html, attr, raw } from "../lib/render.js";
 import { appPage, notice, empty, tabs, PROPERTY_TABS } from "../views/layout.js";
 import { icons } from "../views/icons.js";
 import { navCounts } from "../lib/counts.js";
 import { tick } from "../lib/scheduler.js";
+import { qrSvg } from "../lib/qr.js";
 
 const UNIT_TONE = { occupied: "ok", vacant: "warn", turn: "brand", offline: null };
 
@@ -95,6 +96,93 @@ export function registerPortfolio(router) {
     }));
   });
 
+  /* The sticker sheet.
+
+     A tenant who has to find the right website, then find their own address in
+     a list, will phone instead — which is the cost this whole feature exists
+     to remove. A code on the back of the kitchen door removes both steps: it
+     opens the form with the address already known.
+
+     Printed, not screen-shown, so the page carries its own print rules and the
+     QR is inline SVG — one request, and sharp at any paper size. */
+  router.get("/app/portfolio/labels", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const only = String(ctx.query.property || "");
+    const units = await all(
+      `SELECT u.id, u.label, u.report_token, p.id AS property_id, p.line1, p.city, p.zip
+         FROM unit u JOIN property p ON p.id = u.property_id
+        WHERE u.company_id = ?${only ? " AND p.id = ?" : ""}
+        ORDER BY p.line1, u.label`,
+      ...(only ? [cid, only] : [cid]));
+
+    const properties = await all(
+      `SELECT p.id, p.line1, count(u.id)::int AS units
+         FROM property p JOIN unit u ON u.property_id = p.id
+        WHERE p.company_id = ? GROUP BY p.id, p.line1 ORDER BY p.line1`, cid);
+
+    const origin = `${ctx.url.protocol}//${ctx.url.host}`;
+
+    sendHtml(ctx.res, appPage({
+      staff: ctx.staff, active: "portfolio", csrf: ctx.csrf,
+      counts: await navCounts(cid),
+      title: "Repair QR codes",
+      subtitle: `${units.length} label${units.length === 1 ? "" : "s"} · print, then put one inside each unit`,
+      // No print button: this app ships no client JavaScript, and window.print()
+      // would be the only reason to start. The browser's own print command does
+      // the same job and works when script is blocked.
+      actions: html`<a class="pill outline sm" href="/app/portfolio">All units</a>`,
+      body: html`
+        ${tabs(PROPERTY_TABS, "units")}
+        <div class="panel noprint">
+          <div class="panel__body">
+            <div class="btnrow">
+              <a class="pill${only ? " outline" : " solid"} sm" href="/app/portfolio/labels">All properties</a>
+              ${properties.map((pr) => html`
+                <a class="pill${only === pr.id ? " solid" : " outline"} sm"
+                   href="/app/portfolio/labels?property=${pr.id}">${pr.line1} (${pr.units})</a>`)}
+            </div>
+            <p class="lede" style="margin:0.75rem 0 0">
+              Print this page (<b>Ctrl</b>+<b>P</b>, or <b>&#8984;</b>+<b>P</b>) on plain paper or
+              sticker sheets — everything except the labels drops off the page. Each code
+              opens the repair form with that unit already filled in, so the tenant never
+              picks an address. If a code is misused, regenerate it on the unit's page and
+              the old sticker stops working straight away.
+            </p>
+          </div>
+        </div>
+
+        ${units.length === 0 ? empty("No units yet.") : html`
+          <div class="labelsheet">
+            ${units.map((u) => {
+              const url = `${origin}/r/${u.report_token}`;
+              return html`
+                <div class="labelcard">
+                  ${raw(qrSvg(url, { size: 150, label: `Report a repair at ${u.line1}${u.label ? ` unit ${u.label}` : ""}` }))}
+                  <div class="labelcard__t">
+                    <b>Something broken?</b>
+                    <span>Scan this code to tell ${ctx.staff.company_name}. No app, no account.</span>
+                    <small>${u.line1}${u.label ? ` · Unit ${u.label}` : ""}, ${u.city}</small>
+                    <code>${origin.replace(/^https?:\/\//, "")}/r/${u.report_token}</code>
+                  </div>
+                </div>`;
+            })}
+          </div>`}`,
+    }));
+  });
+
+  /* Burn a sticker. The only reason to need this is a code that got shared or
+     photographed somewhere public and is now attracting junk — so it takes
+     effect immediately and the reprint is the staff member's problem. */
+  router.post("/app/portfolio/u/:id/newtoken", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const unit = await get("SELECT id FROM unit WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    if (!unit) throw new BadRequest("No such unit.");
+    await one(
+      `UPDATE unit SET report_token = translate(encode(gen_random_bytes(12), 'base64'), '+/=', '-_')
+        WHERE id = ? RETURNING id`, unit.id);
+    redirect(ctx.res, `/app/portfolio/u/${unit.id}?m=${encodeURIComponent("New QR code generated. Reprint the sticker for this unit — the old one no longer works.")}`);
+  });
+
   router.post("/app/portfolio/moveout", async (ctx) => {
     const cid = ctx.staff.company_id;
     const lease = await one("SELECT * FROM lease WHERE id = ? AND company_id = ?", String(ctx.fields.lease_id || ""), cid);
@@ -170,6 +258,7 @@ export function registerPortfolio(router) {
       subtitle: `${u.city}, ${u.state} ${u.zip} · owned by ${u.owner_name}`,
       actions: html`
         <a class="pill outline sm" href="/app/portfolio">All units</a>
+        <a class="pill outline sm" href="/app/portfolio/labels?property=${u.property_id}">QR label</a>
         <a class="pill solid sm" href="/app/maintenance/new">Log a repair</a>`,
       body: html`
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
@@ -259,6 +348,27 @@ export function registerPortfolio(router) {
                         <span class="chip"${attr("data-tone", o.status === "overdue" ? "danger" : "warn")}>${o.status}</span>
                       </div>`)
                   : html`<div class="empty">No clock running on this unit.</div>`}
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel__head"><h2>Repair QR code</h2></div>
+              <div class="panel__body">
+                <p class="lede" style="margin:0 0 0.75rem">
+                  The sticker inside this unit opens the repair form with the
+                  address already filled in.
+                </p>
+                <div class="btnrow">
+                  <a class="pill outline sm" href="/app/portfolio/labels?property=${u.property_id}">Print label</a>
+                  <form method="post" action="/app/portfolio/u/${u.id}/newtoken">
+                    <input type="hidden" name="_csrf" value="${ctx.csrf}" />
+                    <button class="pill outline sm" type="submit">New code</button>
+                  </form>
+                </div>
+                <span class="field__help" style="display:block;margin-top:0.5rem">
+                  A new code kills the old sticker immediately. Only do this if
+                  the current one is being misused — it means reprinting.
+                </span>
               </div>
             </div>
 

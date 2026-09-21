@@ -455,8 +455,52 @@ active interception. Supabase signs with its own CA, so verification needs that
 CA file: download it from Project Settings → Database → SSL Configuration and
 set its contents as `DATABASE_CA_CERT`. `/health` reports which mode is in use.
 
-**The public repair form lists every property you manage.** The address picker
-at `/report` is an enumeration of the whole portfolio to anyone who opens the
-page. That is a product decision rather than a bug — a QR code per unit, or
-requiring the tenant to type their address, would close it at some cost in
-convenience.
+*(Closed — see "Repair QR codes" below.)*
+
+# Repair QR codes
+
+`/report` used to open with a dropdown of every unit under management, which
+handed the portfolio to anyone who loaded the page. It is now two paths, and
+neither lists anything:
+
+**Scanned.** Every unit has a `report_token`, printed as a QR code on a sticker
+that goes inside the unit. Scanning opens `/r/<token>`, which knows the address
+and goes straight to "what kind of problem is it?". Two taps to a filed repair.
+
+**Typed.** No sticker to hand, so the tenant types their address. It is matched
+server-side after both sides are folded to the same shape — case, punctuation,
+doubled spaces, and the usual suffixes, so "412 Maple Grove Dr", "412 maple
+grove drive" and "412 Maple Grove Dr Apt 2" all land on the same unit. One
+match goes straight through; several (a building) shows only that building's
+unit numbers, which is not an enumeration because the tenant just told us which
+building they are standing in; none returns a dead end and the phone number.
+
+This is a lookup, not a search. It answers "is this address one of yours" —
+which any intake form must — and never "what addresses do you have".
+
+## The tokens
+
+12 bytes, base64url, generated in SQL so the column is never null and no
+backfill script has to be remembered. Shorter than the 32-byte tokens on
+`/t/:token` and deliberately so: a sticker token identifies a front door, it
+does not unlock anything. Knowing one lets you report a repair for that unit,
+against a rate limit, and nothing else. 96 bits is far past guessable and keeps
+the printed code sparse enough to scan off a scuffed label.
+
+A code cannot be rotated on a schedule — reprinting a building is physical
+work — so rotation is manual, on the unit's page, for the one case that
+warrants it: a code photographed somewhere public and now attracting junk. It
+takes effect immediately, and reprinting is the staff member's problem.
+
+## Printing
+
+`/app/portfolio/labels`, filterable to one property. Error correction is level
+Q (~25% recoverable) because a label above a kitchen sink gets splashed and
+painted over, and a code that dies at the first scratch is a support call. The
+QR is inline SVG — sharp at any paper size, no second request, no image
+library — and the URL is printed underneath, because someone will always type
+it instead.
+
+There is no print button. This app ships no client JavaScript, and
+`window.print()` would have been the only reason to start; the browser's own
+print command does the same job and works when script is blocked.

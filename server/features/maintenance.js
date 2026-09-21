@@ -36,27 +36,70 @@ export function registerMaintenance(router) {
      Public: tenant intake
      ====================================================================== */
 
+  /* The QR sticker points here. Short on purpose: it is printed under the
+     code in readable text, and somebody will always type it instead. */
+  router.get("/r/:tok", async (ctx) => {
+    return redirect(ctx.res, `/report?u=${encodeURIComponent(ctx.params.tok)}`);
+  });
+
   router.get("/report", async (ctx) => {
     const company = await get("SELECT * FROM company LIMIT 1");
     if (!company) return sendHtml(ctx.res, "Not configured", 500);
 
-    const units = await unitOptions(company.id);
-    const chosenUnit = ctx.query.unit && units.find((u) => u.id === ctx.query.unit);
+    const unit = await unitByToken(company.id, ctx.query.u);
+
+    /* No sticker scanned, so the tenant has to tell us where they live. This
+       page used to offer a dropdown of every unit under management, which
+       handed the whole portfolio to anyone who opened it. Now nothing is
+       listed until an address is typed, and what comes back is only ever the
+       property that was typed. */
+    if (!unit) {
+      const typed = String(ctx.query.addr || "").trim();
+      if (!typed) {
+        return sendHtml(ctx.res, publicPage({
+          company, title: `Report a repair · ${company.name}`,
+          heading: "Report something that needs fixing",
+          lede: "Tell us where you are and what kind of problem it is. It takes about a minute, and you will get a link to follow progress.",
+          body: intakeAddress({ company, typed: "", error: ctx.query.e }),
+        }));
+      }
+
+      const matches = await findUnits(company.id, typed);
+      if (matches.length === 1) {
+        return redirect(ctx.res, `/report?u=${encodeURIComponent(matches[0].report_token)}`);
+      }
+      if (matches.length === 0) {
+        return sendHtml(ctx.res, publicPage({
+          company, title: `Report a repair · ${company.name}`,
+          heading: "Report something that needs fixing",
+          lede: "Tell us where you are and what kind of problem it is.",
+          body: intakeAddress({ company, typed,
+            error: "We could not find that address. Check the spelling, or call us and we will log it for you." }),
+        }));
+      }
+      // Several units at one address. Listing them is not an enumeration —
+      // the tenant already told us the building they are standing in.
+      return sendHtml(ctx.res, publicPage({
+        company, title: `Which unit? · ${company.name}`,
+        heading: "Which unit are you in?",
+        lede: matches[0].line1,
+        body: intakePickUnit({ company, matches, typed }),
+      }));
+    }
+
     const chosenCat = category(ctx.query.category);
 
     // Step two only once we know both, so the questions shown are the ones
     // that apply. No JavaScript involved in getting here.
-    const body = chosenUnit && chosenCat
-      ? intakeStepTwo({ company, unit: chosenUnit, cat: chosenCat, csrf: ctx.csrf, error: ctx.query.e })
-      : intakeStepOne({ company, units, chosenUnit, error: ctx.query.e });
+    const body = chosenCat
+      ? intakeStepTwo({ company, unit, cat: chosenCat, csrf: ctx.csrf, error: ctx.query.e })
+      : intakeCategory({ company, unit, error: ctx.query.e });
 
     sendHtml(ctx.res, publicPage({
       company,
       title: `Report a repair · ${company.name}`,
-      heading: chosenUnit && chosenCat ? chosenCat.label : "Report something that needs fixing",
-      lede: chosenUnit && chosenCat
-        ? `${chosenUnit.line1}${chosenUnit.label ? `, unit ${chosenUnit.label}` : ""}`
-        : "Tell us where you are and what kind of problem it is. It takes about a minute, and you will get a link to follow progress.",
+      heading: chosenCat ? chosenCat.label : "Report something that needs fixing",
+      lede: `${unit.line1}${unit.label ? `, unit ${unit.label}` : ""}`,
       body,
     }));
   });
@@ -71,12 +114,13 @@ export function registerMaintenance(router) {
     }
     const company = await one("SELECT * FROM company LIMIT 1");
     const f = ctx.fields;
-    const unit = await get(
-      `SELECT u.*, p.line1, p.city, p.owner_id FROM unit u JOIN property p ON p.id = u.property_id
-        WHERE u.id = ? AND u.company_id = ?`, String(f.unit_id || ""), company.id);
+    /* The unit arrives as its sticker token, never as a row id. A posted id
+       would let anyone file against any unit by guessing a primary key; the
+       token is the only thing the tenant was ever given. */
+    const unit = await unitByToken(company.id, f.unit_token);
     const cat = category(String(f.category || ""));
 
-    const back = `/report?unit=${encodeURIComponent(f.unit_id || "")}&category=${encodeURIComponent(f.category || "")}`;
+    const back = `/report?u=${encodeURIComponent(String(f.unit_token || ""))}&category=${encodeURIComponent(f.category || "")}`;
     if (!unit || !cat) return redirect(ctx.res, `/report?e=${encodeURIComponent("Pick your address and the kind of problem.")}`);
 
     const summary = String(f.summary || "").trim();
@@ -697,6 +741,75 @@ async function autoRoute({ company, woId, cat, unit, severity }) {
   await event(woId, "system", "triaged", `Routed to ${rule.name} (${rule.trade}) by category rule.`, 0);
 }
 
+/* --- resolving a unit without listing the portfolio ------------------------ */
+
+async function unitByToken(companyId, tok) {
+  const t = String(tok || "");
+  if (t.length < 8 || t.length > 64) return null;
+  return await get(
+    `SELECT u.*, p.line1, p.city, p.owner_id FROM unit u JOIN property p ON p.id = u.property_id
+      WHERE u.report_token = ? AND u.company_id = ?`, t, companyId);
+}
+
+/* Addresses get typed the way people say them, not the way they are stored:
+   "123 Maple St", "123 maple street", "123  Maple Str.". Fold both sides to
+   the same shape before comparing, and expand the handful of suffixes that
+   account for nearly all of the variation. */
+const SUFFIX = {
+  st: "street", str: "street", rd: "road", ave: "avenue", av: "avenue",
+  blvd: "boulevard", dr: "drive", ln: "lane", ct: "court", pl: "place",
+  ter: "terrace", trl: "trail", pkwy: "parkway", hwy: "highway",
+  sq: "square", cres: "crescent", cl: "close", gdns: "gardens",
+  n: "north", s: "south", e: "east", w: "west",
+  ne: "northeast", nw: "northwest", se: "southeast", sw: "southwest",
+  apt: "", unit: "", "#": "", no: "",
+};
+
+function normaliseAddress(v) {
+  return String(v || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(" ")
+    .map((w) => (w in SUFFIX ? SUFFIX[w] : w))
+    .filter(Boolean)
+    .join(" ");
+}
+
+/* Returns every unit whose property matches what was typed. One match sends
+   the tenant straight on; several means a building, and they pick the unit.
+
+   This is deliberately a lookup and not a search: it answers "is this address
+   one of yours", which any intake form must answer, and never "what addresses
+   do you have". The rate limit on POST /report covers the rest. */
+async function findUnits(companyId, typed) {
+  const want = normaliseAddress(typed);
+  if (want.length < 4) return [];
+
+  const rows = await all(
+    `SELECT u.id, u.label, u.report_token, p.line1, p.city FROM unit u
+       JOIN property p ON p.id = u.property_id
+      WHERE u.company_id = ? ORDER BY p.line1, u.label`, companyId);
+
+  const scored = rows.map((r) => ({ r, key: normaliseAddress(r.line1) }));
+
+  // Exact first, then "typed the street but also the unit number", then a
+  // house-number-plus-street-name match for everything else.
+  let hit = scored.filter((x) => x.key === want);
+  if (!hit.length) hit = scored.filter((x) => want.startsWith(x.key + " ") || want === x.key);
+  if (!hit.length) {
+    const num = want.match(/^\d+/);
+    if (num) {
+      hit = scored.filter((x) => {
+        if (!x.key.startsWith(num[0] + " ")) return false;
+        const street = x.key.slice(num[0].length + 1).split(" ")[0];
+        return street && want.includes(street);
+      });
+    }
+  }
+  return hit.map((x) => x.r);
+}
+
 async function unitOptions(companyId) {
   return await all(
     `SELECT u.id, u.label, p.line1, p.city FROM unit u
@@ -741,7 +854,7 @@ function emergencyBanner(company) {
     </div>`;
 }
 
-function intakeStepOne({ company, units, chosenUnit, error }) {
+function intakeAddress({ company, typed, error }) {
   return html`
     ${emergencyBanner(company)}
     ${error ? notice("warn", null, decodeURIComponent(error)) : ""}
@@ -750,17 +863,59 @@ function intakeStepOne({ company, units, chosenUnit, error }) {
       <div class="panel__body">
         <form method="get" action="/report" class="formgrid">
           <div class="field">
-            <label for="unit">Your address</label>
-            <select id="unit" name="unit" required>
-              <option value="">Choose your address…</option>
-              ${units.map((u) => html`
-                <option value="${u.id}"${attr("selected", chosenUnit && chosenUnit.id === u.id)}>
-                  ${u.line1}${u.label ? ` — unit ${u.label}` : ""}, ${u.city}
-                </option>`)}
-            </select>
+            <label for="addr">Your street address</label>
+            <input id="addr" name="addr" type="text" required autocomplete="street-address"
+                   value="${typed || ""}" placeholder="123 Maple Street" />
+            <span class="field__help">Street and number is enough — we will ask which unit if we need to.</span>
           </div>
+          <button class="pill solid" type="submit">Continue</button>
+        </form>
+      </div>
+      <div class="panel__foot">
+        There is a QR code inside your unit that skips this step. Scanning it
+        is the fastest way in, and it fills your address in for you.
+      </div>
+    </div>`;
+}
+
+function intakePickUnit({ company, matches, typed }) {
+  return html`
+    ${emergencyBanner(company)}
+    <div class="panel">
+      <div class="panel__head">
+        <h2>Which unit?</h2>
+        <a class="pill outline sm" href="/report">Change address</a>
+      </div>
+      <div class="panel__body">
+        <form method="get" action="/report" class="formgrid">
           <div class="field">
-            <span class="field__label" style="display:block;font-size:0.8125rem;font-weight:600;margin-bottom:0.4375rem">What kind of problem is it?</span>
+            <div class="radioset">
+              ${matches.map((u) => html`
+                <label class="radiotile">
+                  <input type="radio" name="u" value="${u.report_token}" required />
+                  <span>Unit ${u.label || "—"}<small>${u.line1}, ${u.city}</small></span>
+                </label>`)}
+            </div>
+          </div>
+          <button class="pill solid" type="submit">Continue</button>
+        </form>
+      </div>
+    </div>`;
+}
+
+function intakeCategory({ company, unit, error }) {
+  return html`
+    ${emergencyBanner(company)}
+    ${error ? notice("warn", null, decodeURIComponent(error)) : ""}
+    <div class="panel">
+      <div class="panel__head">
+        <h2>What kind of problem is it?</h2>
+        <a class="pill outline sm" href="/report">Not your address?</a>
+      </div>
+      <div class="panel__body">
+        <form method="get" action="/report" class="formgrid">
+          <input type="hidden" name="u" value="${unit.report_token}" />
+          <div class="field">
             <div class="radioset">
               ${CATEGORIES.map((c) => html`
                 <label class="radiotile">
@@ -782,12 +937,12 @@ function intakeStepTwo({ company, unit, cat, csrf, error }) {
     <div class="panel">
       <div class="panel__head">
         <h2>${cat.label}</h2>
-        <a class="pill outline sm" href="/report?unit=${unit.id}">Change</a>
+        <a class="pill outline sm" href="/report?u=${unit.report_token}">Change</a>
       </div>
       <div class="panel__body">
         <form method="post" action="/report" enctype="multipart/form-data" class="formgrid">
           <input type="hidden" name="_csrf" value="${csrf}" />
-          <input type="hidden" name="unit_id" value="${unit.id}" />
+          <input type="hidden" name="unit_token" value="${unit.report_token}" />
           <input type="hidden" name="category" value="${cat.key}" />
 
           <div class="field">
