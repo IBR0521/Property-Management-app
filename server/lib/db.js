@@ -33,10 +33,28 @@ if (!url) {
   );
 }
 
+/* TLS.
+
+   "require" encrypts the connection but does NOT verify the certificate, so it
+   protects against passive eavesdropping and not against an active attacker
+   who can present any certificate. Supabase's pooler is signed by their own
+   CA rather than a publicly trusted one, so verify-full only works once that
+   CA is supplied.
+
+   Download it from Supabase -> Project Settings -> Database -> SSL
+   Configuration and pass the contents as DATABASE_CA_CERT. With it set, the
+   certificate chain and hostname are both checked. */
+const CA = process.env.DATABASE_CA_CERT;
+const ssl = CA
+  ? { ca: CA, rejectUnauthorized: true }
+  : "require";
+
+export const VERIFIED_TLS = Boolean(CA);
+
 export const db = postgres(url, {
   // Required by pgbouncer in transaction mode, which is what port 6543 is.
   prepare: false,
-  ssl: "require",
+  ssl,
   /* Pages issue their queries concurrently, so a pool of one would serialise
      them again and undo the point. Four is enough for the widest page and
      leaves plenty of headroom against Supabase's 200 client limit. */
@@ -102,7 +120,12 @@ export async function run(sql, ...params) {
 
 export async function one(sql, ...params) {
   const row = await get(sql, ...params);
-  if (!row) throw new NotFound(`no row for: ${sql.slice(0, 60)}`);
+  if (!row) {
+    // The SQL used to be in this message, and the message reaches the browser.
+    const err = new NotFound("Not found");
+    err.query = sql.slice(0, 120);   // for the server log only
+    throw err;
+  }
   return row;
 }
 

@@ -2,6 +2,7 @@
 import { get } from "../lib/db.js";
 import { verifyPassword, startSession, endSession } from "../lib/auth.js";
 import { sendHtml, redirect } from "../lib/http.js";
+import { check, clear, clientIp } from "../lib/ratelimit.js";
 import { signInPage } from "../views/layout.js";
 
 export function registerAuthRoutes(router) {
@@ -19,6 +20,15 @@ export function registerAuthRoutes(router) {
   router.post("/app/sign-in", async (ctx) => {
     const email = String(ctx.fields.email || "").trim().toLowerCase();
     const password = String(ctx.fields.password || "");
+
+    /* Without this a password is simply brute-forceable. Keyed on address AND
+       email so one noisy client cannot lock a colleague out, and so trying a
+       thousand passwords against one account is what actually gets stopped. */
+    const gate = await check("signin", `${clientIp(ctx.req)}|${email}`);
+    if (!gate.allowed) {
+      return redirect(ctx.res, `/app/sign-in?e=${encodeURIComponent(
+        `Too many attempts. Wait ${gate.retryAfterMinutes} minutes and try again.`)}`);
+    }
     const staff = await get(
       "SELECT * FROM staff WHERE lower(email) = ? AND active = 1", email
     );
@@ -29,6 +39,8 @@ export function registerAuthRoutes(router) {
       return redirect(ctx.res, `/app/sign-in?e=${encodeURIComponent("That email and password do not match.")}`);
     }
 
+    // A legitimate user who fumbled the password should not stay throttled.
+    await clear("signin", `${clientIp(ctx.req)}|${email}`);
     await startSession(ctx.res, staff.id, { secure: ctx.url.protocol === "https:" });
     const next = typeof ctx.fields.next === "string" && ctx.fields.next.startsWith("/app") ? ctx.fields.next : "/app";
     redirect(ctx.res, next);

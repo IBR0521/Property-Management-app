@@ -81,7 +81,9 @@ export function appPage({ staff, active, title, subtitle, actions, body, counts 
     )}
 
     <div class="shell__foot">
-      <div class="shell__who"><b>${staff.name}</b>${staff.email}</div>
+      <a class="shell__who" href="/app/account" style="display:block;text-decoration:none">
+        <b>${staff.name}</b>${staff.email}
+      </a>
       <form method="post" action="/app/sign-out">
         <input type="hidden" name="_csrf" value="${csrf}" />
         <button class="navlink" type="submit" style="width:100%;text-align:left">${icons.out}<span>Sign out</span></button>

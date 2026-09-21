@@ -24,6 +24,7 @@ import { html, attr } from "../lib/render.js";
 import { appPage, publicPage, notice, empty, tabs, PEOPLE_TABS } from "../views/layout.js";
 import { navCounts } from "../lib/counts.js";
 import { storeMany, DOC_TYPES, fileUrl } from "../lib/files.js";
+import { check, clientIp } from "../lib/ratelimit.js";
 
 const STATUS_TONE = {
   received: "warn", incomplete: "warn", screening: "brand",
@@ -112,6 +113,10 @@ export function registerApplications(router) {
   });
 
   router.post("/apply", async (ctx) => {
+    const gate = await check("apply", clientIp(ctx.req));
+    if (!gate.allowed) {
+      return sendHtml(ctx.res, "Too many applications from this connection. Please call us instead.", 429);
+    }
     const company = await one("SELECT * FROM company LIMIT 1");
     const f = ctx.fields;
     const unit = await get(

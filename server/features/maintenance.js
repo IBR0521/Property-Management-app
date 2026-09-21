@@ -23,6 +23,7 @@ import { icons } from "../views/icons.js";
 import { navCounts } from "../lib/counts.js";
 import { storeMany, fileUrl } from "../lib/files.js";
 import { CATEGORIES, category, assess } from "../lib/triage.js";
+import { check, clientIp } from "../lib/ratelimit.js";
 
 const STATUS_TONE = {
   new: "warn", triaged: "warn", awaiting_owner: "warn",
@@ -61,6 +62,13 @@ export function registerMaintenance(router) {
   });
 
   router.post("/report", async (ctx) => {
+    /* Anyone can reach this form, so anyone can script it. Generous enough for
+       a real block of flats reporting a burst outage, tight enough that nobody
+       fills the queue with thousands of jobs. */
+    const gate = await check("report", clientIp(ctx.req));
+    if (!gate.allowed) {
+      return sendHtml(ctx.res, "Too many requests from this connection. Please call us instead.", 429);
+    }
     const company = await one("SELECT * FROM company LIMIT 1");
     const f = ctx.fields;
     const unit = await get(

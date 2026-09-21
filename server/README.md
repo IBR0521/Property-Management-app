@@ -378,3 +378,81 @@ on every read and write attempt with the publishable key.
 **Still worth doing:** rotate the database password and the `sb_secret_…`
 service-role key. The service-role key bypasses RLS by design, so it is the one
 credential this lockdown does not defend against.
+
+---
+
+# Security review
+
+A full pass over authentication, transport, headers, abuse and the database.
+Findings and what was done about each.
+
+## Fixed
+
+**The session cookie was never marked `Secure`.** The request URL was built
+with a hardcoded `http://`, so `protocol` never read `https` and the flag was
+never set in production. The scheme now comes from `x-forwarded-proto`, which
+is what a proxy like Vercel actually sets. Verified: `Secure` appears behind an
+HTTPS proxy and does not on plain localhost, where it would break development.
+
+**Nothing was rate limited.** Sign-in was brute-forceable and the public tenant
+and application forms could be flooded. `rate_hit` counts attempts in a rolling
+window — in the database, because a serverless process does not survive between
+requests and an in-memory counter would enforce nothing. Sign-in locks after 8
+attempts per address+email in 15 minutes; the public forms allow 12 and 8 per
+hour. The limiter fails open: a database problem should not lock everyone out
+of their own sign-in page.
+
+**No Content-Security-Policy.** Now set, with `script-src 'self'` — none of the
+pages this handler renders carry an inline script, so an injected `<script>`
+has nothing to execute. `frame-ancestors 'none'` stops clickjacking and
+`form-action 'self'` stops an injected form posting credentials elsewhere.
+HSTS is sent only over HTTPS. `Permissions-Policy` drops camera, microphone,
+geolocation, payment and USB.
+
+**Error pages echoed internals.** `err.message` went straight to the browser,
+and `NotFound` carried a fragment of the SQL that failed. Only errors this app
+raised deliberately now reach a visitor; everything else becomes a generic
+line, with the real error in the server log.
+
+**No way to change a password.** `/app/account` now does it, requiring the
+current password, a minimum of 12 characters, and signing out every other
+device on success. It also lists active sessions with a "sign out everywhere
+else" button. Rate limited on the same basis as sign-in, because it is the
+same guess.
+
+**CSRF comparison was not constant-time.** Now `timingSafeEqual`.
+
+## Database
+
+- **RLS on 37 of 37 tables, zero policies** — deny-all for any role that does
+  not bypass it. New tables from future migrations are swept automatically.
+- **Grants:** only `postgres` and `service_role`. `anon`, `authenticated` and
+  the `PUBLIC` pseudo-role hold nothing.
+- **No `SECURITY DEFINER` functions and no views** in `public` — both are ways
+  RLS can be sidestepped, and there are none.
+- **GraphQL is not enabled**, so `pg_graphql` exposes nothing.
+- **Storage has no buckets.**
+- Verified by attempting reads and writes against the REST API with the
+  publishable key: `401 / 42501 insufficient privilege` every time.
+
+## Open — these need you, not code
+
+**Rotate the `sb_secret_…` service-role key.** It holds 259 privileges and
+bypasses RLS by design; that is its purpose, and no lockdown defends against
+it. It was pasted into a chat log, so it must be rotated.
+
+**Turn on "Enforce SSL on incoming connections"** in Supabase → Database
+Settings. The pooler currently *accepts* unencrypted connections. This app
+always uses TLS, but nothing stops a misconfigured client from not doing so.
+
+**Supply the database CA certificate.** `ssl: "require"` encrypts but does not
+verify the certificate, so it defends against eavesdropping and not against an
+active interception. Supabase signs with its own CA, so verification needs that
+CA file: download it from Project Settings → Database → SSL Configuration and
+set its contents as `DATABASE_CA_CERT`. `/health` reports which mode is in use.
+
+**The public repair form lists every property you manage.** The address picker
+at `/report` is an enumeration of the whole portfolio to anyone who opens the
+page. That is a product decision rather than a bug — a QR code per unit, or
+requiring the tenant to type their address, would close it at some cost in
+convenience.

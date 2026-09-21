@@ -3,7 +3,7 @@
    Hand-rolled rather than pulled from npm: the whole surface this app needs is
    a form parser, a multipart parser, cookies and a few send helpers. That is a
    few hundred lines I can read, against a dependency tree I cannot. */
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 
 /* Caps exist so a single request cannot exhaust memory. Photos from a phone
    are routinely 3-6MB, so the per-file ceiling has to be generous. */
@@ -155,17 +155,59 @@ export function clearCookie(res, name) {
 
 /* --- responses ------------------------------------------------------------ */
 
+/* Content-Security-Policy for pages this handler renders. None of them carry
+   an inline <script>, so script-src stays at 'self' and an injected <script>
+   tag has nothing to execute. Inline STYLE is allowed because the app uses
+   style attributes throughout; style injection is a far smaller problem than
+   script injection, and every interpolation is escaped anyway.
+
+   frame-ancestors 'none' stops clickjacking, form-action 'self' stops an
+   injected form posting credentials to another origin, and object-src 'none'
+   removes the plugin surface entirely. */
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com",
+  "img-src 'self' data: blob: https://*.public.blob.vercel-storage.com",
+  "connect-src 'self'",
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "object-src 'none'",
+].join("; ");
+
 const SECURITY_HEADERS = {
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "strict-origin-when-cross-origin",
-  "X-Frame-Options": "SAMEORIGIN",
+  "X-Frame-Options": "DENY",
+  "Content-Security-Policy": CSP,
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+  "Cross-Origin-Opener-Policy": "same-origin",
 };
+
+/* HSTS only over HTTPS. Sending it on a plaintext response is meaningless and
+   on localhost it would pin the developer's browser to https for a year. */
+export function securityHeaders(req) {
+  return isHttps(req)
+    ? { ...SECURITY_HEADERS, "Strict-Transport-Security": "max-age=31536000; includeSubDomains" }
+    : SECURITY_HEADERS;
+}
+
+/* Behind Vercel the socket is plain HTTP and the real scheme arrives in a
+   header. Getting this wrong is how the session cookie ends up without its
+   Secure flag in production. */
+export function isHttps(req) {
+  const proto = req.headers["x-forwarded-proto"];
+  if (typeof proto === "string" && proto.length) return proto.split(",")[0].trim() === "https";
+  return Boolean(req.socket && req.socket.encrypted);
+}
 
 export function sendHtml(res, html, status = 200, extra = {}) {
   res.writeHead(status, {
     "Content-Type": "text/html; charset=utf-8",
     "Content-Length": Buffer.byteLength(html),
-    ...SECURITY_HEADERS,
+    ...(res.req ? securityHeaders(res.req) : SECURITY_HEADERS),
     ...extra,
   });
   res.end(html);
@@ -176,7 +218,7 @@ export function sendJson(res, data, status = 200) {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": Buffer.byteLength(body),
-    ...SECURITY_HEADERS,
+    ...(res.req ? securityHeaders(res.req) : SECURITY_HEADERS),
   });
   res.end(body);
 }
@@ -206,7 +248,17 @@ export function csrfToken(req, res) {
 export function checkCsrf(req, fields) {
   const jar = cookies(req);
   const sent = fields && fields._csrf;
-  return Boolean(jar.csrf && sent && jar.csrf === sent);
+  if (!jar.csrf || typeof sent !== "string") return false;
+  return timingSafeCompare(jar.csrf, sent);
+}
+
+/* Length is compared first because timingSafeEqual throws on a mismatch, and
+   the length of a CSRF token is not a secret. */
+export function timingSafeCompare(a, b) {
+  const x = Buffer.from(String(a));
+  const y = Buffer.from(String(b));
+  if (x.length !== y.length) return false;
+  return timingSafeEqual(x, y);
 }
 
 /* --- errors --------------------------------------------------------------- */

@@ -16,7 +16,7 @@ import { serveFromRoot, serveUpload } from "./lib/static.js";
 import { currentStaff } from "./lib/auth.js";
 import {
   parseRequestBody, sendHtml, sendText, sendJson, redirect,
-  HttpError, csrfToken, checkCsrf, Forbidden,
+  HttpError, csrfToken, checkCsrf, Forbidden, isHttps,
 } from "./lib/http.js";
 import { registerAuthRoutes } from "./features/session.js";
 import { registerQueue } from "./features/queue.js";
@@ -28,6 +28,7 @@ import { registerTurns } from "./features/turns.js";
 import { registerApplications } from "./features/applications.js";
 import { registerPortfolio } from "./features/portfolio.js";
 import { registerSetup } from "./features/setup.js";
+import { registerAccount } from "./features/account.js";
 
 const router = createRouter();
 
@@ -42,6 +43,7 @@ registerTurns(router);
 registerApplications(router);
 registerPortfolio(router);
 registerSetup(router);
+registerAccount(router);
 
 /* Routes that need a signed-in staff member. Everything under /app except the
    sign-in pages, which register themselves as public. */
@@ -49,7 +51,11 @@ const PUBLIC_APP_PATHS = new Set(["/app/sign-in", "/app/sign-out"]);
 
 export async function handle(req, res) {
 
-  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  /* Scheme from the proxy, not assumed. This was hardcoded to http://, which
+     meant ctx.url.protocol never read https and the session cookie never got
+     its Secure flag in production. */
+  const scheme = isHttps(req) ? "https" : "http";
+  const url = new URL(req.url, `${scheme}://${req.headers.host || "localhost"}`);
   const path = url.pathname.replace(/\/+$/, "") || "/";
 
   try {
@@ -85,7 +91,13 @@ export async function handle(req, res) {
         return sendJson(res, {
           ok: dbOk,
           at: new Date().toISOString(),
-          db: { reachable: dbOk, remote: Boolean(process.env.DATABASE_URL), error: dbError },
+          db: {
+            reachable: dbOk,
+            remote: Boolean(process.env.DATABASE_URL),
+            // encrypted always; verified only once a CA is supplied
+            tls: process.env.DATABASE_CA_CERT ? "verified" : "encrypted-unverified",
+            error: dbError,
+          },
           blob: Boolean(process.env.BLOB_READ_WRITE_TOKEN),
         }, dbOk ? 200 : 503);
       }
@@ -146,9 +158,18 @@ export async function handle(req, res) {
     else console.warn(`[${status}] ${req.method} ${path} — ${err.message}`);
 
     if (res.headersSent) return res.end();
+
+    /* Only messages this app wrote deliberately reach the visitor. Anything
+       else — a driver error, a failed query — carries internals such as SQL
+       fragments and table names, and is replaced with a generic line. The
+       real error is already in the server log above. */
+    const safe = err instanceof HttpError && status < 500
+      ? err.message
+      : "Something went wrong at our end. Try again, or call us if it keeps happening.";
+
     const wantsJson = (req.headers.accept || "").includes("application/json");
-    if (wantsJson) return sendJson(res, { error: err.message }, status);
-    sendHtml(res, errorPage(status, err.message), status);
+    if (wantsJson) return sendJson(res, { error: safe }, status);
+    sendHtml(res, errorPage(status, safe), status);
   }
 }
 

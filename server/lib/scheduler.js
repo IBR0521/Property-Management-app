@@ -13,6 +13,7 @@ import { id } from "./ids.js";
 import { today, addDays, stamp, monthKey, dueDateFor, human, daysBetween } from "./dates.js";
 import { usd } from "./money.js";
 import { pruneSessions } from "./auth.js";
+import { prune as pruneRateHits } from "./ratelimit.js";
 
 const EVERY_MS = 10 * 60 * 1000;
 
@@ -56,6 +57,7 @@ export async function tick(reason = "manual") {
 
   out.delivered = await drainOutbox();
   out.sessionsPruned = await pruneSessions();
+  out.rateHitsPruned = await pruneRateHits();
   return out;
 }
 
