@@ -17,6 +17,7 @@
 import { DELIVERY_MODE } from "../config.js";
 import { drains, reachesRecipients, describe } from "./mode.js";
 import * as logProvider from "./log.js";
+import { blockedReason } from "./consent.js";
 
 export { drains, reachesRecipients, describe };
 
@@ -32,11 +33,27 @@ export function providerFor(channel, forMode = DELIVERY_MODE) {
 
 /* One send. Never throws: a provider being unreachable is an outcome to record
    against this message, not an exception that aborts the drain of the fifty
-   behind it. */
+   behind it.
+
+   Consent is checked here rather than at each of the twelve call sites that
+   write to the outbox, because a check every producer has to remember is a
+   check one of them will not. */
 export async function deliver(
-  { channel, to, subject, body, from, companyId },
+  { channel, to, subject, body, from, companyId, kind = "transactional" },
   forMode = DELIVERY_MODE
 ) {
+  if (companyId) {
+    const blocked = await blockedReason(companyId, channel, to, kind);
+    if (blocked) {
+      return {
+        ok: false, providerMessageId: null, error: blocked,
+        /* Not retryable and not a failure: the message did what it should
+           have, which was not to go. */
+        retryable: false, suppressed: true, provider: null,
+      };
+    }
+  }
+
   const provider = providerFor(channel, forMode);
   if (!provider) {
     return { ok: false, providerMessageId: null, error: "delivery is off", retryable: true, provider: null };

@@ -17,6 +17,8 @@ import { prune as pruneRateHits } from "./ratelimit.js";
 import { DELIVERY_MODE } from "./config.js";
 import { drains, reachesRecipients } from "./delivery/mode.js";
 import { deliver } from "./delivery/index.js";
+import { outcomeFor, MAX_ATTEMPTS } from "./delivery/retry.js";
+import { log } from "./logger.js";
 
 const EVERY_MS = 10 * 60 * 1000;
 
@@ -64,7 +66,11 @@ export async function tick(reason = "manual") {
     Object.assign(out, sumInto(out, await judgePromises(company)));
   }
 
-  out.delivered = await drainOutbox();
+  const drained = await drainOutbox();
+  out.delivered = drained.sent;
+  out.deliveryFailed = drained.failed;
+  out.deliveryDead = drained.dead;
+  out.deliverySuppressed = drained.suppressed;
   out.sessionsPruned = await pruneSessions();
   out.rateHitsPruned = await pruneRateHits();
   return out;
@@ -383,31 +389,83 @@ async function judgePromises(company) {
    it matters: the on-call SMS never fires, so that guarantee currently rests on
    the tenant dialling the number on the stop card. Providers are plain HTTP
    APIs, so this stays dependency-free. See the checklist in server/README.md. */
-async function drainOutbox() {
-  if (!DELIVERY.draining) return 0;              // nothing is configured; the UI says so
-  const queued = await all("SELECT * FROM outbox WHERE status = 'queued' ORDER BY queued_at LIMIT 50");
-  let n = 0;
-  for (const m of queued) {
-    /* One path for every provider. A branch per mode here is how the
-       production path becomes the one that is never exercised. */
-    const result = await deliver({
+/* `send` and `now` are parameters rather than imports so the drainer can be
+   driven by a provider that fails on demand and a clock that does not have to
+   be waited out. The drainer does not care who sends — that is the whole point
+   of the provider interface — so taking it as an argument costs nothing and
+   makes the retry behaviour testable in milliseconds instead of hours. */
+export async function drainOutbox({ send = deliver, now = () => new Date(), mode = DELIVERY.mode } = {}) {
+  /* The mode is a parameter for the same reason the clock is: a test needs to
+     exercise both "delivery is off, touch nothing" and "delivery is on, here
+     is a provider that fails", and neither should depend on how the process
+     happened to be started. */
+  if (!drains(mode)) return { sent: 0, failed: 0, dead: 0, suppressed: 0 };
+
+  /* Due means queued and either never attempted or past its backoff. Retrying
+     everything on every tick is how a provider outage becomes a rate-limit
+     ban. */
+  const nowIso = now().toISOString();
+  const due = await all(
+    `SELECT * FROM outbox
+      WHERE status = 'queued'
+        AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
+      ORDER BY queued_at LIMIT 50`, nowIso);
+
+  const out = { sent: 0, failed: 0, dead: 0, suppressed: 0 };
+
+  for (const m of due) {
+    const result = await send({
       channel: m.channel, to: m.to_contact, subject: m.subject,
-      body: m.body, companyId: m.company_id,
+      body: m.body, companyId: m.company_id, kind: m.kind || "transactional",
     });
 
-    if (result.ok) {
+    const attempts = Number(m.attempts || 0) + 1;
+
+    if (result.suppressed) {
+      /* Not a failure. The recipient said no and the system listened, which is
+         a different fact from "we could not reach them" and is recorded as
+         one. */
       await run(
-        "UPDATE outbox SET status = 'sent', sent_at = ?, attempts = attempts + 1 WHERE id = ?",
-        stamp(), m.id);
-      n++;
+        `UPDATE outbox SET status = 'suppressed', attempts = ?, last_error = ?,
+                failed_at = ?, provider = ? WHERE id = ?`,
+        attempts, result.error, nowIso, result.provider, m.id);
+      out.suppressed++;
+      continue;
+    }
+
+    const outcome = outcomeFor(result, attempts, now());
+
+    if (outcome.status === "sent") {
+      await run(
+        `UPDATE outbox SET status = 'sent', sent_at = ?, attempts = ?,
+                provider = ?, provider_message_id = ?, last_error = NULL,
+                next_attempt_at = NULL WHERE id = ?`,
+        nowIso, attempts, result.provider, result.providerMessageId || null, m.id);
+      out.sent++;
+    } else if (outcome.status === "dead") {
+      await run(
+        `UPDATE outbox SET status = 'dead', attempts = ?, last_error = ?,
+                failed_at = ?, provider = ?, next_attempt_at = NULL WHERE id = ?`,
+        attempts, String(result.error || "send failed").slice(0, 300),
+        nowIso, result.provider, m.id);
+      out.dead++;
+      log.error("message dead-lettered", {
+        outboxId: m.id, channel: m.channel, attempts,
+        reason: outcome.permanent ? "permanent rejection" : "attempts exhausted",
+        error: String(result.error || "").slice(0, 200),
+      });
     } else {
       await run(
-        "UPDATE outbox SET attempts = attempts + 1, last_error = ? WHERE id = ?",
-        String(result.error || "send failed").slice(0, 300), m.id);
+        `UPDATE outbox SET attempts = ?, last_error = ?, next_attempt_at = ?,
+                provider = ? WHERE id = ?`,
+        attempts, String(result.error || "send failed").slice(0, 300),
+        outcome.nextAttemptAt, result.provider, m.id);
+      out.failed++;
     }
   }
-  return n;
+  return out;
 }
+
 
 export async function outboxPending(companyId) {
   return (await get("SELECT COUNT(*) AS n FROM outbox WHERE company_id = ? AND status = 'queued'", companyId)).n;
