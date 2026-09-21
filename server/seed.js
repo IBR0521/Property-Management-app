@@ -9,6 +9,7 @@
 import { migrate, db, insert, run, get, all } from "./lib/db.js";
 import { id, token, ref } from "./lib/ids.js";
 import { hashPassword } from "./lib/auth.js";
+import { randomBytes } from "node:crypto";
 import { stamp, today, addDays, monthKey, prevMonthRange } from "./lib/dates.js";
 import { tick } from "./lib/scheduler.js";
 
@@ -21,7 +22,11 @@ if (await get("SELECT id FROM company LIMIT 1")) {
 
 const now = stamp();
 const T = today();
-const PASSWORD = "columbus2026";
+/* Generated per run, never hardcoded. A fixed password in a seed script is a
+   published password the moment the repository is public — and this one was
+   used to seed a live database before anyone noticed. It is printed once, at
+   the end of the run, and never stored anywhere but the hash. */
+const PASSWORD = randomBytes(15).toString("base64url");
 
 const companyId = id();
 await insert("company", {
@@ -387,6 +392,9 @@ console.log(`
   Sign in at  http://localhost:4300/app
     dana@leafridgepm.test    ${PASSWORD}   (admin)
     marcus@leafridgepm.test  ${PASSWORD}   (manager)
+
+  ^ generated for this run only. Write it down now — it is not stored
+    anywhere, and nothing in this repository knows it.
 
   Public pages
     /report   tenant maintenance intake

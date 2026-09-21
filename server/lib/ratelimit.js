@@ -1,0 +1,71 @@
+/* Rate limiting.
+
+   Counts attempts in a rolling window, in the database rather than in memory,
+   because a serverless process does not survive between requests and an
+   in-memory counter would enforce nothing.
+
+   Deliberately fail-open: if the limiter itself errors, the request proceeds.
+   A database hiccup should not lock everyone out of their own sign-in page,
+   and the failure is logged rather than swallowed. */
+import { all, run, get } from "./db.js";
+import { id } from "./ids.js";
+
+export const LIMITS = {
+  // Sign-in is the one that matters: without this a password is brute-forceable.
+  signin: { max: 8, windowMinutes: 15 },
+  // Public forms: generous enough for a real block of flats, tight enough
+  // that nobody scripts thousands of work orders.
+  report: { max: 12, windowMinutes: 60 },
+  apply: { max: 8, windowMinutes: 60 },
+};
+
+/* Best-effort client address. Vercel and most proxies set x-forwarded-for;
+   the first entry is the client, the rest are proxies. */
+export function clientIp(req) {
+  const fwd = req.headers["x-forwarded-for"];
+  if (typeof fwd === "string" && fwd.length) return fwd.split(",")[0].trim();
+  return req.socket?.remoteAddress || "unknown";
+}
+
+/* Returns { allowed, remaining, retryAfterMinutes }. Records the attempt when
+   it is allowed, so a caller that is already over the limit does not extend
+   its own lockout by hammering. */
+export async function check(bucket, subject) {
+  const limit = LIMITS[bucket];
+  if (!limit) return { allowed: true, remaining: Infinity };
+
+  const since = new Date(Date.now() - limit.windowMinutes * 60_000).toISOString();
+  try {
+    const row = await get(
+      "SELECT COUNT(*) n FROM rate_hit WHERE bucket = ? AND subject = ? AND at > ?",
+      bucket, subject, since
+    );
+    const used = Number(row?.n || 0);
+    if (used >= limit.max) {
+      return { allowed: false, remaining: 0, retryAfterMinutes: limit.windowMinutes };
+    }
+    await run(
+      "INSERT INTO rate_hit (id, bucket, subject, at) VALUES (?, ?, ?, ?)",
+      id(), bucket, subject, new Date().toISOString()
+    );
+    return { allowed: true, remaining: limit.max - used - 1 };
+  } catch (err) {
+    console.error("[ratelimit] check failed, allowing request", err.message);
+    return { allowed: true, remaining: Infinity };
+  }
+}
+
+/* Called after a successful sign-in so a legitimate user who fumbled their
+   password a few times does not stay throttled. */
+export async function clear(bucket, subject) {
+  try {
+    await run("DELETE FROM rate_hit WHERE bucket = ? AND subject = ?", bucket, subject);
+  } catch { /* housekeeping only */ }
+}
+
+/* Old rows are noise; the scheduler drops them. */
+export async function prune() {
+  const cutoff = new Date(Date.now() - 24 * 3600_000).toISOString();
+  const r = await run("DELETE FROM rate_hit WHERE at < ?", cutoff);
+  return r.changes;
+}
