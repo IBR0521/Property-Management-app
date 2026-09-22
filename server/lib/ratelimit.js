@@ -24,6 +24,11 @@ export const LIMITS = {
      enough for somebody who mistypes an amount twice and comes back, tight
      enough that the link cannot be used to run up API calls. */
   pay: { max: 10, windowMinutes: 30 },
+  /* Portal sign-in attempts, counted per network before any lookup happens.
+     The inner limit in magiclink.js counts links actually issued; this one
+     counts tries, so a script pointed at a thousand addresses is stopped
+     before the difference in work done could leak which of them exist. */
+  portal: { max: 30, windowMinutes: 60 },
 };
 
 /* Best-effort client address. Vercel and most proxies set x-forwarded-for;

@@ -142,6 +142,50 @@ ${impersonation ? html`
 </html>`);
 }
 
+/* The portal: a tenant or an owner, signed in as themselves.
+
+   Deliberately not the staff shell. A person signed into the place they pay
+   rent should not be looking at something that resembles an operations
+   console — it is a handful of things about their own home, so it gets a
+   narrow page and a short bar rather than a sidebar of sections they will
+   never open.
+
+   Built from `publicPage`'s furniture rather than `appPage`'s, so the two
+   cannot drift into each other. */
+export function portalPage({ title, heading, lede, body, person, company, tabs: items, active }) {
+  return doc(html`
+<html lang="en">
+<head>${HEAD(`${title} · ${company?.name || "Your account"}`)}</head>
+<body class="antialiased">
+<div class="pub" style="max-width:52rem">
+  <div class="pub__brand" style="justify-content:space-between">
+    <span style="display:inline-flex;align-items:center;gap:0.5rem">
+      ${icons.logo}<b>${company?.name || "Your account"}</b>
+    </span>
+    ${person ? html`
+      <span class="cellsub" style="display:inline-flex;align-items:center;gap:0.75rem">
+        ${person.name || person.email}
+        <a href="/portal/sign-out">Sign out</a>
+      </span>` : ""}
+  </div>
+
+  ${items && items.length > 1 ? html`
+    <nav class="tabs" aria-label="Your account">
+      ${items.map((t) => html`
+        <a class="tab" href="${t.href}"${attr("aria-current", t.key === active ? "page" : null)}>${t.label}</a>`)}
+    </nav>` : ""}
+
+  ${heading ? html`<h1>${heading}</h1>` : ""}
+  ${lede ? html`<p class="lede">${lede}</p>` : ""}
+  ${body}
+  <p class="pub__foot">
+    ${company?.name || ""}${company?.phone ? html` · <a href="tel:${company.phone}">${company.phone}</a>` : ""}
+  </p>
+</div>
+</body>
+</html>`);
+}
+
 /* Public pages: tenants, owners and applicants. No shell, no nav, no account
    — they arrive on a tokenised link and should see one thing. */
 export function publicPage({ title, heading, lede, body, company, foot }) {

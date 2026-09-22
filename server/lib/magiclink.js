@@ -36,6 +36,7 @@ import { sha256 } from "./crypto.js";
 import { log } from "./logger.js";
 import { personByEmail, companiesFor, normaliseEmail } from "./identity.js";
 import { APP_BASE_URL } from "./config.js";
+import { cookies, setCookie, clearCookie } from "./http.js";
 
 /* Long enough that guessing is not a strategy, short-lived enough that a
    forwarded email is not a standing key. Fifteen minutes is the window
@@ -241,4 +242,58 @@ export async function prunePortalSessions() {
     "DELETE FROM portal_login_token WHERE created_at < ?",
     new Date(Date.now() - 30 * 86_400_000).toISOString());
   return { portalSessionsPruned: sessions.changes, loginTokensPruned: tokens.changes };
+}
+
+/* --- the cookie -------------------------------------------------------------
+
+   A different name from the staff one, deliberately. Two cookies means a
+   browser can hold both at once — a member of staff who also rents from their
+   own company is a real person, not a hypothetical — and it means neither
+   gate can ever read the other's. */
+export const PORTAL_COOKIE = "pops_portal";
+const PORTAL_DAYS = 30;
+
+export function setPortalCookie(res, sessionId, { secure } = {}) {
+  setCookie(res, PORTAL_COOKIE, sessionId, {
+    expires: new Date(Date.now() + PORTAL_DAYS * 86_400_000), secure,
+  });
+}
+
+export function clearPortalCookie(res) {
+  clearCookie(res, PORTAL_COOKIE);
+}
+
+/* Who is signed into the portal on this request, or null. The portal twin of
+   `currentStaff`, and kept as far from it as the two tables are. */
+export async function currentPerson(req) {
+  const sid = cookies(req)[PORTAL_COOKIE];
+  if (!sid) return null;
+  const session = await sessionFor(sid);
+  if (!session) return null;
+
+  /* The company on the session is where they last chose to be. It is checked
+     against a live link on every request rather than trusted from the row,
+     because access can be revoked between one page and the next. */
+  let company = null;
+  if (session.company_id) {
+    company = await get(
+      `SELECT c.* FROM company c
+        WHERE c.id = ? AND EXISTS (
+          SELECT 1 FROM person_link l
+           WHERE l.person_id = ? AND l.company_id = c.id AND l.revoked_at IS NULL)`,
+      session.company_id, session.person_id);
+    /* Revoked while they were signed in: the session survives, the company
+       selection does not, and they land back on the picker. */
+    if (!company) await update("portal_session", session.id, { company_id: null });
+  }
+
+  return {
+    sessionId: session.id,
+    personId: session.person_id,
+    email: session.email,
+    name: session.name,
+    phone: session.phone,
+    company,
+    companyId: company ? company.id : null,
+  };
 }

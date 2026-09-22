@@ -16,6 +16,7 @@ import { captureError } from "./lib/errors.js";
 import { DATABASE_URL, DATABASE_CA_CERT, BLOB_READ_WRITE_TOKEN, configSummary } from "./lib/config.js";
 import { createRouter } from "./lib/router.js";
 import { serveFromRoot, serveUpload } from "./lib/static.js";
+import { currentPerson } from "./lib/magiclink.js";
 import { currentStaff, can, requiredCapability, roleLabel, secondFactorRedirect } from "./lib/auth.js";
 import {
   parseRequestBody, sendHtml, sendText, sendJson, redirect,
@@ -46,6 +47,9 @@ import { registerBilling, companyIsReadOnly, readOnlyExempt } from "./features/b
 import { registerPlatform, activeImpersonation, impersonationForbids } from "./features/platform.js";
 import { registerPayments } from "./features/payments.js";
 import { registerPayouts } from "./features/payouts.js";
+import { registerPortal } from "./features/portal.js";
+import { registerPortalTenant } from "./features/portal-tenant.js";
+import { registerPortalOwner } from "./features/portal-owner.js";
 
 const router = createRouter();
 
@@ -75,10 +79,20 @@ registerBilling(router);
 registerPlatform(router);
 registerPayments(router);
 registerPayouts(router);
+registerPortal(router);
+registerPortalTenant(router);
+registerPortalOwner(router);
 
 /* Routes that need a signed-in staff member. Everything under /app except the
    sign-in pages, which register themselves as public. */
 const PUBLIC_APP_PATHS = new Set(["/app/sign-in", "/app/sign-out"]);
+
+/* Reachable without a portal session: the sign-in form itself, the page that
+   confirms a link was sent, and signing out. `/portal/enter/:token` is public
+   too and handled by prefix, because the token in it is the credential. */
+const PUBLIC_PORTAL_PATHS = new Set([
+  "/portal", "/portal/sign-in", "/portal/sent", "/portal/sign-out", "/portal/code",
+]);
 
 /* Exported for the test suite, which asserts properties over every registered
    route. Nothing in the application reads it. */
@@ -172,6 +186,7 @@ export async function handle(req, res) {
       params: hit.params,
       query: Object.fromEntries(url.searchParams),
       staff: null,
+      person: null,
       fields: {},
       files: [],
       csrf: null,
@@ -181,6 +196,13 @@ export async function handle(req, res) {
     /* Prefix matching on "/app" alone also catches /apply and /application —
        the guard has to be the segment, not the string. */
     const isAppRoute = path === "/app" || path.startsWith("/app/");
+
+    /* The portal: tenants and owners, signed in as a person rather than as a
+       member of staff. A separate branch beside the staff one rather than a
+       widened version of it, for the same reason the sessions are separate
+       tables — the two actors carry different things, and the gate that
+       cannot confuse them is the gate that never has to remember not to. */
+    const isPortalRoute = path === "/portal" || path.startsWith("/portal/");
 
     if (isAppRoute && !PUBLIC_APP_PATHS.has(path)) {
       ctx.staff = await currentStaff(req);
@@ -254,6 +276,30 @@ export async function handle(req, res) {
       }
     } else if (isAppRoute) {
       ctx.staff = await currentStaff(req);
+    }
+
+    if (isPortalRoute) {
+      ctx.person = await currentPerson(req);
+
+      if (!ctx.person && !PUBLIC_PORTAL_PATHS.has(path) && !path.startsWith("/portal/enter/")) {
+        const back = encodeURIComponent(url.pathname + url.search);
+        return redirect(res, `/portal/sign-in?next=${back}`);
+      }
+
+      /* Signed in, but not yet looking at a company. A person with links in
+         two companies has to pick one before any record is readable, because
+         every portal query is scoped by the chosen company and a query with
+         no company is a query with no boundary. */
+      if (ctx.person && !ctx.person.companyId
+          && !PUBLIC_PORTAL_PATHS.has(path) && path !== "/portal/choose") {
+        return redirect(res, "/portal/choose");
+      }
+
+      /* There is no capability table here on purpose. A person's authority is
+         the set of records they hold, which is a question about rows rather
+         than about roles, so it is asked per record by `leaseIfHeld` and its
+         siblings rather than answered once by a name. */
+      if (ctx.person) actor = { companyId: ctx.person.companyId, personId: ctx.person.personId };
     }
 
     if (req.method === "POST") {
