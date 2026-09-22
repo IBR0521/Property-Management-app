@@ -8,6 +8,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 
 const CONFIG = fileURLToPath(new URL("../server/lib/config.js", import.meta.url));
 
@@ -120,5 +121,52 @@ describe("the config summary never carries a secret", () => {
     const serialised = JSON.stringify(r.summary);
     assert.ok(!serialised.includes(secret),
       "configSummary is rendered on /health, which is public");
+  });
+});
+
+/* --- and that somebody can find out what to set --------------------------- */
+
+describe("every variable is written down", () => {
+  /* This rule had quietly broken. Twenty-three variables — every Stripe key,
+     both Twilio credentials, the inbound-email secret — were read at boot and
+     documented nowhere, so the only way to find out what to set was to read
+     config.js. That is fine for the person who wrote it and useless to anyone
+     else, and it is exactly the kind of debt that never gets paid off by
+     intention. So it is a test. */
+  const CONFIG_SOURCE = readFileSync(CONFIG, "utf8");
+  const README = readFileSync(
+    fileURLToPath(new URL("../server/README.md", import.meta.url)), "utf8");
+
+  /* Read out of the source rather than listed here, so a variable added
+     tomorrow is caught without anybody remembering to update this. */
+  const VARIABLES = [...new Set(
+    [...CONFIG_SOURCE.matchAll(/raw\("([A-Z0-9_]+)"\)|process\.env\.([A-Z0-9_]+)/g)]
+      .map((m) => m[1] || m[2]))].sort();
+
+  test("config.js reads a plausible number of them", () => {
+    /* A guard on the guard: if the regex above stops matching, every
+       assertion below passes vacuously. */
+    assert.ok(VARIABLES.length > 30, `only found ${VARIABLES.length}`);
+  });
+
+  test("each one appears in the environment table", () => {
+    const missing = VARIABLES.filter((v) => !README.includes(`\`${v}\``));
+    assert.deepEqual(missing, [],
+      "read at boot and documented nowhere — add it to Environment in server/README.md");
+  });
+
+  test("the table says whether each one is required", () => {
+    /* A name in prose is not documentation. Every variable has to be in a
+       row of the table, where the middle column says what happens without
+       it. */
+    const rows = [...README.matchAll(/^\|(.+)\|(.+)\|(.+)\|$/gm)]
+      .map((m) => ({ names: m[1], required: m[2].trim() }));
+
+    for (const name of VARIABLES) {
+      if (name === "VERCEL" || name === "AWS_LAMBDA_FUNCTION_NAME") continue; // never set by hand
+      const row = rows.find((r) => r.names.includes(`\`${name}\``));
+      assert.ok(row, `${name} is mentioned but is not in a table row`);
+      assert.ok(row.required.length > 0, `${name}'s row does not say whether it is required`);
+    }
   });
 });

@@ -913,6 +913,55 @@ than a decryption failure months later.
 | `NODE_ENV` | no | `test` switches which database URL is used. |
 | `PORT` | no | Local dev server, default 4300. |
 
+## Sending
+
+| Variable | Required | What it is |
+|---|---|---|
+| `EMAIL_FROM` | to send email | The From address. Unset with a live mode is a boot failure. |
+| `RESEND_API_KEY` | to send email | Unset means email queues and is never sent; the dashboard says so. |
+| `RESEND_WEBHOOK_SECRET` | for delivery status | Verifies delivery callbacks. Without it the UI cannot honestly say a message arrived. |
+| `RESEND_INBOUND_SECRET` | for inbound email | Unset, `/api/webhooks/resend-inbound` returns 401 and accepts nothing. An unverified version would let anybody write into any company's inbox as any tenant. |
+| `PORTAL_REPLY_DOMAIN` | no | Where `reply+<token>@…` lands. Unset is a working state: threading falls back to `In-Reply-To` and to matching the sender, and the inbox says which mode it is in. |
+| `TWILIO_ACCOUNT_SID` `TWILIO_AUTH_TOKEN` | to send SMS | Unset means SMS queues and is never sent. |
+| `TWILIO_FROM_NUMBER` | to send SMS | One of this or the messaging service is needed. |
+| `TWILIO_MESSAGING_SERVICE_SID` | no | Preferred over a single number once there is more than one. |
+| `APP_BASE_URL` | to send | Cannot be derived from the request: Twilio signs over the full public URL, and behind a proxy the app sees an internal host. It is also what links inside messages are built from. |
+
+## Money
+
+Stripe Connect is **Standard**, not Express: on Express the platform carries
+liability for negative balances, and this application is never the custodian of
+anybody's money.
+
+| Variable | Required | What it is |
+|---|---|---|
+| `STRIPE_SECRET_KEY` | for payments | Unset means no card or ACH rails and every payment screen says so. |
+| `STRIPE_PUBLISHABLE_KEY` | for payments | Handed to the browser. Safe to expose; that is what it is for. |
+| `STRIPE_WEBHOOK_SECRET` | for payments | Verifies platform webhooks. Unverified webhooks would let anybody mark rent as paid. |
+| `STRIPE_CONNECT_CLIENT_ID` | for payouts | The Connect application. Unset means companies cannot connect an account. |
+| `STRIPE_CONNECT_WEBHOOK_SECRET` | for payouts | Verifies connected-account webhooks, including payout settlement. |
+| `STRIPE_PRICE_STARTER` `STRIPE_PRICE_GROWTH` `STRIPE_PRICE_PROFESSIONAL` `STRIPE_PRICE_SCALE` | for subscriptions | One price id per band. Read by name so a missing one identifies itself. |
+
+## Notifications
+
+| Variable | Required | What it is |
+|---|---|---|
+| `VAPID_PUBLIC_KEY` `VAPID_PRIVATE_KEY` | for web push | A P-256 pair, base64url. Generate with `npm run vapid`. The public half is handed to browsers, so replacing it invalidates every existing subscription. |
+| `VAPID_SUBJECT` | for web push | A `mailto:` or `https:` URL push services can reach somebody at. They mean it. |
+
+All three together or none: half-configured VAPID is refused at boot, because a
+public key with no private one hands browsers a subscription nothing can ever
+send to, and the failure is otherwise silent.
+
+## Administration
+
+| Variable | Required | What it is |
+|---|---|---|
+| `PLATFORM_OPERATOR_EMAIL` | no | The one address that may see across companies. An environment variable rather than a role, because a role is a column somebody can change and this capability must not be grantable from inside the product. Unset means the platform area does not exist. |
+
+`VERCEL` and `AWS_LAMBDA_FUNCTION_NAME` are read but never set by hand: they are
+how the application works out that it is deployed rather than local.
+
 ## Request ids
 
 Every request gets one before anything can throw, so even a 404 or a failed

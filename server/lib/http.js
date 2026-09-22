@@ -171,6 +171,11 @@ const CSP = [
   "font-src 'self' https://fonts.gstatic.com",
   "img-src 'self' data: blob: https://*.public.blob.vercel-storage.com",
   "connect-src 'self'",
+  /* The install metadata and the service worker. Both default to
+     default-src, which is already 'self' — named explicitly so that
+     narrowing default-src later cannot silently break installing. */
+  "manifest-src 'self'",
+  "worker-src 'self'",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",

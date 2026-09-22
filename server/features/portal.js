@@ -13,7 +13,7 @@
 import { all, get, one } from "../lib/db.js";
 import { sendHtml, redirect } from "../lib/http.js";
 import { html, attr } from "../lib/render.js";
-import { portalPage, publicPage, notice, empty } from "../views/layout.js";
+import { portalPage, publicPage, notice, empty, PORTAL_MANIFEST } from "../views/layout.js";
 import { check, clientIp } from "../lib/ratelimit.js";
 import { IS_SERVERLESS } from "../lib/config.js";
 import { queueMessage } from "../lib/outbox.js";
@@ -41,6 +41,7 @@ export function registerPortal(router) {
     if (ctx.person) return redirect(ctx.res, "/portal");
 
     sendHtml(ctx.res, publicPage({
+      install: PORTAL_MANIFEST,
       title: "Sign in",
       heading: "Your account",
       lede: "Rent, repairs and documents for the place you rent — or the property you own.",
@@ -113,6 +114,7 @@ export function registerPortal(router) {
 
   router.get("/portal/sent", async (ctx) => {
     sendHtml(ctx.res, publicPage({
+      install: PORTAL_MANIFEST,
       title: "Check your email",
       heading: "Check your email",
       body: html`

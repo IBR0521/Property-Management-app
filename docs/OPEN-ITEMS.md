@@ -93,6 +93,21 @@ is an endpoint anybody can post into as any tenant.
 
 ---
 
+## Mobile and push — what needs a real device or a real domain
+
+The service worker, the manifests and the payload encryption are all verified
+here. What cannot be verified on a laptop is whether the three companies that
+run the push services accept what we send them.
+
+| | What | Why it matters |
+|---|---|---|
+| P1 | **`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`** | Generate with `npm run vapid`. Unset means push is off and every screen says so. Half-set is refused at boot. The public key is handed to browsers, so replacing it later invalidates every subscription anybody has made. |
+| P2 | **One real subscription from a real browser, sent to** | The encryption reproduces the RFC 8291 §5 vectors byte for byte, and the VAPID tokens verify against their own key. Neither of those proves Apple, Google and Mozilla accept the result — that needs one real endpoint and one real send, and it is the only way to find out. |
+| P3 | **Installing on an actual phone** | Needs HTTPS on a real domain; `localhost` is a secure context but a home-screen install from it is not the same first run. The manifests, icons and offline page are verified in a browser, the install prompt is not. |
+| P4 | **The manifests carry no company name** | An installed icon says "Operations" or "Your home", not "Leafridge". A manifest is fetched without credentials, so the server cannot know which company is installing. Fixable with a per-company manifest URL if it matters; it is a deliberate generic today rather than an oversight. |
+
+---
+
 ## Security — overdue, and not blocked on anything
 
 | | What | Why it matters |

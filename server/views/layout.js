@@ -7,11 +7,24 @@ import { html, doc, raw, attr } from "../lib/render.js";
 import { icons } from "./icons.js";
 import { can, roleLabel } from "../lib/auth.js";
 
-const HEAD = (title) => html`
+const APP_MANIFEST = "/app-assets/manifest.webmanifest";
+export const PORTAL_MANIFEST = "/app-assets/portal.webmanifest";
+
+/* `install` is the manifest to offer, or null for a page nobody should be
+   installing. It also gates the service worker registration, because the two
+   belong together: the worker exists to make an installed copy open offline,
+   and a one-off tokenised page has no business leaving one behind on a
+   device. */
+const HEAD = (title, { install = null } = {}) => html`
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${title}</title>
 <meta name="robots" content="noindex, nofollow" />
+<meta name="theme-color" content="#1b184e" />
+<link rel="icon" href="/app-assets/icons/icon-192.png" sizes="192x192" type="image/png" />
+<link rel="apple-touch-icon" href="/app-assets/icons/icon-192.png" />
+${install ? html`<link rel="manifest" href="${install}" />
+<script src="/app-assets/js/register-sw.js" defer></script>` : ""}
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500&display=swap" rel="stylesheet" />
@@ -83,7 +96,7 @@ export function appPage({ staff, active, title, subtitle, actions, body, counts 
   const impersonation = staff?.impersonation || null;
   return doc(html`
 <html lang="en">
-<head>${HEAD(`${title} · ${staff.company_name}`)}</head>
+<head>${HEAD(`${title} · ${staff.company_name}`, { install: APP_MANIFEST })}</head>
 <body class="antialiased">
 ${impersonation ? html`
   <div class="impersonating">
@@ -156,7 +169,7 @@ ${impersonation ? html`
 export function portalPage({ title, heading, lede, body, person, company, tabs: items, active }) {
   return doc(html`
 <html lang="en">
-<head>${HEAD(`${title} · ${company?.name || "Your account"}`)}</head>
+<head>${HEAD(`${title} · ${company?.name || "Your account"}`, { install: PORTAL_MANIFEST })}</head>
 <body class="antialiased">
 <div class="pub" style="max-width:52rem">
   <div class="pub__brand" style="justify-content:space-between">
@@ -188,11 +201,16 @@ export function portalPage({ title, heading, lede, body, person, company, tabs: 
 }
 
 /* Public pages: tenants, owners and applicants. No shell, no nav, no account
-   — they arrive on a tokenised link and should see one thing. */
-export function publicPage({ title, heading, lede, body, company, foot }) {
+   — they arrive on a tokenised link and should see one thing.
+
+   `install` defaults to nothing, which is the right default: somebody who
+   followed a one-off link to report a leak should not come away with a
+   service worker on their phone. The portal's own sign-in pages pass it,
+   because that is where a tenant would install from. */
+export function publicPage({ title, heading, lede, body, company, foot, install = null }) {
   return doc(html`
 <html lang="en">
-<head>${HEAD(title)}</head>
+<head>${HEAD(title, { install })}</head>
 <body class="antialiased">
 <div class="pub">
   <div class="pub__brand">${icons.logo}<b>${company?.name || "Property operations"}</b></div>
@@ -209,7 +227,7 @@ export function publicPage({ title, heading, lede, body, company, foot }) {
 export function signInPage({ error, company, csrf, next }) {
   return doc(html`
 <html lang="en">
-<head>${HEAD("Sign in")}</head>
+<head>${HEAD("Sign in", { install: APP_MANIFEST })}</head>
 <body class="antialiased">
 <div class="pub" style="max-width:24rem">
   <div class="pub__brand">${icons.logo}<b>${company?.name || "Property operations"}</b></div>
