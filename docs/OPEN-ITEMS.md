@@ -78,6 +78,21 @@ file, because most of it is per-institution.
 
 ---
 
+## Messaging — what only a real domain can settle
+
+The inbox works today over SMS and from the portal. Inbound *email* is built
+and deliberately switched off until two things exist, because the alternative
+is an endpoint anybody can post into as any tenant.
+
+| | What | Why it matters |
+|---|---|---|
+| M1 | **`RESEND_INBOUND_SECRET`** | Verifies the inbound-parse webhook. Unset, `/api/webhooks/resend-inbound` returns 401 and accepts nothing — an unauthenticated version of it would let anybody write into any company's inbox as any tenant. |
+| M2 | **`PORTAL_REPLY_DOMAIN`**, and the inbound route pointed at it | Outbound email carries `reply+<token>@<domain>`, and that token is the only *certain* way to know which conversation a reply belongs to. Unset is a working state — threading falls back to `In-Reply-To` and to matching the sender — and the inbox says so on screen rather than being quietly worse. |
+| M3 | **Confirm Resend's inbound payload shape** | The mapping handles `from`/`to`/`cc`/`envelope.to`, both header shapes, and HTML-only bodies, tested against a fixture. The first real inbound message is the real test. |
+| M4 | **A note about the company's own email confirmation** | A company whose address is unconfirmed cannot send anything, including inbox replies. That is the existing rule and it is right; the inbox now names it on screen rather than saying "check the log". |
+
+---
+
 ## Security — overdue, and not blocked on anything
 
 | | What | Why it matters |

@@ -27,6 +27,7 @@ const NAV = [
   { group: null, items: [
     { href: "/app", key: "queue", icon: "inbox", label: "Queue", badge: "queue" },
     { href: "/app/portfolio", key: "properties", icon: "home", label: "Properties", badge: "properties" },
+    { href: "/app/inbox", key: "inbox", icon: "send", label: "Inbox", badge: "inbox" },
     { href: "/app/owners", key: "people", icon: "users", label: "People", badge: "people", need: "money.view" },
   ] },
   { group: "Money", items: [

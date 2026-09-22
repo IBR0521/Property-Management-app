@@ -197,6 +197,7 @@ const ROUTE_CAPABILITY = [
   ["/app/leases", "leasing.work"],
   ["/app/listings", "leasing.work"],
   ["/app/applications", "leasing.work"],
+  ["/app/inbox", "queue.view"],
   ["/app/maintenance", "maintenance.work"],
   ["/app/turns", "maintenance.work"],
   ["/app/compliance", "property.view"],

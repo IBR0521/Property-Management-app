@@ -13,7 +13,7 @@ import { today } from "./dates.js";
 export async function navCounts(companyId) {
   const n = async (sql, ...p) => Number((await get(sql, ...p)).n || 0);
 
-  const [emergencies, unassigned, blocked, overdue, approvals, lateRent, lateTurns, apps] =
+  const [emergencies, unassigned, blocked, overdue, approvals, lateRent, lateTurns, apps, unreadMail] =
     await Promise.all([
       n(`SELECT COUNT(*) n FROM work_order WHERE company_id = ? AND severity = 'emergency'
            AND status NOT IN ('complete','cancelled')`, companyId),
@@ -29,6 +29,10 @@ export async function navCounts(companyId) {
            AND target_ready_date IS NOT NULL AND target_ready_date < ?`, companyId, today()),
       n(`SELECT COUNT(*) n FROM application WHERE company_id = ?
            AND status IN ('received','incomplete','screening')`, companyId),
+      /* Conversations nobody has opened. Somebody wrote to this company and
+         is waiting, which belongs on the same footing as an unassigned job. */
+      n(`SELECT COUNT(*) n FROM thread WHERE company_id = ? AND unread = 1
+           AND state <> 'resolved'`, companyId),
     ]);
 
   // Ranks 0 and 1 are the things that need a person today; the badge on Queue
@@ -38,6 +42,7 @@ export async function navCounts(companyId) {
 
   return {
     queue: { n: total, tone: urgent ? "danger" : total ? "warn" : null },
+    inbox: { n: unreadMail, tone: unreadMail ? "warn" : null },
     properties: { n: lateRent + overdue, tone: overdue ? "danger" : lateRent ? "warn" : null },
     people: { n: approvals + apps, tone: approvals ? "warn" : null },
     _raw: { urgent, total, emergencies, unassigned, overdue, approvals, lateRent, apps },

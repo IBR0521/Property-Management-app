@@ -50,6 +50,7 @@ import { registerPayouts } from "./features/payouts.js";
 import { registerPortal } from "./features/portal.js";
 import { registerPortalTenant, registerPortalTenantSelfService } from "./features/portal-tenant.js";
 import { registerPortalOwner } from "./features/portal-owner.js";
+import { registerInbox } from "./features/inbox.js";
 
 const router = createRouter();
 
@@ -83,6 +84,7 @@ registerPortal(router);
 registerPortalTenant(router);
 registerPortalTenantSelfService(router);
 registerPortalOwner(router);
+registerInbox(router);
 
 /* Routes that need a signed-in staff member. Everything under /app except the
    sign-in pages, which register themselves as public. */
