@@ -296,13 +296,31 @@ describe("settling", () => {
     assert.equal(entry.journal_id, payment.journal_id, "the entry points at its journal");
   });
 
-  test("rent lands in trust cash, because it is the owner's money", async () => {
+  test("rent lands in payments-in-transit, because that is where it is", async () => {
+    /* Not trust cash. The tenant has paid and the money is real, but it is
+       at Stripe for another two to five days — it is not in the company's
+       bank. Posting it to 1010 would say it was, and then the deposit
+       arriving would post it a second time. The balance of 1020 is exactly
+       what the processor is holding. */
     const payment = await settled();
     const splits = await all(
       `SELECT a.code, s.debit_cents, s.credit_cents FROM journal_split s
          JOIN account a ON a.id = s.account_id WHERE s.journal_id = ?`, payment.journal_id);
     const debited = splits.find((s) => Number(s.debit_cents) > 0);
-    assert.equal(debited.code, "1010", "client money, distinguishable from the company's own");
+    assert.equal(debited.code, "1020", "held by the processor, not yet in the bank");
+
+    assert.equal(await trustCash(), 0,
+      "and nothing at all has reached the bank yet — not the rent, not the fee");
+    assert.equal(await inTransit(), RENT - 500,
+      "what the processor is holding, less the fee it already took");
+  });
+
+  test("a cheque recorded by hand still goes straight to the bank", async () => {
+    /* The distinction that makes 1020 meaningful: money banked by hand
+       really is in the bank the day it is banked. */
+    const { postingFor } = await import("../server/lib/ledger.js");
+    const splits = postingFor("rent_payment", 145000);
+    assert.equal(splits.find((s) => s.debit).code, "1010");
   });
 
   test("a webhook delivered twice does not post rent twice", async () => {
@@ -347,7 +365,8 @@ describe("settling", () => {
       [s.code, Number(s.debit_cents) || -Number(s.credit_cents)]));
 
     assert.equal(codes["5200"], 500);
-    assert.equal(codes["1010"], -500, "it comes out of the cash that arrived");
+    assert.equal(codes["1020"], -500,
+      "the processor takes it before it pays out, so it reduces what is in transit");
     assert.equal(codes["4300"], undefined, "nothing was recovered from the tenant");
   });
 
@@ -437,16 +456,50 @@ describe("a returned payment", () => {
     }
   });
 
-  test("trust cash nets back to where it started", async () => {
+  test("in-transit nets back to where it started", async () => {
     /* The point of the whole exercise: after a return, the company's books do
-       not show money it does not have. */
+       not show money it does not have. The rent never reached the bank in
+       this case — it was still with the processor — so it is in-transit that
+       has to come back to nothing. */
     const payment = await settled();
-    const cashBefore = await trustCash();
-    assert.equal(cashBefore, RENT - 500, "rent in, absorbed fee out");
+    assert.equal(await inTransit(), RENT - 500, "rent in, absorbed fee out");
 
     await returnPayment({ paymentId: payment.id, returnCode: "R01" });
+    assert.equal(await inTransit(), -500,
+      "the rent is gone; the fee the processor already took is not");
+  });
+
+  test("a return after the deposit landed takes it back out of the bank", async () => {
+    /* An ACH return arrives days after settlement, which is usually *after*
+       the payout. By then the money is in the bank and the processor claws it
+       back from there — so in-transit must net to zero and the bank must go
+       down, rather than in-transit drifting permanently negative. */
+    const payment = await settled();
+
+    const payoutId = id();
+    await insert("stripe_payout", {
+      id: payoutId, company_id: world.companyId, stripe_payout_id: "po_test_1",
+      amount_cents: RENT - 500, status: "paid", arrival_date: "2026-06-05",
+      created_at: stamp(), paid_at: stamp(),
+    });
+    await run("UPDATE tenant_payment SET stripe_payout_id = ? WHERE id = ?", payoutId, payment.id);
+    /* The deposit landing, as the bank match would post it. */
+    const { postJournal, ACCT } = await import("../server/features/accounting.js");
+    await postJournal({
+      companyId: world.companyId, date: "2026-06-05", memo: "Bank: deposit from Stripe",
+      source: "bank", postedBy: "test",
+      splits: [
+        { code: ACCT.TRUST_CASH, debit: RENT - 500, memo: "deposit" },
+        { code: ACCT.IN_TRANSIT, credit: RENT - 500, memo: "payout" },
+      ],
+    });
+    assert.equal(await inTransit(), 0, "everything has landed");
+
+    await returnPayment({ paymentId: payment.id, returnCode: "R01" });
+
+    assert.equal(await inTransit(), 0, "in-transit does not drift negative");
     assert.equal(await trustCash(), -500,
-      "the rent is gone; the fee the company already paid is not");
+      "the rent came back out of the bank; the fee the processor took did not");
   });
 
   test("the owner sees a visible negative line, not a vanished one", async () => {
@@ -686,6 +739,15 @@ describe("recomputing what is owed", () => {
     assert.equal(res, null);
   });
 });
+
+async function inTransit() {
+  const row = await get(
+    `SELECT COALESCE(SUM(s.debit_cents) - SUM(s.credit_cents), 0)::bigint AS c
+       FROM journal_split s JOIN account a ON a.id = s.account_id
+       JOIN journal j ON j.id = s.journal_id
+      WHERE a.code = '1020' AND j.company_id = ?`, world.companyId);
+  return Number(row.c);
+}
 
 async function trustCash() {
   const row = await get(

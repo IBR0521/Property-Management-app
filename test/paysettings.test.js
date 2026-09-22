@@ -509,3 +509,70 @@ describe("finding a tenant's link", () => {
     assert.match(unit.body, /filed for possession/);
   });
 });
+
+/* --- what Stripe is holding ------------------------------------------------ */
+
+describe("deposits from Stripe", () => {
+  beforeEach(async () => {
+    await run("UPDATE company SET stripe_account_id = ?, stripe_charges_enabled = 1 WHERE id = ?",
+      "acct_connected_1", world.companyId);
+  });
+
+  test("the screen says how much is on its way", async () => {
+    /* The question a manager actually has. It is the balance of 1020, and it
+       should agree with their Stripe dashboard. */
+    const { postJournal, ACCT } = await import("../server/features/accounting.js");
+    await postJournal({
+      companyId: world.companyId, date: "2026-06-03", memo: "Rent settled",
+      source: "rent", postedBy: "test",
+      splits: [
+        { code: ACCT.IN_TRANSIT, debit: 144500, memo: "held by the processor" },
+        { code: ACCT.TENANT_RECEIVABLE, credit: 144500, memo: "cleared" },
+      ],
+    });
+
+    const res = await page("/app/payments");
+    assert.match(res.body, /\$1,445\.00 is on its way to you/);
+    assert.match(res.body, /match the balance on your Stripe dashboard/i);
+  });
+
+  test("with nothing in transit it says so rather than showing a zero", async () => {
+    const res = await page("/app/payments");
+    assert.match(res.body, /Nothing in transit/);
+  });
+
+  test("a recorded payout is listed with what was in it", async () => {
+    await insert("stripe_payout", {
+      id: id(), company_id: world.companyId, stripe_payout_id: "po_1",
+      amount_cents: 234000, status: "paid", arrival_date: "2026-06-06",
+      destination: "Chase ending 6789", payment_count: 12, created_at: stamp(),
+    });
+
+    const res = await page("/app/payments");
+    assert.match(res.body, /\$2,340\.00/);
+    assert.match(res.body, /12 payments/);
+    assert.match(res.body, /Chase ending 6789/);
+    assert.match(res.body, /Reconcile/, "and offers to tie it to the bank line");
+  });
+
+  test("a payout that could not be itemised says so rather than showing zero", async () => {
+    await insert("stripe_payout", {
+      id: id(), company_id: world.companyId, stripe_payout_id: "po_2",
+      amount_cents: 100000, status: "paid", arrival_date: "2026-06-06",
+      payment_count: null, created_at: stamp(),
+    });
+    const res = await page("/app/payments");
+    assert.match(res.body, /not itemised/);
+  });
+
+  test("a failed payout shows its reason", async () => {
+    await insert("stripe_payout", {
+      id: id(), company_id: world.companyId, stripe_payout_id: "po_3",
+      amount_cents: 100000, status: "failed", arrival_date: "2026-06-06",
+      failure_message: "The bank account has been closed.", created_at: stamp(),
+    });
+    const res = await page("/app/payments");
+    assert.match(res.body, /failed/);
+    assert.match(res.body, /bank account has been closed/);
+  });
+});

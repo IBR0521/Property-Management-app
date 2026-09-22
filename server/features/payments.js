@@ -35,7 +35,7 @@ import { quote, describeQuote, availableMethods } from "../lib/fees.js";
 import { id } from "../lib/ids.js";
 import {
   balanceFor, blockedReason, startCheckout, enrolAutopay, cancelAutopay,
-  autopayDueToday, settlePayment, failPayment, returnPayment,
+  autopayDueToday, settlePayment, failPayment, returnPayment, recordStripePayout,
 } from "../lib/payments.js";
 
 const METHOD_LABEL = { ach: "Bank account", card: "Debit or credit card" };
@@ -595,6 +595,18 @@ export async function applyConnectEvent(event) {
       return { companyId: company.id, outcome: "refunded" };
     }
 
+    /* Stripe deposits a batch of settled rent into the company's bank. The
+       bank will show one line for it; recording the payout is what lets that
+       line be reconciled against the payments inside it. */
+    case "payout.created":
+    case "payout.updated":
+    case "payout.paid":
+    case "payout.failed":
+    case "payout.canceled": {
+      await recordStripePayout({ companyId: company.id, payout: object });
+      return { companyId: company.id, outcome: `payout ${object.status || kind}` };
+    }
+
     /* The company's ability to take money at all, read back from Stripe
        rather than assumed from "they clicked connect". */
     case "account.updated": {
@@ -734,7 +746,7 @@ function registerPaymentSettings(router) {
     const company = await one("SELECT * FROM company WHERE id = ?", cid);
     const origin = `${ctx.url.protocol}//${ctx.url.host}`;
 
-    const [blocked, recent, totals] = await Promise.all([
+    const [blocked, recent, totals, payouts, inTransit] = await Promise.all([
       all(`SELECT l.id, l.payments_blocked_reason, l.payments_blocked_at, l.payments_blocked_by,
                   u.label, p.line1
              FROM lease l JOIN unit u ON u.id = l.unit_id JOIN property p ON p.id = u.property_id
@@ -750,6 +762,17 @@ function registerPaymentSettings(router) {
              COUNT(*) FILTER (WHERE status = 'returned')::int AS returned,
              COUNT(*) FILTER (WHERE status = 'succeeded')::int AS settled
            FROM tenant_payment WHERE company_id = ?`, cid),
+      all(`SELECT p.*, (SELECT COUNT(*)::int FROM bank_match m
+                         WHERE m.target_type = 'stripe_payout' AND m.target_id = p.id) AS reconciled
+             FROM stripe_payout p WHERE p.company_id = ?
+            ORDER BY p.arrival_date DESC NULLS LAST, p.created_at DESC LIMIT 8`, cid),
+      /* What the processor is holding: settled rent that has not yet reached
+         the bank. It is the balance of 1020, which is a figure a manager can
+         check against their Stripe dashboard. */
+      get(`SELECT COALESCE(SUM(s.debit_cents) - SUM(s.credit_cents), 0)::bigint AS c
+             FROM journal_split s JOIN account a ON a.id = s.account_id
+             JOIN journal j ON j.id = s.journal_id
+            WHERE a.code = '1020' AND j.company_id = ?`, cid),
     ]);
 
     sendHtml(ctx.res, appPage({
@@ -766,6 +789,7 @@ function registerPaymentSettings(router) {
 
         ${company.stripe_account_id ? html`
           ${totalsPanel(totals)}
+          ${payoutsPanel({ payouts, inTransitCents: Number(inTransit?.c || 0) })}
           ${feesPanel({ company, csrf: ctx.csrf })}
           ${linksPanel({ company, origin })}
         ` : ""}
@@ -1068,6 +1092,59 @@ function totalsPanel(t) {
       </div>
       <div class="tile"${attr("data-tone", Number(t.returned) ? "danger" : null)}>
         <span class="tile__label">Returned</span><span class="tile__value">${Number(t.returned)}</span>
+      </div>
+    </div>`;
+}
+
+/* What Stripe is holding, and what it has already sent.
+
+   The bank shows one line for a dozen rents, so the question a manager
+   actually has — "is that deposit the one from Tuesday, and what was in
+   it?" — is answered here and reconciled under Banking. */
+function payoutsPanel({ payouts, inTransitCents }) {
+  return html`
+    <div class="panel">
+      <div class="panel__head">
+        <h2>Deposits from Stripe</h2>
+        <p>Rent reaches your bank in batches, a few days behind the tenant</p>
+      </div>
+      <div class="panel__body">
+        ${inTransitCents > 0
+          ? notice("ok", `${usd(inTransitCents)} is on its way to you`,
+              "Settled rent that Stripe has not deposited yet. This figure should match "
+              + "the balance on your Stripe dashboard.")
+          : notice("ok", "Nothing in transit", "Everything settled has reached your bank.")}
+      </div>
+      <div class="panel__body panel__body--flush">
+        ${payouts.length === 0
+          ? html`<div class="panel__body">${empty("No deposits yet",
+              "They appear here once Stripe sends the first one.")}</div>`
+          : html`
+            <div class="tablewrap">
+              <table class="data">
+                <thead><tr><th>Arriving</th><th class="num">Amount</th><th>In it</th>
+                  <th>State</th><th>Bank line</th></tr></thead>
+                <tbody>
+                  ${payouts.map((p) => html`
+                    <tr>
+                      <td>${p.arrival_date ? human(p.arrival_date) : "—"}
+                        <div class="cellsub">${p.destination || p.stripe_payout_id}</div></td>
+                      <td class="num">${usd(p.amount_cents)}</td>
+                      <td>${p.payment_count == null
+                        ? html`<span class="cellsub">not itemised</span>`
+                        : `${p.payment_count} payment${Number(p.payment_count) === 1 ? "" : "s"}`}</td>
+                      <td><span class="chip"${attr("data-tone",
+                        p.status === "paid" ? "ok" : p.status === "failed" ? "danger" : "warn")}>${p.status}</span>
+                        ${p.failure_message ? html`<div class="cellsub">${p.failure_message}</div>` : ""}</td>
+                      <td>${Number(p.reconciled)
+                        ? html`<span class="chip" data-tone="ok">matched</span>`
+                        : p.status === "paid"
+                          ? html`<a class="pill outline sm" href="/app/banking">Reconcile</a>`
+                          : "—"}</td>
+                    </tr>`)}
+                </tbody>
+              </table>
+            </div>`}
       </div>
     </div>`;
 }

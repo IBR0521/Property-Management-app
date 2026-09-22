@@ -289,14 +289,42 @@ export async function settlePayment({ paymentId, settledAt = null, chargeId = nu
 
   const when = (settledAt || stamp()).slice(0, 10);
 
+  const { postJournal, ACCT } = await import("../features/accounting.js");
+
   return await tx(async () => {
-    const { entryId, journalId } = await postMoney({
+    /* Into `payments in transit`, not into trust cash.
+
+       The tenant has paid and the money is real, but it is at Stripe for
+       another two to five days — it is not in the company's bank. Posting it
+       to 1010 would say it was, and then the deposit arriving would post it a
+       second time. The balance of 1020 is exactly what Stripe is holding,
+       which is a figure a manager can check against their dashboard, and
+       `reconcileStripePayout` is what moves it across when it lands.
+
+       A cheque recorded by hand still goes straight to 1010 through
+       `postMoney`'s default posting, because that money really is in the
+       bank the day it is banked. */
+    const amount = Number(payment.amount_cents);
+    const journalId = await postJournal({
+      companyId: payment.company_id, date: when,
+      memo: `Rent ${payment.period || ""} — ${payment.kind.toUpperCase()}`.trim(),
+      source: "rent", sourceType: "tenant_payment", sourceId: payment.id,
+      postedBy: payment.initiated_by,
+      splits: [
+        { code: ACCT.IN_TRANSIT, debit: amount, ownerId: payment.owner_id,
+          unitId: payment.unit_id, leaseId: payment.lease_id, memo: "held by the processor" },
+        { code: ACCT.TENANT_RECEIVABLE, credit: amount, ownerId: payment.owner_id,
+          leaseId: payment.lease_id, memo: "tenant receivable cleared" },
+      ],
+    });
+
+    const { entryId } = await postMoney({
       companyId: payment.company_id, ownerId: payment.owner_id,
       unitId: payment.unit_id, leaseId: payment.lease_id,
-      date: when, kind: "rent_payment", amountCents: Number(payment.amount_cents),
+      date: when, kind: "rent_payment", amountCents: amount,
       memo: `Rent ${payment.period || ""} — ${payment.kind.toUpperCase()}`.trim(),
       source: "system", sourceType: "tenant_payment", sourceId: payment.id,
-      postedBy: payment.initiated_by,
+      postedBy: payment.initiated_by, journalId,
     });
 
     /* A fee the tenant paid is the company's income and the processor's fee is
@@ -327,8 +355,10 @@ async function postFeeJournal(payment, when) {
     ...(tenantShare > 0
       ? [{ code: ACCT.FEE_RECOVERED, credit: tenantShare, memo: "fee recovered from tenant" }]
       : []),
+    /* Deducted by the processor before it pays out, so it reduces what is in
+       transit rather than what is in the bank. */
     ...(total - tenantShare > 0
-      ? [{ code: ACCT.TRUST_CASH, credit: total - tenantShare, memo: "fee borne by the company" }]
+      ? [{ code: ACCT.IN_TRANSIT, credit: total - tenantShare, memo: "fee borne by the company" }]
       : []),
   ];
 
@@ -422,6 +452,34 @@ export async function returnPayment({
       source: "system", sourceType: "tenant_payment", sourceId: payment.id,
       postedBy: "return", journalId: reversalId,
     });
+
+    /* Where the money actually comes back from.
+
+       The reversal above credits `payments in transit`, which is right while
+       Stripe still holds it. Once a payout has landed, the money is in the
+       company's bank and Stripe claws it back from there — so a second entry
+       moves it across, leaving 1020 net zero and 1010 correctly reduced.
+       Without this, in-transit would drift permanently negative by the value
+       of every late return. */
+    if (payment.stripe_payout_id) {
+      const payout = await get(
+        "SELECT * FROM stripe_payout WHERE id = ?", payment.stripe_payout_id);
+      if (payout && payout.status === "paid") {
+        const { postJournal, ACCT } = await import("../features/accounting.js");
+        await postJournal({
+          companyId: payment.company_id, date: when,
+          memo: `Returned payment taken back from the bank — ${payment.period || ""}`.trim(),
+          source: "bank", sourceType: "tenant_payment", sourceId: payment.id,
+          postedBy: "return",
+          splits: [
+            { code: ACCT.IN_TRANSIT, debit: Math.abs(Number(payment.amount_cents)),
+              memo: "reversal settled against the payout" },
+            { code: ACCT.TRUST_CASH, credit: Math.abs(Number(payment.amount_cents)),
+              memo: "taken back by the processor" },
+          ],
+        });
+      }
+    }
 
     /* A bank charge for the return is the company's cost, not the tenant's,
        until somebody decides to pass it on deliberately. */
@@ -679,3 +737,121 @@ export async function runAutopay(company, { localToday, stripe = defaultStripe }
   return out;
 }
 
+
+/* --- Stripe payouts ---------------------------------------------------------
+
+   Settled rent sits in `1020 Payments in transit` until Stripe deposits it.
+   Recording the payout and moving the money across is what makes the bank
+   line reconcilable — and what makes the balance of 1020 mean "what the
+   processor is holding right now". */
+
+export async function recordStripePayout({
+  companyId, payout, stripe = defaultStripe, fetchContents = true,
+}) {
+  const company = await one("SELECT * FROM company WHERE id = ?", companyId);
+  const stripeId = String(payout.id);
+
+  const existing = await get(
+    "SELECT * FROM stripe_payout WHERE company_id = ? AND stripe_payout_id = ?",
+    companyId, stripeId);
+
+  const arrival = payout.arrival_date
+    ? new Date(Number(payout.arrival_date) * 1000).toISOString().slice(0, 10)
+    : null;
+
+  const fields = {
+    amount_cents: Math.round(Number(payout.amount) || 0),
+    currency: payout.currency || "usd",
+    arrival_date: arrival,
+    status: normalisePayoutStatus(payout.status),
+    destination: describeDestination(payout),
+    failure_message: payout.failure_message || null,
+    paid_at: payout.status === "paid" ? stamp() : existing?.paid_at || null,
+  };
+
+  const payoutRowId = existing?.id || id();
+  if (existing) {
+    await update("stripe_payout", existing.id, fields);
+  } else {
+    await insert("stripe_payout", {
+      id: payoutRowId, company_id: companyId, stripe_payout_id: stripeId,
+      created_at: stamp(), ...fields,
+    });
+  }
+
+  /* Which payments were in it. Best effort: a failure here leaves the payout
+     recorded and matchable, just without its contents. */
+  if (fetchContents && company.stripe_account_id) {
+    try {
+      const entries = await stripe.payoutContents(company.stripe_account_id, stripeId);
+      const attributed = await attributePayments({
+        companyId, payoutRowId, entries,
+      });
+      await update("stripe_payout", payoutRowId, {
+        payment_count: attributed.count,
+        fee_cents: attributed.feeCents,
+      });
+    } catch (err) {
+      log.warn("could not read what was inside a payout", {
+        payout: stripeId, reason: String(err.message).slice(0, 160),
+      });
+    }
+  }
+
+  return { ok: true, payoutId: payoutRowId };
+}
+
+/* Tie each balance transaction back to the payment it came from. Stripe names
+   the charge; our row carries that charge id from the settlement webhook. */
+async function attributePayments({ companyId, payoutRowId, entries }) {
+  let count = 0;
+  let feeCents = 0;
+
+  for (const entry of entries) {
+    feeCents += Math.round(Number(entry.fee) || 0);
+    if (entry.type !== "charge" && entry.type !== "payment") continue;
+
+    const chargeId = typeof entry.source === "string" ? entry.source : entry.source?.id;
+    const intentId = entry.source?.payment_intent;
+    if (!chargeId && !intentId) continue;
+
+    const payment = await get(
+      `SELECT * FROM tenant_payment
+        WHERE company_id = ? AND (stripe_charge_id = ? OR stripe_payment_intent_id = ?)`,
+      companyId, chargeId || "", intentId || "");
+    if (!payment) continue;
+
+    await update("tenant_payment", payment.id, { stripe_payout_id: payoutRowId });
+    count += 1;
+  }
+
+  return { count, feeCents };
+}
+
+function normalisePayoutStatus(status) {
+  const known = ["pending", "in_transit", "paid", "failed", "canceled"];
+  return known.includes(String(status)) ? String(status) : "pending";
+}
+
+function describeDestination(payout) {
+  const d = payout.destination;
+  if (!d) return null;
+  if (typeof d === "string") return d;
+  return [d.bank_name, d.last4 ? `ending ${d.last4}` : null].filter(Boolean).join(" ") || d.id || null;
+}
+
+/* The money arriving in the bank: out of what the processor holds, into trust
+   cash. Posted when the bank line is matched rather than when Stripe says it
+   sent it, because "sent" and "arrived" are different days and the ledger
+   should follow the bank. */
+export async function payoutsAwaitingBank(companyId, { withinDays = 10, amountCents = null } = {}) {
+  const rows = await all(
+    `SELECT p.* FROM stripe_payout p
+      WHERE p.company_id = ? AND p.status = 'paid'
+        AND NOT EXISTS (SELECT 1 FROM bank_match m
+                         WHERE m.target_type = 'stripe_payout' AND m.target_id = p.id)
+      ORDER BY p.arrival_date DESC NULLS LAST LIMIT 50`, companyId);
+
+  if (amountCents == null) return rows;
+  return rows.filter((r) => Number(r.amount_cents) === Math.abs(amountCents));
+}

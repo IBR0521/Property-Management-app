@@ -248,6 +248,38 @@ export async function listPayouts(accountId, { limit = 20 } = {}) {
   return await callAs(accountId, `/payouts?limit=${Number(limit)}`, { method: "GET" });
 }
 
+export async function getPayout(accountId, payoutId) {
+  return await callAs(accountId, `/payouts/${encodeURIComponent(payoutId)}`, { method: "GET" });
+}
+
+/* What is actually inside a payout.
+
+   Stripe deposits a dozen rent payments as one lump and the bank shows one
+   line. This is the only way to learn which payments made it up — the payout
+   object itself carries a total and nothing else. Paged, because a busy
+   company's daily payout can run to hundreds of entries.
+
+   A failure here is not fatal: the payout is still worth recording and the
+   bank line can still be matched. It just cannot say which rents were in it. */
+export async function payoutContents(accountId, payoutId, { limit = 100 } = {}) {
+  const out = [];
+  let startingAfter = null;
+
+  for (let page = 0; page < 20; page++) {
+    const query = new URLSearchParams({
+      payout: payoutId, limit: String(limit), "expand[]": "data.source",
+    });
+    if (startingAfter) query.set("starting_after", startingAfter);
+
+    const res = await callAs(accountId, `/balance_transactions?${query}`, { method: "GET" });
+    const data = res?.data || [];
+    out.push(...data);
+    if (!res?.has_more || data.length === 0) break;
+    startingAfter = data[data.length - 1].id;
+  }
+  return out;
+}
+
 /* Deliberately exported so a test can assert the platform never takes a cut.
    If an application fee is ever added, this list is where it would have to be
    declared, and the test fails. */

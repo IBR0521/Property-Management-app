@@ -156,7 +156,28 @@ export async function proposeMatches(companyId, txn) {
   const out = [];
 
   if (amount < 0) {
-    // Money out: most likely a vendor invoice being paid.
+    /* Money out. A run of contractor payments or owner distributions is one
+       bank debit covering many payments, which is the case the original
+       matcher had no answer for: it looked for a single invoice of exactly
+       that size and found nothing, so the largest line on the statement was
+       the one that could never be ticked off. */
+    const batches = await all(
+      `SELECT b.* FROM payout_batch b
+        WHERE b.company_id = ? AND b.status IN ('approved', 'issued')
+          AND b.total_cents = ?
+          AND NOT EXISTS (SELECT 1 FROM bank_match m
+                           WHERE m.target_type = 'payout_batch' AND m.target_id = b.id)`,
+      companyId, Math.abs(amount));
+    for (const b of batches) {
+      out.push({
+        targetType: "payout_batch", targetId: b.id,
+        label: `${b.kind === "owner" ? "Owner distribution" : "Contractor payments"} — ${b.item_count} payment${Number(b.item_count) === 1 ? "" : "s"}`,
+        sub: `${human(b.effective_date)} · ${usd(Number(b.total_cents))} · ${b.method === "ach" ? "ACH file" : "cheques"}`,
+        score: score(txn, b.method === "ach" ? "ACH payment transfer" : "cheque", b.effective_date),
+      });
+    }
+
+    // And a single vendor invoice paid on its own.
     const invoices = await all(
       `SELECT i.*, v.name AS vendor_name FROM vendor_invoice i
          JOIN vendor v ON v.id = i.vendor_id
@@ -171,7 +192,24 @@ export async function proposeMatches(companyId, txn) {
       });
     }
   } else {
-    // Money in: most likely a rent payment already recorded on a ledger.
+    /* Money in. A Stripe deposit first, because it is the common case and
+       because it is a batch: a dozen rents arrive as one line, and matching
+       it against a single ledger entry of the same size would be a
+       coincidence rather than a reconciliation. */
+    const { payoutsAwaitingBank } = await import("../lib/payments.js");
+    for (const p of await payoutsAwaitingBank(companyId, { amountCents: amount })) {
+      out.push({
+        targetType: "stripe_payout", targetId: p.id,
+        label: `Deposit from Stripe${p.payment_count ? ` — ${p.payment_count} payment${p.payment_count === 1 ? "" : "s"}` : ""}`,
+        sub: `${p.arrival_date ? human(p.arrival_date) : "date unknown"} · ${usd(Number(p.amount_cents))}`
+          + `${p.destination ? ` · ${p.destination}` : ""}`,
+        /* Stripe's clearing string is distinctive, so a name hit here is
+           worth more than the usual token match. */
+        score: score(txn, "stripe transfer payout", p.arrival_date) + 15,
+      });
+    }
+
+    // Then a rent payment already recorded on a ledger, one line at a time.
     const entries = await all(
       `SELECT e.*, p.line1, u.label FROM ledger_entry e
          LEFT JOIN unit u ON u.id = e.unit_id
@@ -237,6 +275,31 @@ export async function confirmMatch({ companyId, txnId, targetType, targetId, by 
         ],
       });
       await update("vendor_invoice", inv.id, { status: "paid" });
+    } else if (targetType === "stripe_payout") {
+      /* The money leaves what the processor is holding and arrives in the
+         bank. Both sides already exist: settlement put it into 1020, and
+         this is the day it actually landed. Posting it here rather than when
+         Stripe said it sent the money means the ledger follows the bank
+         statement, which is the thing being reconciled against. */
+      const payout = await one(
+        "SELECT * FROM stripe_payout WHERE id = ? AND company_id = ?", targetId, companyId);
+      journalId = await postJournal({
+        companyId, date: txn.posted_date,
+        memo: `Bank: deposit from Stripe${payout.payment_count ? ` (${payout.payment_count} payments)` : ""}`,
+        source: "bank", sourceType: "bank_txn", sourceId: txn.id, postedBy: by,
+        splits: [
+          { code: ACCT.TRUST_CASH, debit: amount, memo: txn.name_raw.slice(0, 120) },
+          { code: ACCT.IN_TRANSIT, credit: amount, memo: `payout ${payout.stripe_payout_id}` },
+        ],
+      });
+    } else if (targetType === "payout_batch") {
+      /* A run of payments leaving the account. The journals for the payments
+         themselves were posted when the run was approved, which already
+         credited cash — so this match records the reconciliation and posts
+         nothing, rather than taking the money out twice. */
+      await one(
+        "SELECT * FROM payout_batch WHERE id = ? AND company_id = ?", targetId, companyId);
+      journalId = null;
     } else if (targetType === "ledger_entry") {
       const entry = await one(
         "SELECT * FROM ledger_entry WHERE id = ? AND company_id = ?", targetId, companyId);
