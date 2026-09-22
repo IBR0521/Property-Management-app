@@ -207,6 +207,19 @@ describe("company A cannot reach company B's records", () => {
       "journal_split",           // -> journal
       "bank_webhook_event",      // provider delivery ids, no company until resolved
       "obligation_reminder",     // -> obligation
+
+      /* Identity, and the one deliberate exception to the rule.
+
+         `person` is platform-level on purpose: the same landlord can own
+         property managed by two companies here, and making them hold two
+         logins to read two statements drives people back to the telephone.
+         What makes that safe is that the row holds nothing but an address, a
+         name and a phone — asserted separately below — and that every record
+         hangs off `person_link`, which IS company-scoped. No portal query is
+         ever scoped by person_id alone. */
+      "person",
+      "portal_login_token",      // -> person, like session -> staff
+      "portal_session",          // -> person; carries a company, chosen not implied
     ]);
     const tables = await all(
       `SELECT t.tablename,
@@ -239,3 +252,39 @@ async function snapshot(companyId) {
     ...Array(7).fill(companyId));
   return rows.map((r) => `${r.t}:${r.id}:${r.v}`);
 }
+
+/* --- the one table without a company ---------------------------------------- */
+
+describe("person is allowed to be platform-level because it holds nothing", () => {
+  test("it carries identity and not records", async () => {
+    /* The justification for the exception above, enforced rather than
+       asserted in a comment. If somebody ever adds a balance, a lease or a
+       document to this table, the exception stops being defensible and this
+       fails. */
+    const columns = (await all(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'person'`)).map((c) => c.column_name);
+
+    assert.deepEqual(columns.sort(), [
+      "created_at", "email", "id", "last_seen_at", "name", "phone", "phone_verified_at",
+    ], "person holds an identity and nothing else");
+  });
+
+  test("everything a person can reach hangs off a company-scoped link", async () => {
+    const link = (await all(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'person_link'`)).map((c) => c.column_name);
+    assert.ok(link.includes("company_id"), "person_link is where the boundary lives");
+    assert.ok(link.includes("tenant_id") && link.includes("owner_id"));
+  });
+
+  test("a portal session names the company it is looking at", async () => {
+    /* So a query can be scoped by it. A session without one is a person who
+       has not chosen yet, and sees no records at all. */
+    const columns = (await all(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'portal_session'`)).map((c) => c.column_name);
+    assert.ok(columns.includes("company_id"));
+    assert.ok(columns.includes("person_id"));
+  });
+});

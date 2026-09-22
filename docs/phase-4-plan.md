@@ -218,10 +218,15 @@ checks, for the reason the roadmap already gives.
 will be built against Resend's documented payload and a recorded fixture, and
 the first real inbound message is the real test. It goes in OPEN-ITEMS.
 
-**This phase is bigger than Phase 3.** If you would rather land it in two
-pieces — identity plus portals first, messaging second — say so and I will
-split it. Otherwise I will do it in that order anyway, committing per step, so
-the split exists whether or not we name it.
+**This phase is bigger than Phase 3, so it is split.** Agreed on 2026-09-22:
+
+- **4a — identity and the portals.** `person`, `person_link`, portal sessions,
+  magic-link sign-in, the gate branch, and the two portals.
+- **4b — messaging.** Threads, the shared inbox, inbound email and SMS.
+
+4a lands and is verified before 4b starts. Everything under "Files" and
+"Migrations" above is tagged accordingly: `029_identity.sql` and everything
+except `inbox.js`, `threading.js` and the inbound webhook belong to 4a.
 
 ---
 

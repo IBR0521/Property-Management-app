@@ -24,6 +24,7 @@ import { randomBytes } from "node:crypto";
 import { stamp, today, addDays, monthKey, prevMonthRange } from "./lib/dates.js";
 import { tick } from "./lib/scheduler.js";
 import { postMoney } from "./lib/ledger.js";
+import { syncPeopleFor } from "./lib/identity.js";
 
 /* Before migrate(), and before anything else opens a connection. A guard that
    runs after the database has already been touched is a guard that has
@@ -431,6 +432,12 @@ for (const item of JSON.parse(crit.items)) {
   });
 }
 
+/* --- portal identities ------------------------------------------------------
+
+   Everyone the seed just created gets a person and a link, so the demo can be
+   signed into as a tenant or an owner rather than only as staff. */
+const people = await syncPeopleFor(companyId);
+
 /* --- let the engines catch up ---------------------------------------------- */
 const result = await tick("seed");
 
@@ -449,6 +456,8 @@ console.log(`
     /apply    rental application
 
   ${units.length} units · ${leases.length} active leases · ${vendors.length} vendors
+  ${people.tenants + people.owners} portal identities — sign in at /portal with any
+    tenant or owner email above
   scheduler: ${Object.entries(result).filter(([, v]) => typeof v === "number" && v > 0).map(([k, v]) => `${k}=${v}`).join(" ") || "nothing due"}
 `);
 

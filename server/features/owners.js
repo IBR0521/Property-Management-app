@@ -20,6 +20,7 @@ import { navCounts } from "../lib/counts.js";
 import { storeMany, DOC_TYPES, fileUrl } from "../lib/files.js";
 import { event } from "./maintenance.js";
 import { postMoney } from "../lib/ledger.js";
+import { linkOwner } from "../lib/identity.js";
 
 export function registerOwners(router) {
   /* --- list --------------------------------------------------------------- */
@@ -87,6 +88,10 @@ export function registerOwners(router) {
       notes: String(f.notes || "").trim() || null,
       created_at: stamp(),
     });
+
+    /* So they can sign in and read their own statements rather than waiting
+       for one to be emailed. No address, no link, and nothing changes. */
+    await linkOwner({ ownerId, source: "staff" });
     redirect(ctx.res, `/app/owners/${ownerId}?m=${encodeURIComponent("Owner added. Add their building next.")}`);
   });
 
@@ -115,6 +120,8 @@ export function registerOwners(router) {
       statement_day: statementDayOf(f.statement_day),
       notes: String(f.notes || "").trim() || null,
     });
+    /* A corrected address moves the portal access with it. */
+    await linkOwner({ ownerId: owner.id, source: "staff" });
     redirect(ctx.res, `/app/owners/${owner.id}?m=${encodeURIComponent("Owner updated.")}`);
   });
 

@@ -21,6 +21,7 @@ import { outcomeFor, MAX_ATTEMPTS } from "./delivery/retry.js";
 import { senderFor } from "./outbox.js";
 import { log } from "./logger.js";
 import { runAutopay, paidForPeriod } from "./payments.js";
+import { prunePortalSessions } from "./magiclink.js";
 import { todayIn } from "./timezone.js";
 
 const EVERY_MS = 10 * 60 * 1000;
@@ -104,6 +105,9 @@ export async function tick(reason = "manual") {
   out.deliveryDead = drained.dead;
   out.deliverySuppressed = drained.suppressed;
   out.sessionsPruned = await pruneSessions();
+  /* Portal sessions and spent sign-in tokens. A login token that was never
+     used is still a row that names somebody. */
+  Object.assign(out, await prunePortalSessions());
   out.rateHitsPruned = await pruneRateHits();
 
   /* Recorded last, and only on success, so "last run" means "last run that

@@ -8,6 +8,7 @@ import { html, attr, raw } from "../lib/render.js";
 import { appPage, notice, empty, tabs, PROPERTY_TABS } from "../views/layout.js";
 import { icons } from "../views/icons.js";
 import { navCounts } from "../lib/counts.js";
+import { linkTenant } from "../lib/identity.js";
 import { tick } from "../lib/scheduler.js";
 import { qrSvg } from "../lib/qr.js";
 
@@ -333,6 +334,13 @@ export function registerPortfolio(router) {
       });
       await insert("lease_tenant", { lease_id: leaseId, tenant_id: tenantId });
       await update("unit", unit.id, { status: "occupied" });
+
+      /* The portal side of the same fact. This insert makes a fresh `tenant`
+         row every time, so somebody moving from unit 1 to unit 3 becomes two
+         rows — linking them to one person here is what lets them sign in once
+         and see both. A tenancy with no email gets no link and keeps working
+         exactly as it does now, reachable by token. */
+      await linkTenant({ tenantId, source: "movein" });
       await insert("audit_log", {
         id: id(), company_id: cid, at: stamp(), actor: ctx.staff.name,
         entity: "lease", entity_id: leaseId, action: "movein", detail: `${name} from ${start}`,
