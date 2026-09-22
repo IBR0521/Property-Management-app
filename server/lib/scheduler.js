@@ -22,6 +22,7 @@ import { senderFor } from "./outbox.js";
 import { log } from "./logger.js";
 import { runAutopay, paidForPeriod } from "./payments.js";
 import { prunePortalSessions } from "./magiclink.js";
+import { pruneDeadSubscriptions } from "./push/index.js";
 import { todayIn } from "./timezone.js";
 
 const EVERY_MS = 10 * 60 * 1000;
@@ -108,6 +109,9 @@ export async function tick(reason = "manual") {
   /* Portal sessions and spent sign-in tokens. A login token that was never
      used is still a row that names somebody. */
   Object.assign(out, await prunePortalSessions());
+  /* Devices nobody holds any more. A push service that has answered 500 for a
+     fortnight is not coming back. */
+  Object.assign(out, await pruneDeadSubscriptions());
   out.rateHitsPruned = await pruneRateHits();
 
   /* Recorded last, and only on success, so "last run" means "last run that

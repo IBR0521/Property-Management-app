@@ -226,6 +226,33 @@ export const PORTAL_REPLY_DOMAIN = raw("PORTAL_REPLY_DOMAIN");
    accepted unverified. */
 export const RESEND_INBOUND_SECRET = raw("RESEND_INBOUND_SECRET");
 
+/* --- web push ---------------------------------------------------------------
+
+   An ECDSA P-256 pair identifying this deployment to every push service, and
+   a subject they can reach a person at if our messages become a problem.
+
+   Unset means push is off, and every screen that would offer it says so
+   rather than showing a button that silently does nothing. Generate a pair
+   with `npm run vapid`; the public half is also handed to browsers, so
+   changing it invalidates every existing subscription — which is a thing to
+   do deliberately, not by regenerating a key while debugging. */
+export const VAPID_PUBLIC_KEY = raw("VAPID_PUBLIC_KEY");
+export const VAPID_PRIVATE_KEY = raw("VAPID_PRIVATE_KEY");
+export const VAPID_SUBJECT = raw("VAPID_SUBJECT");
+
+export const PUSH_CONFIGURED = Boolean(
+  VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY && VAPID_SUBJECT);
+
+/* Half-configured is worse than off: a public key with no private one gives
+   browsers a subscription nothing can ever send to, and the failure is
+   silent. */
+if (!PUSH_CONFIGURED && (VAPID_PUBLIC_KEY || VAPID_PRIVATE_KEY || VAPID_SUBJECT)) {
+  problems.push(
+    "VAPID is half configured.\n" +
+    "    Push needs VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT together,\n" +
+    "    or none of them. Generate a pair with: npm run vapid");
+}
+
 /* A price id per band, read by name so a missing one identifies itself. */
 export const STRIPE_PRICES = {
   starter: raw("STRIPE_PRICE_STARTER"),
