@@ -27,6 +27,8 @@ import { PORTAL_REPLY_DOMAIN } from "../lib/config.js";
 import {
   threadsFor, threadWithMessages, markRead, assignThread,
   resolveThreadById, reopenThread, attachParty,
+  templatesFor, saveTemplate, archiveTemplate,
+  templateValuesFor, renderTemplate, TEMPLATE_FIELDS,
 } from "../lib/inbox.js";
 import { recordOutbound, replyAddress, messageIdFor } from "../lib/threading.js";
 
@@ -51,6 +53,7 @@ export function registerInbox(router) {
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "inbox", counts: await navCounts(cid),
       title: "Inbox", subtitle: "Everything anybody has said to you",
+      actions: html`<a class="pill outline sm" href="/app/inbox/templates">Saved replies</a>`,
       body: html`
         ${tabs(INBOX_TABS, view)}
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
@@ -97,6 +100,132 @@ export function registerInbox(router) {
     }));
   });
 
+  /* --- saved replies -------------------------------------------------------
+
+     Before /app/inbox/:id, which matches any single segment and would
+     otherwise look "templates" up as a conversation id. */
+
+  router.get("/app/inbox/templates", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const templates = await templatesFor(cid);
+    const editing = ctx.query.edit
+      ? templates.find((t) => t.id === String(ctx.query.edit)) : null;
+
+    sendHtml(ctx.res, appPage({
+      staff: ctx.staff, csrf: ctx.csrf, active: "inbox", counts: await navCounts(cid),
+      title: "Saved replies", subtitle: "Wording your team reuses",
+      actions: html`<a class="pill outline sm" href="/app/inbox">Back to the inbox</a>`,
+      body: html`
+        ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
+        ${ctx.query.e ? notice("danger", null, ctx.query.e) : ""}
+
+        ${notice("ok", "These are not notices",
+          html`Legal notices for the rent ladder live under
+               <a href="/app/rent/ladder">Rent</a> and need your attorney's sign-off before
+               they can be sent. These are ordinary replies — they go in the box for you to
+               read and change, and nothing is sent until you press Send.`)}
+
+        <div class="panel">
+          <div class="panel__head"><h2>${editing ? "Edit" : "New saved reply"}</h2></div>
+          <div class="panel__body">
+            <form method="post" action="/app/inbox/templates" class="formgrid">
+              <input type="hidden" name="_csrf" value="${ctx.csrf}" />
+              ${editing ? html`<input type="hidden" name="template_id" value="${editing.id}" />` : ""}
+
+              <div class="formgrid formgrid--2">
+                <div class="field">
+                  <label for="name">What to call it</label>
+                  <input id="name" name="name" type="text" maxlength="80" required
+                         value="${editing?.name || ""}" />
+                </div>
+                <div class="field">
+                  <label for="channel">Suits</label>
+                  <select id="channel" name="channel">
+                    <option value="any"${attr("selected", (editing?.channel || "any") === "any")}>Either</option>
+                    <option value="email"${attr("selected", editing?.channel === "email")}>Email</option>
+                    <option value="sms"${attr("selected", editing?.channel === "sms")}>Text — keep it short</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="body">The wording</label>
+                <textarea id="body" name="body" rows="6" required>${editing?.body || ""}</textarea>
+                <span class="field__help">
+                  You can use: ${Object.entries(TEMPLATE_FIELDS)
+                    .map(([token, what]) => html`<code>${token}</code> ${what}`)
+                    .reduce((acc, bit, i) => i ? html`${acc} · ${bit}` : bit, "")}
+                </span>
+              </div>
+
+              <div class="btnrow">
+                <button class="pill solid" type="submit">${editing ? "Save" : "Add it"}</button>
+                ${editing ? html`<a class="pill outline" href="/app/inbox/templates">Cancel</a>` : ""}
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel__head"><h2>What you have</h2></div>
+          <div class="panel__body panel__body--flush">
+            ${templates.length === 0
+              ? html`<div class="panel__body">${empty("None yet",
+                  "Add the things your team types over and over.")}</div>`
+              : html`
+                <div class="tablewrap">
+                  <table class="data">
+                    <thead><tr><th>Name</th><th>Suits</th><th>Wording</th><th></th></tr></thead>
+                    <tbody>
+                      ${templates.map((t) => html`
+                        <tr>
+                          <td>${t.name}</td>
+                          <td>${t.channel === "any" ? "Either" : t.channel}</td>
+                          <td><div class="cellsub">${preview(t.body)}</div></td>
+                          <td class="shrink">
+                            <div class="btnrow">
+                              <a class="pill outline sm" href="/app/inbox/templates?edit=${t.id}">Edit</a>
+                              <form method="post" action="/app/inbox/templates/archive" style="display:inline">
+                                <input type="hidden" name="_csrf" value="${ctx.csrf}" />
+                                <input type="hidden" name="template_id" value="${t.id}" />
+                                <button class="pill outline sm" type="submit">Retire</button>
+                              </form>
+                            </div>
+                          </td>
+                        </tr>`)}
+                    </tbody>
+                  </table>
+                </div>`}
+          </div>
+          <div class="panel__foot">
+            Retiring one hides it from the reply box. Messages already written from it keep
+            pointing at it, so you can still answer "where did this wording come from".
+          </div>
+        </div>`,
+    }));
+  });
+
+  router.post("/app/inbox/templates", async (ctx) => {
+    const res = await saveTemplate({
+      companyId: ctx.staff.company_id,
+      templateId: String(ctx.fields.template_id || "") || null,
+      name: ctx.fields.name, channel: String(ctx.fields.channel || "any"),
+      body: ctx.fields.body, by: ctx.staff.id,
+    });
+    if (!res.ok) {
+      return redirect(ctx.res, `/app/inbox/templates?e=${encodeURIComponent(res.reason)}`);
+    }
+    return redirect(ctx.res, `/app/inbox/templates?m=${encodeURIComponent("Saved.")}`);
+  });
+
+  router.post("/app/inbox/templates/archive", async (ctx) => {
+    await archiveTemplate({
+      companyId: ctx.staff.company_id,
+      templateId: String(ctx.fields.template_id || ""),
+    });
+    return redirect(ctx.res, `/app/inbox/templates?m=${encodeURIComponent("Retired.")}`);
+  });
+
   /* --- one conversation ---------------------------------------------------- */
 
   router.get("/app/inbox/:id", async (ctx) => {
@@ -127,6 +256,20 @@ export function registerInbox(router) {
       : null;
     const reachable = thread.contact_email || thread.contact_phone
       || thread.party_email || thread.party_phone;
+
+    /* A template is filled in and put in the box, never sent on its own.
+       Choosing one is a plain GET, so this works with scripts switched off
+       and the person reads what they are about to send. */
+    const templates = await templatesFor(cid);
+    let draft = { text: "", missing: [], templateId: null };
+    if (ctx.query.template) {
+      const chosen = templates.find((t) => t.id === String(ctx.query.template));
+      if (chosen) {
+        const values = await templateValuesFor(cid, thread.id);
+        const rendered = renderTemplate(chosen.body, values);
+        draft = { ...rendered, templateId: chosen.id };
+      }
+    }
 
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "inbox", counts: await navCounts(cid),
@@ -162,7 +305,7 @@ export function registerInbox(router) {
               </div>
             </div>
 
-            ${replyPanel({ thread, csrf: ctx.csrf, reachable })}
+            ${replyPanel({ thread, csrf: ctx.csrf, reachable, templates, draft })}
           </div>
 
           <div class="hub__col">
@@ -221,6 +364,13 @@ export function registerInbox(router) {
       subject: channel === "email" ? thread.subject : null,
       toContact: to, authorStaffId: ctx.staff.id, outboxId,
     });
+
+    /* Which wording this came from, where it came from one. "Where did this
+       phrasing come from" is a question somebody asks six months later. */
+    if (ctx.fields.template_id) {
+      await run("UPDATE message SET template_id = ? WHERE id = ?",
+        String(ctx.fields.template_id), messageId);
+    }
 
     /* The Message-ID we will have sent, so a reply's In-Reply-To can be
        matched against it. */
@@ -326,7 +476,7 @@ function deliveryChip(m) {
     m.last_error ? html` <span class="cellsub">${m.last_error}</span>` : ""}`;
 }
 
-function replyPanel({ thread, csrf, reachable }) {
+function replyPanel({ thread, csrf, reachable, templates, draft }) {
   return html`
     <div class="panel">
       <div class="panel__head">
@@ -336,11 +486,39 @@ function replyPanel({ thread, csrf, reachable }) {
       <div class="panel__body">
         ${reachable ? "" : notice("warn", "No way to reach them",
           "This conversation has no address or number on it. Attach it to a record first.")}
+        ${templates.length ? html`
+          <form method="get" action="/app/inbox/${thread.id}" class="formgrid"
+                style="margin-bottom:1rem">
+            <div class="field">
+              <label for="template">Start from a saved reply</label>
+              <select id="template" name="template">
+                <option value="">Write it myself</option>
+                ${templates.map((t) => html`
+                  <option value="${t.id}"${attr("selected", t.id === draft.templateId)}>
+                    ${t.name}${t.channel === "any" ? "" : ` (${t.channel})`}
+                  </option>`)}
+              </select>
+              <span class="field__help">
+                It goes in the box below for you to read and change. Nothing is sent
+                until you press Send.
+              </span>
+            </div>
+            <div class="btnrow">
+              <button class="pill outline sm" type="submit">Use it</button>
+            </div>
+          </form>` : ""}
+
+        ${draft.missing.length ? notice("warn", "Some blanks were not filled in",
+          html`We had no value for ${draft.missing.join(", ")}, so ${draft.missing.length === 1
+            ? "it is" : "they are"} still showing in the text below. Replace
+            ${draft.missing.length === 1 ? "it" : "them"} before sending.`) : ""}
+
         <form method="post" action="/app/inbox/${thread.id}/reply" class="formgrid">
           <input type="hidden" name="_csrf" value="${csrf}" />
+          ${draft.templateId ? html`<input type="hidden" name="template_id" value="${draft.templateId}" />` : ""}
           <div class="field">
             <label for="body">Message</label>
-            <textarea id="body" name="body" rows="5" required></textarea>
+            <textarea id="body" name="body" rows="5" required>${draft.text}</textarea>
           </div>
 
           <div class="field">

@@ -267,3 +267,143 @@ async function note(companyId, threadId, actor, kind, detail) {
     at: stamp(), actor: actor || null, kind, detail: detail || null,
   });
 }
+
+/* --- canned replies -----------------------------------------------------------
+
+   A template is filled in against the conversation and put in the reply box.
+   It is never sent on its own, which is what stops a message going out with
+   an unfilled placeholder in it.
+
+   The placeholders are a fixed, small list. Not an expression language: a
+   template is written by a member of staff and rendered into a message to a
+   tenant, so anything that could reach further than these fields would be a
+   way to read data the writer should not have. */
+export const TEMPLATE_FIELDS = {
+  "{{name}}": "who the conversation is with",
+  "{{first_name}}": "their first name",
+  "{{company}}": "your company's name",
+  "{{property}}": "the address, where the conversation is about a tenancy",
+  "{{unit}}": "the unit label",
+  "{{rent}}": "their rent",
+  "{{balance}}": "what they currently owe",
+  "{{phone}}": "your company's phone number",
+};
+
+/* Everything a template can see. Assembled once so `renderTemplate` cannot
+   reach past it. */
+export async function templateValuesFor(companyId, threadId) {
+  const company = await get("SELECT name, phone FROM company WHERE id = ?", companyId);
+  const thread = await get(
+    `SELECT t.*, COALESCE(te.name, o.name, v.name) AS party_name
+       FROM thread t
+       LEFT JOIN tenant te ON te.id = t.tenant_id
+       LEFT JOIN owner o ON o.id = t.owner_id
+       LEFT JOIN vendor v ON v.id = t.vendor_id
+      WHERE t.id = ? AND t.company_id = ?`, threadId, companyId);
+  if (!thread) return {};
+
+  const values = {
+    "{{name}}": thread.party_name || null,
+    "{{first_name}}": thread.party_name ? String(thread.party_name).split(/\s+/)[0] : null,
+    "{{company}}": company?.name || null,
+    "{{phone}}": company?.phone || null,
+    "{{property}}": null,
+    "{{unit}}": null,
+    "{{rent}}": null,
+    "{{balance}}": null,
+  };
+
+  /* The tenancy figures, only where the conversation is with a tenant who
+     has a live one. An owner asking about a statement has no rent. */
+  if (thread.tenant_id) {
+    const lease = await get(
+      `SELECT l.*, u.label, p.line1 FROM lease l
+         JOIN lease_tenant lt ON lt.lease_id = l.id
+         JOIN unit u ON u.id = l.unit_id
+         JOIN property p ON p.id = u.property_id
+        WHERE lt.tenant_id = ? AND l.company_id = ? AND l.status = 'active'
+        ORDER BY l.start_date DESC LIMIT 1`, thread.tenant_id, companyId);
+    if (lease) {
+      const { usd } = await import("./money.js");
+      const { balanceFor } = await import("./payments.js");
+      const { monthKey, today } = await import("./dates.js");
+      const balance = await balanceFor(lease.id, monthKey(today()));
+
+      values["{{property}}"] = lease.line1;
+      values["{{unit}}"] = lease.label || null;
+      values["{{rent}}"] = usd(lease.rent_cents);
+      values["{{balance}}"] = usd(balance.outstandingCents);
+    }
+  }
+
+  return values;
+}
+
+/* Fills what it can and reports what it could not.
+
+   An unfilled placeholder is left in the text on purpose rather than becoming
+   an empty space. "Hello , your rent of is due" reads like a broken system
+   and might be sent without anybody noticing; "Hello {{first_name}}" is
+   obviously unfinished, and `missing` is shown beside the box so it is
+   noticed before it goes. */
+export function renderTemplate(body, values) {
+  const missing = [];
+  const text = String(body || "").replace(/\{\{[a-z_]+\}\}/g, (token) => {
+    const value = values[token];
+    if (value == null || value === "") {
+      if (!missing.includes(token)) missing.push(token);
+      return token;
+    }
+    return String(value);
+  });
+  return { text, missing };
+}
+
+export async function templatesFor(companyId, { channel = null } = {}) {
+  return await all(
+    `SELECT * FROM message_template
+      WHERE company_id = ? AND archived_at IS NULL
+        ${channel ? "AND channel IN ('any', ?)" : ""}
+      ORDER BY name`,
+    ...(channel ? [companyId, channel] : [companyId]));
+}
+
+export async function saveTemplate({
+  companyId, templateId = null, name, channel = "any", subject = null, body, by,
+}) {
+  const trimmed = String(name || "").trim();
+  if (!trimmed) return { ok: false, reason: "Give it a name so somebody can find it." };
+  if (!String(body || "").trim()) return { ok: false, reason: "A template with no text is not a template." };
+
+  const fields = {
+    name: trimmed.slice(0, 80),
+    channel: ["any", "email", "sms"].includes(channel) ? channel : "any",
+    subject: String(subject || "").trim().slice(0, 200) || null,
+    body: String(body).slice(0, 4000),
+    updated_at: stamp(),
+  };
+
+  try {
+    if (templateId) {
+      await one("SELECT id FROM message_template WHERE id = ? AND company_id = ?", templateId, companyId);
+      await update("message_template", templateId, fields);
+      return { ok: true, templateId };
+    }
+    const newId = id();
+    await insert("message_template", {
+      id: newId, company_id: companyId, created_by: by, created_at: stamp(), ...fields,
+    });
+    return { ok: true, templateId: newId };
+  } catch (err) {
+    if (String(err.message).includes("duplicate key")) {
+      return { ok: false, reason: "You already have a template with that name." };
+    }
+    throw err;
+  }
+}
+
+export async function archiveTemplate({ companyId, templateId }) {
+  await one("SELECT id FROM message_template WHERE id = ? AND company_id = ?", templateId, companyId);
+  await update("message_template", templateId, { archived_at: stamp() });
+  return { ok: true };
+}

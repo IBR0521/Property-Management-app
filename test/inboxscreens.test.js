@@ -369,3 +369,149 @@ describe("a reply the delivery rules refuse", () => {
     assert.match(shown.body, /not queued/, "and it does not claim to have gone");
   });
 });
+
+/* --- saved replies ----------------------------------------------------------------- */
+
+describe("saved replies", () => {
+  test("they are kept apart from legal notices, and the screen says why", async () => {
+    /* notice_template carries an invariant this must not inherit: an
+       unapproved notice cannot be sent, and editing clears the attorney's
+       sign-off. "Thanks, somebody is coming Tuesday" is not that. */
+    const res = await page(staff, "/app/inbox/templates");
+    assert.equal(res.status, 200);
+    assert.match(res.body, /not notices/i);
+    assert.match(res.body, /attorney/i);
+    assert.match(res.body, /\/app\/rent\/ladder/, "and points at where notices really live");
+  });
+
+  test("one can be added and then used", async () => {
+    await staff.post("/app/inbox/templates", {
+      name: "Contractor booked", channel: "any",
+      body: "Hello {{first_name}}, somebody is coming to {{property}} on Tuesday.",
+    }, { csrfFrom: "/app/inbox/templates" });
+
+    const saved = await get("SELECT * FROM message_template WHERE company_id = ?", world.companyId);
+    assert.equal(saved.name, "Contractor booked");
+
+    const threadId = await inbound();
+    const property = await get(
+      "SELECT line1 FROM property WHERE id = ?", world.propertyId);
+
+    const res = await page(staff, `/app/inbox/${threadId}?template=${saved.id}`);
+    assert.match(res.body,
+      new RegExp(`Hello Test, somebody is coming to ${property.line1} on Tuesday\\.`),
+      "filled in against this conversation");
+    assert.ok(!res.body.includes("{{first_name}}"), "and nothing was left unfilled");
+  });
+
+  test("a blank it could not fill is left visible and called out", async () => {
+    /* "Hello , your rent of is due" reads like a broken system and might go
+       out unnoticed. An obvious {{token}} does not. */
+    await staff.post("/app/inbox/templates", {
+      name: "Balance", channel: "any",
+      body: "Hello {{first_name}}, you owe {{balance}}.",
+    }, { csrfFrom: "/app/inbox/templates" });
+    const saved = await get("SELECT * FROM message_template");
+
+    /* A conversation with somebody who has no live tenancy. */
+    const threadId = await inbound("hello", "+16145559999");
+    const res = await page(staff, `/app/inbox/${threadId}?template=${saved.id}`);
+
+    assert.match(res.body, /were not filled in/i);
+    assert.match(res.body, /\{\{balance\}\}/, "the token is still there to be noticed");
+  });
+
+  test("nothing is sent by choosing one", async () => {
+    await staff.post("/app/inbox/templates", {
+      name: "Booked", channel: "any", body: "Somebody is coming Tuesday.",
+    }, { csrfFrom: "/app/inbox/templates" });
+    const saved = await get("SELECT * FROM message_template");
+
+    const threadId = await inbound();
+    await page(staff, `/app/inbox/${threadId}?template=${saved.id}`);
+
+    assert.equal((await all("SELECT id FROM outbox")).length, 0, "it only fills the box");
+    assert.equal((await all("SELECT id FROM message WHERE direction = 'out'")).length, 0);
+  });
+
+  test("a sent message remembers which wording it came from", async () => {
+    await staff.post("/app/inbox/templates", {
+      name: "Booked", channel: "any", body: "Somebody is coming Tuesday.",
+    }, { csrfFrom: "/app/inbox/templates" });
+    const saved = await get("SELECT * FROM message_template");
+
+    const threadId = await inbound();
+    await staff.post(`/app/inbox/${threadId}/reply`, {
+      body: "Somebody is coming Tuesday.", kind: "reply", channel: "sms",
+      template_id: saved.id,
+    }, { csrfFrom: `/app/inbox/${threadId}` });
+
+    const message = await get(
+      "SELECT * FROM message WHERE thread_id = ? AND direction = 'out'", threadId);
+    assert.equal(message.template_id, saved.id);
+  });
+
+  test("retiring one hides it but keeps the history", async () => {
+    await staff.post("/app/inbox/templates", {
+      name: "Old wording", channel: "any", body: "Somebody is coming Tuesday.",
+    }, { csrfFrom: "/app/inbox/templates" });
+    const saved = await get("SELECT * FROM message_template");
+
+    const threadId = await inbound();
+    await staff.post(`/app/inbox/${threadId}/reply`, {
+      body: "Somebody is coming Tuesday.", kind: "reply", channel: "sms",
+      template_id: saved.id,
+    }, { csrfFrom: `/app/inbox/${threadId}` });
+
+    await staff.post("/app/inbox/templates/archive",
+      { template_id: saved.id }, { csrfFrom: "/app/inbox/templates" });
+
+    const list = await page(staff, "/app/inbox/templates");
+    assert.ok(!list.body.includes("Old wording"), "gone from the list");
+
+    const message = await get(
+      "SELECT * FROM message WHERE thread_id = ? AND direction = 'out'", threadId);
+    assert.equal(message.template_id, saved.id, "and the message still points at it");
+  });
+
+  test("two with the same name are refused", async () => {
+    const body = { name: "Booked", channel: "any", body: "Tuesday." };
+    await staff.post("/app/inbox/templates", body, { csrfFrom: "/app/inbox/templates" });
+    const res = await staff.post("/app/inbox/templates", body, { csrfFrom: "/app/inbox/templates" });
+    assert.match(loc(res), /already have a template with that name/i);
+  });
+
+  test("an empty one is refused", async () => {
+    const res = await staff.post("/app/inbox/templates",
+      { name: "Nothing", channel: "any", body: "   " }, { csrfFrom: "/app/inbox/templates" });
+    assert.match(loc(res), /not a template/i);
+  });
+
+  test("another company's template cannot be edited or retired", async () => {
+    const other = await f.makeWorld({ name: "Other Co" });
+    await insert("message_template", {
+      id: "tpl-other", company_id: other.companyId, name: "Theirs",
+      channel: "any", body: "Hello", created_at: stamp(),
+    });
+
+    const res = await staff.post("/app/inbox/templates",
+      { template_id: "tpl-other", name: "Stolen", channel: "any", body: "Hello" },
+      { csrfFrom: "/app/inbox/templates" });
+    assert.equal(res.status, 404);
+
+    const untouched = await get("SELECT name FROM message_template WHERE id = 'tpl-other'");
+    assert.equal(untouched.name, "Theirs");
+  });
+
+  test("a template from another company is not offered in the reply box", async () => {
+    const other = await f.makeWorld({ name: "Other Co" });
+    await insert("message_template", {
+      id: "tpl-other-2", company_id: other.companyId, name: "Theirs",
+      channel: "any", body: "Hello", created_at: stamp(),
+    });
+
+    const threadId = await inbound();
+    const res = await page(staff, `/app/inbox/${threadId}`);
+    assert.ok(!res.body.includes("tpl-other-2"));
+  });
+});

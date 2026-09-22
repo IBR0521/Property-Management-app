@@ -132,6 +132,13 @@ Outbound from the inbox goes through the existing outbox, so the delivery
 honesty invariant holds without new work: the inbox shows *queued* until the
 provider accepts.
 
+**Templates** are a separate table from `notice_template`, decided during 4b.
+That table carries an invariant this one must not inherit — an unapproved
+notice cannot be sent, and editing clears the attorney's sign-off — because a
+notice is a step in a process that ends in a courtroom. "Thanks, somebody is
+coming Tuesday" is not. One table would mean either requiring an attorney to
+approve a pleasantry or letting unapproved text go out as a notice.
+
 ---
 
 ## What I will not do in this phase
