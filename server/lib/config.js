@@ -191,6 +191,12 @@ export const STRIPE_SECRET_KEY = raw("STRIPE_SECRET_KEY");
 export const STRIPE_WEBHOOK_SECRET = raw("STRIPE_WEBHOOK_SECRET");
 export const STRIPE_PUBLISHABLE_KEY = raw("STRIPE_PUBLISHABLE_KEY");
 
+/* Connect is a separate application registered in the Stripe dashboard, with
+   its own client id. Unset means companies cannot connect an account, which
+   is the correct state until you have one. */
+export const STRIPE_CONNECT_CLIENT_ID = raw("STRIPE_CONNECT_CLIENT_ID");
+export const STRIPE_CONNECT_WEBHOOK_SECRET = raw("STRIPE_CONNECT_WEBHOOK_SECRET");
+
 /* A price id per band, read by name so a missing one identifies itself. */
 export const STRIPE_PRICES = {
   starter: raw("STRIPE_PRICE_STARTER"),
@@ -253,6 +259,7 @@ export function configSummary() {
     plaid: PLAID.configured ? PLAID.env : "unset",
     errorReporting: SENTRY_DSN ? "configured" : "unset",
     platformAdmin: PLATFORM_OPERATOR_EMAIL ? "configured" : "unset",
+    connect: STRIPE_CONNECT_CLIENT_ID ? "configured" : "unset",
     billing: STRIPE_SECRET_KEY
       ? (STRIPE_SECRET_KEY.startsWith("sk_live_") ? "live" : "test")
       : "unset",
