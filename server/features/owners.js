@@ -19,6 +19,7 @@ import { icons } from "../views/icons.js";
 import { navCounts } from "../lib/counts.js";
 import { storeMany, DOC_TYPES, fileUrl } from "../lib/files.js";
 import { event } from "./maintenance.js";
+import { postMoney } from "../lib/ledger.js";
 
 export function registerOwners(router) {
   /* --- list --------------------------------------------------------------- */
@@ -333,11 +334,12 @@ export function registerOwners(router) {
     const amount = outbound ? -Math.abs(magnitude) : Math.abs(magnitude);
     const { stored, problems } = await storeMany(ctx.files, "receipt", { allow: DOC_TYPES });
 
-    await insert("ledger_entry", {
-      id: id(), company_id: cid, owner_id: owner.id,
-      date: String(ctx.fields.date || today()), kind, amount_cents: amount,
+    await postMoney({
+      companyId: cid, ownerId: owner.id,
+      date: String(ctx.fields.date || today()), kind, amountCents: amount,
       memo: String(ctx.fields.memo || "").trim(), source: "manual",
-      receipt_path: stored[0] ? stored[0].path : null, created_at: stamp(),
+      receiptPath: stored[0] ? stored[0].path : null,
+      sourceType: "owner", sourceId: owner.id, postedBy: ctx.staff.id,
     });
     const msg = problems.length ? problems.join(" ") : "Entry added.";
     redirect(ctx.res, `/app/owners/${owner.id}?m=${encodeURIComponent(msg)}`);

@@ -26,6 +26,7 @@ import { CATEGORIES, category, assess } from "../lib/triage.js";
 import { check, clientIp } from "../lib/ratelimit.js";
 import { sendNow } from "../lib/delivery/now.js";
 import { resolvePublicCompany, companyForUnitToken, publicPath } from "../lib/tenancy.js";
+import { postMoney } from "../lib/ledger.js";
 import { complianceState } from "./vendors.js";
 
 const STATUS_TONE = {
@@ -713,12 +714,13 @@ export function registerMaintenance(router) {
          attached. This is the link that makes the monthly statement cheap to
          produce and hard to argue with. */
       if (actual != null && actual > 0) {
-        await insert("ledger_entry", {
-          id: id(), company_id: cid, owner_id: owner.id, property_id: owner.property_id,
-          unit_id: wo.unit_id, lease_id: wo.lease_id, date: today(),
-          kind: "expense", amount_cents: -Math.abs(actual),
+        await postMoney({
+          companyId: cid, ownerId: owner.id, propertyId: owner.property_id,
+          unitId: wo.unit_id, leaseId: wo.lease_id, date: today(),
+          kind: "expense", amountCents: -Math.abs(actual),
           memo: `${wo.reference} ${wo.summary}`,
-          source: "work_order", work_order_id: wo.id, created_at: stamp(),
+          source: "work_order", workOrderId: wo.id,
+          sourceType: "work_order", sourceId: wo.id, postedBy: ctx.staff.id,
         });
       }
     });

@@ -80,6 +80,14 @@ test run cannot charge a real card.
 
 ---
 
+## Phase 3 — one decision I stopped for
+
+| | What | Why I have not done it |
+|---|---|---|
+| 17 | **Approve the ledger conversion on the live database** | `ledger_entry` and `journal` were written independently until now, so 22 entries exist that owners have been shown and the company's books do not know about. The conversion posts **two opening journals** — one per owner — dated 2026-08-03, memo `Conversion: pre-double-entry ledger balance`:<br><br>• owner …221d0f3d — 10 entries, net **+$6,864.75**<br>• owner …68e762c9 — 12 entries, net **+$5,912.60**<br><br>The journal is append-only, so this cannot be deleted afterwards — only reversed, which leaves both halves visible forever. Tested on a throwaway database (12 tests). Run with:<br>`node -e "import('./server/lib/convert.js').then(m=>m.commit({confirm:'post-opening-journals'}))"` |
+
+---
+
 ## Still to be decided (not yet blocking)
 
 | | What | When it becomes urgent |

@@ -18,6 +18,7 @@ import { html, attr } from "../lib/render.js";
 import { appPage, notice, empty, tabs, PROPERTY_TABS } from "../views/layout.js";
 import { navCounts } from "../lib/counts.js";
 import { queueNotice, renderTemplate, tick } from "../lib/scheduler.js";
+import { postMoney } from "../lib/ledger.js";
 
 export function registerRent(router) {
   /* --- rent roll ---------------------------------------------------------- */
@@ -154,11 +155,16 @@ export function registerRent(router) {
     const date = String(ctx.fields.date || today());
 
     await tx(async () => {
-      await insert("ledger_entry", {
-        id: id(), company_id: cid, owner_id: lease.owner_id, property_id: lease.property_id,
-        unit_id: lease.unit_id, lease_id: lease.id, date, kind: "rent_payment",
-        amount_cents: Math.abs(amount), memo: String(ctx.fields.memo || "Rent").trim(),
-        source: "manual", created_at: stamp(),
+      /* Both books, in one call. This wrote ledger_entry alone, which meant
+         recording rent told the owner's statement and told the company's
+         accounts nothing — twelve payments and thirteen thousand dollars had
+         accumulated on one side only. */
+      await postMoney({
+        companyId: cid, ownerId: lease.owner_id, propertyId: lease.property_id,
+        unitId: lease.unit_id, leaseId: lease.id, date, kind: "rent_payment",
+        amountCents: Math.abs(amount), memo: String(ctx.fields.memo || "Rent").trim(),
+        source: "manual", sourceType: "lease", sourceId: lease.id,
+        postedBy: ctx.staff.id,
       });
 
       /* Close any delinquency the payment clears. Recomputed from the ledger

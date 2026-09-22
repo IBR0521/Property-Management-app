@@ -178,6 +178,9 @@ export async function sweepLateFees({ asOf = null, postedBy = "system", now = ne
 
         await run("UPDATE late_fee SET journal_id = ?, ledger_entry_id = ? WHERE id = ?",
           jid, entryId, feeId);
+        /* The sweep already posted both books; this links them so the parity
+           check sees a fee as posted rather than as an orphan. */
+        await run("UPDATE ledger_entry SET journal_id = ? WHERE id = ?", jid, entryId);
       });
 
       out.charged++;

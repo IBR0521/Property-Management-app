@@ -23,38 +23,68 @@ import { navCounts } from "../lib/counts.js";
 export const ACCT = {
   CASH: "1000",
   TRUST_CASH: "1010",
+  IN_TRANSIT: "1020",
   RENT_RECEIVABLE: "1200",
+  TENANT_RECEIVABLE: "1300",
   PAYABLE: "2000",
   DEPOSITS_HELD: "2100",
   OWNER_FUNDS: "2200",
+  PREPAID_RENT: "2300",
+  RETAINED: "3000",
+  OPENING_CONVERSION: "3100",
   RENT_INCOME: "4000",
   LATE_FEE_INCOME: "4100",
   MGMT_FEE_INCOME: "4200",
+  FEE_RECOVERED: "4300",
   REPAIRS: "5000",
   BANK_CHARGES: "5100",
+  PROCESSING_FEES: "5200",
+  RETURN_CHARGES: "5300",
 };
 
+/* The whole chart, and the only definition of it for a new company.
+
+   This list and the INSERT in migration 020 have to agree. They drifted once —
+   020 added the payment accounts for companies that already existed, and a
+   company created afterwards got a chart without them, so posting a rent
+   payment failed with "Not found" from a code lookup. The test below asserts
+   every ACCT constant resolves, which is what makes that a failure rather
+   than a surprise. */
 const DEFAULT_CHART = [
   [ACCT.CASH, "Operating cash", "asset", "debit", 0],
   [ACCT.TRUST_CASH, "Trust cash — client funds", "asset", "debit", 1],
+  [ACCT.IN_TRANSIT, "Payments in transit", "asset", "debit", 1],
   [ACCT.RENT_RECEIVABLE, "Rent receivable", "asset", "debit", 0],
+  [ACCT.TENANT_RECEIVABLE, "Tenant receivable", "asset", "debit", 0],
   [ACCT.PAYABLE, "Accounts payable", "liability", "credit", 0],
   [ACCT.DEPOSITS_HELD, "Tenant deposits held", "liability", "credit", 1],
   [ACCT.OWNER_FUNDS, "Owner funds held", "liability", "credit", 1],
-  ["3000", "Retained earnings", "equity", "credit", 0],
+  [ACCT.PREPAID_RENT, "Prepaid rent", "liability", "credit", 1],
+  [ACCT.RETAINED, "Retained earnings", "equity", "credit", 0],
+  [ACCT.OPENING_CONVERSION, "Opening balance conversion", "equity", "credit", 0],
   [ACCT.RENT_INCOME, "Rent income", "income", "credit", 0],
   [ACCT.LATE_FEE_INCOME, "Late fee income", "income", "credit", 0],
   [ACCT.MGMT_FEE_INCOME, "Management fee income", "income", "credit", 0],
+  [ACCT.FEE_RECOVERED, "Processing fee recovered", "income", "credit", 0],
   [ACCT.REPAIRS, "Repairs and maintenance", "expense", "debit", 0],
   [ACCT.BANK_CHARGES, "Bank charges", "expense", "debit", 0],
+  [ACCT.PROCESSING_FEES, "Payment processing fees", "expense", "debit", 0],
+  [ACCT.RETURN_CHARGES, "Returned payment charges", "expense", "debit", 0],
 ];
 
 /* A company created after migration 005 ran has no chart. Rather than making
    that a setup step somebody forgets, the first post creates it. */
+/* Fills in anything missing rather than returning early when the chart is
+   non-empty. The early return was the other half of the drift: a company with
+   the original twelve accounts never gained the seven the payment paths need,
+   and the failure surfaced as a 404 on recording rent. */
 export async function ensureChart(companyId) {
-  const have = await get("SELECT COUNT(*)::int AS n FROM account WHERE company_id = ?", companyId);
-  if (have.n > 0) return;
+  const existing = await all(
+    "SELECT code FROM account WHERE company_id = ?", companyId);
+  const have = new Set(existing.map((r) => r.code));
+
   for (const [code, name, type, normal, trust] of DEFAULT_CHART) {
+    if (have.has(code)) continue;
     await insert("account", {
       id: id(), company_id: companyId, code, name, type,
       normal_balance: normal, is_trust: trust, active: 1, created_at: stamp(),
