@@ -12,8 +12,8 @@
     "seed": "node server/seed.js",
     "reset": "rm -rf data/app.db data/app.db-wal data/app.db-shm && npm run seed",
     "cron": "node -e \"import('./server/lib/scheduler.js').then(m=>m.tick('manual')).then(r=>console.log(r))\"",
-    "test": "node --test --test-concurrency=1 test/*.test.js",
-    "test:watch": "node --test --watch test/*.test.js",
+    "test": "node --env-file=.env.test --test --test-concurrency=1 test/*.test.js",
+    "test:watch": "node --env-file=.env.test --test --watch test/*.test.js",
     "db:test": "createdb propops_test 2>/dev/null; echo 'propops_test ready'",
     "check": "npm test && echo ALL_GREEN"
   },

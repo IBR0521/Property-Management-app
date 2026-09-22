@@ -9,6 +9,43 @@ thing arrives.
 
 ---
 
+## Urgent — I emptied the production database on 2026-09-22
+
+**What happened.** I ran the test suite against a single file with
+`node --env-file=.env.local --test`. That loaded the production
+`DATABASE_URL` and did not set `NODE_ENV=test`. The guard in `config.js` only
+swaps in `TEST_DATABASE_URL` when `NODE_ENV=test`, so with it unset the suite
+was handed the live Supabase URL exactly as asked, and the harness's first
+action is `DROP SCHEMA public CASCADE` followed by a rebuild from the
+migrations.
+
+**What is gone.** Every row. The schema came back complete (all 24 migrations,
+RLS on 30 tables), but the data did not: the two owners' opening journals from
+the Phase 3 conversion ($6,864.75 and $5,912.60), the properties, units,
+leases, tenants, work orders and staff. The database now holds one leftover
+test fixture, a company called "Payments Co", which I have left in place rather
+than delete anything further without you.
+
+**What I have not done.** I have not re-seeded and I have not deleted the
+fixture, because either would overwrite what a restore would bring back. That
+is your call, and it wants making before anything else writes to that database.
+
+| | What | Why it matters |
+|---|---|---|
+| 0a | **Restore from a Supabase backup, if you have one** — Dashboard → Database → Backups. Point-in-time recovery to just before 08:12 UTC on 2026-09-22 would return everything. | PITR is a Pro-plan feature. On the free plan there may be a daily backup, or nothing. I cannot see which applies to your project. |
+| 0b | **If there is no backup: say so, and I will re-seed** | `npm run seed` rebuilds a working demo dataset. Anything you had entered through the deployed app by hand is not recoverable that way. |
+| 0c | **Turn on PITR if the plan allows it** | This is the second time this database has been the only copy of something. |
+
+**What I changed so it cannot recur.** The destructive calls in
+`test/helpers/db.js` now check for themselves rather than trusting that
+something upstream already did: they refuse unless the pool was built from
+`TEST_DATABASE_URL` *and* the database it actually connected to is named like
+a throwaway. `npm test` now reads a committed `.env.test`, so it no longer
+depends on my remembering to set anything. Four tests in `test/security.test.js`
+assert all of that, and the exact command that caused this is now refused.
+
+---
+
 ## Security — overdue, and not blocked on anything
 
 | | What | Why it matters |

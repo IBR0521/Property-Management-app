@@ -80,6 +80,17 @@ function resolveDatabaseUrl() {
 }
 
 export const DATABASE_URL = resolveDatabaseUrl();
+
+/* True only when the pool above was built from TEST_DATABASE_URL.
+
+   The test harness drops and rebuilds the public schema on whatever it is
+   given, and it used to decide whether that was safe by reading NODE_ENV.
+   That is not a guard, it is an assumption: running the suite with the
+   production env file loaded and NODE_ENV unset pointed the drop at the real
+   database and destroyed it. The destructive operation now checks this flag,
+   which can only be true if the URL came from the test variable. */
+export const IS_TEST_DATABASE =
+  IS_TEST && Boolean(DATABASE_URL) && DATABASE_URL === raw("TEST_DATABASE_URL");
 export const DATABASE_CA_CERT = raw("DATABASE_CA_CERT");
 export const PG_POOL_MAX = Number(raw("PG_POOL_MAX") || 4);
 

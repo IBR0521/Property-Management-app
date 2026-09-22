@@ -93,15 +93,19 @@ export async function postMoney({
   date, kind, amountCents, memo, source = "manual",
   workOrderId = null, receiptPath = null,
   sourceType = null, sourceId = null, postedBy = "system",
-  journalSource = null,
+  journalSource = null, journalId: existingJournalId = null,
 }) {
   const splits = postingFor(kind, amountCents);
   const { postJournal } = await import("../features/accounting.js");
 
   return await tx(async () => {
-    let journalId = null;
+    /* A caller that has already posted the double-entry record — a reversal is
+       the case that exists — hands it in rather than having a second one
+       posted. Without this the mirror entry would either post a duplicate
+       journal or carry none at all, and parity would fail either way. */
+    let journalId = existingJournalId;
 
-    if (splits) {
+    if (splits && !journalId) {
       journalId = await postJournal({
         companyId, date, memo: memo || kind.replace(/_/g, " "),
         source: journalSource || sourceFor(kind),

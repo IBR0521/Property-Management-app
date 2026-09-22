@@ -4,6 +4,7 @@
    were run manually during the security pass and are now run on every push. */
 import { test, before, after, describe } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { freshDatabase, truncateAll, closeDb, all, get, run } from "./helpers/db.js";
 import { startApp, client } from "./helpers/http.js";
 import * as f from "./helpers/factories.js";
@@ -242,5 +243,47 @@ describe("passwords and sessions", () => {
     const s = await f.makeStaff(world.companyId, { email: "gone@security-co.invalid", role: "admin", active: 0 });
     const res = await client(app.origin).signIn(s.email, f.PASSWORD);
     assert.equal(res.signedIn, false, "deactivating an account must actually stop it");
+  });
+});
+
+describe("the suite cannot reach a real database", () => {
+  /* This is not hypothetical. The harness drops and rebuilds the public
+     schema, and it decided whether that was safe by reading NODE_ENV. Running
+     it with the production env file loaded and NODE_ENV unset pointed the
+     drop at the live database and emptied it — config.js handed over
+     DATABASE_URL exactly as asked, because that is what it was asked for.
+
+     The guard now lives on the destructive call itself, which is the only
+     place that cannot be bypassed by forgetting a variable. */
+  const helperSrc = () => readFileSync(
+    new URL("./helpers/db.js", import.meta.url), "utf8");
+
+  test("every destructive call checks that the database is disposable", () => {
+    const src = helperSrc();
+    for (const statement of ["DROP SCHEMA IF EXISTS public CASCADE", "TRUNCATE"]) {
+      const at = src.indexOf(statement);
+      assert.ok(at > 0, `${statement} is no longer in the helper — update this test`);
+      const before = src.slice(0, at);
+      assert.ok(before.lastIndexOf("refuseUnlessDisposable") > before.lastIndexOf("export async function"),
+        `${statement} runs without a disposability check in front of it`);
+    }
+  });
+
+  test("the check requires the pool to have come from TEST_DATABASE_URL", () => {
+    assert.match(helperSrc(), /IS_TEST_DATABASE/,
+      "a check that only reads NODE_ENV is the check that already failed");
+  });
+
+  test("and refuses a database not named like a throwaway", () => {
+    /* Belt and braces: if TEST_DATABASE_URL is ever pointed at something
+       real, the name is the second thing standing in the way. */
+    assert.match(helperSrc(), /current_database\(\)/);
+  });
+
+  test("this run is against a disposable database", async () => {
+    const { IS_TEST_DATABASE } = await import("../server/lib/config.js");
+    assert.equal(IS_TEST_DATABASE, true);
+    const row = await get("SELECT current_database() AS name");
+    assert.match(row.name, /_test$|^test_/);
   });
 });

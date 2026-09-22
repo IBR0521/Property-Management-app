@@ -19,6 +19,7 @@ import { appPage, notice, empty, tabs, PROPERTY_TABS } from "../views/layout.js"
 import { navCounts } from "../lib/counts.js";
 import { queueNotice, renderTemplate, tick } from "../lib/scheduler.js";
 import { postMoney } from "../lib/ledger.js";
+import { recomputeDelinquency } from "../lib/payments.js";
 
 export function registerRent(router) {
   /* --- rent roll ---------------------------------------------------------- */
@@ -168,21 +169,12 @@ export function registerRent(router) {
       });
 
       /* Close any delinquency the payment clears. Recomputed from the ledger
-         rather than decremented, so a correction cannot leave a stale balance. */
-      const period = monthKey(date);
-      const d = await get("SELECT * FROM delinquency WHERE lease_id = ? AND period = ?", lease.id, period);
-      if (d && d.status !== "resolved") {
-        const paid = (await get(
-          `SELECT COALESCE(SUM(amount_cents),0) AS c FROM ledger_entry
-            WHERE lease_id = ? AND kind = 'rent_payment' AND date >= ? AND date <= ?`,
-          lease.id, `${period}-01`, addDays(`${period}-01`, 45))).c;
-        const owed = lease.rent_cents - paid;
-        if (owed <= 0) {
-          await update("delinquency", d.id, { status: "resolved", resolved_at: stamp(), amount_cents: 0 });
-        } else {
-          await update("delinquency", d.id, { amount_cents: owed });
-        }
-      }
+         rather than decremented, so a correction cannot leave a stale balance.
+
+         The same function serves the online payment path and the ACH return,
+         because two implementations of "how much is still owed" eventually
+         disagree and the one nobody is looking at is the one that is wrong. */
+      await recomputeDelinquency(lease.id, monthKey(date));
     });
     redirect(ctx.res, `/app/rent?m=${encodeURIComponent("Payment recorded.")}`);
   });
