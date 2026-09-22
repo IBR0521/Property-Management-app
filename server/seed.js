@@ -17,11 +17,13 @@
 
    Run: npm run seed   (npm run reset wipes the database first) */
 import { migrate, db, insert, run, get, all } from "./lib/db.js";
-import { id, token, ref } from "./lib/ids.js";
+import { id, token, ref, stickerToken } from "./lib/ids.js";
+import { uniqueSlug } from "./lib/slug.js";
 import { hashPassword } from "./lib/auth.js";
 import { randomBytes } from "node:crypto";
 import { stamp, today, addDays, monthKey, prevMonthRange } from "./lib/dates.js";
 import { tick } from "./lib/scheduler.js";
+import { postMoney } from "./lib/ledger.js";
 
 /* Before migrate(), and before anything else opens a connection. A guard that
    runs after the database has already been touched is a guard that has
@@ -48,6 +50,12 @@ await insert("company", {
   id: companyId, name: "Leafridge Property Management",
   phone: "(614) 655-8240", emergency_phone: "(614) 655-8241",
   timezone: "America/New_York", created_at: now,
+  /* Generated the same way the signup path does it, rather than written out
+     here. The column went NOT NULL in migration 014 and this insert was not
+     updated, so the seed had been broken for two phases — nothing exercised
+     it, because the suite builds its world from factories instead. The test
+     that now runs this file end to end is what closes that gap. */
+  slug: await uniqueSlug("Leafridge Property Management"),
 });
 
 /* --- staff ---------------------------------------------------------------- */
@@ -114,6 +122,10 @@ for (const p of PROPERTIES) {
       id: uid, company_id: companyId, property_id: pid, label: u.label,
       beds: u.beds, baths: u.baths, sqft: u.sqft, market_rent_cents: u.rent,
       status: "occupied", created_at: now,
+      /* The QR sticker's token. NOT NULL since migration 004 — every unit has
+         a code on the wall, so a unit without one is a unit nobody can
+         report a problem from. */
+      report_token: stickerToken(),
     });
     units.push({ id: uid, propertyId: pid, ownerId: owners[p.owner].id, ...u, line1: p.line1 });
   }
@@ -258,33 +270,41 @@ await insert("criteria_set", {
   created_at: now,
 });
 
-/* --- ledger: last month paid in full, this month partly ------------------- */
+/* --- ledger: last month paid in full, this month partly -------------------
+
+   Through postMoney, so the demo company's two books agree. Writing
+   ledger_entry directly — which this did — produced twenty entries and no
+   journals: $12,677 of owner-visible money with nothing behind it, and an
+   accounting screen reporting a discrepancy on a fresh install. */
 const last = prevMonthRange(T);
 const period = monthKey(T);
 for (const [i, l] of leases.entries()) {
   const fee = Math.round(l.rent * 0.09);
 
-  await insert("ledger_entry", {
-    id: id(), company_id: companyId, owner_id: l.ownerId, property_id: l.propertyId,
-    unit_id: l.unitId, lease_id: l.id, date: addDays(last.start, 2),
-    kind: "rent_payment", amount_cents: l.rent,
-    memo: `Rent ${monthKey(last.start)} — ${l.tenant}`, source: "import", created_at: now,
+  await postMoney({
+    companyId, ownerId: l.ownerId, propertyId: l.propertyId,
+    unitId: l.unitId, leaseId: l.id, date: addDays(last.start, 2),
+    kind: "rent_payment", amountCents: l.rent,
+    memo: `Rent ${monthKey(last.start)} — ${l.tenant}`, source: "import",
+    sourceType: "lease", sourceId: l.id, postedBy: "seed",
   });
-  await insert("ledger_entry", {
-    id: id(), company_id: companyId, owner_id: l.ownerId, property_id: l.propertyId,
-    unit_id: l.unitId, lease_id: l.id, date: addDays(last.start, 2),
-    kind: "management_fee", amount_cents: -fee,
-    memo: `Management fee ${monthKey(last.start)} (9%)`, source: "system", created_at: now,
+  await postMoney({
+    companyId, ownerId: l.ownerId, propertyId: l.propertyId,
+    unitId: l.unitId, leaseId: l.id, date: addDays(last.start, 2),
+    kind: "management_fee", amountCents: -fee,
+    memo: `Management fee ${monthKey(last.start)} (9%)`, source: "system",
+    sourceType: "lease", sourceId: l.id, postedBy: "seed",
   });
 
   // Two leases are left unpaid this month so the ladder has real work, and
   // one pays short so a partial balance is visible.
   if (i < leases.length - 2) {
-    await insert("ledger_entry", {
-      id: id(), company_id: companyId, owner_id: l.ownerId, property_id: l.propertyId,
-      unit_id: l.unitId, lease_id: l.id, date: `${period}-03`,
-      kind: "rent_payment", amount_cents: i === 0 ? l.rent - 30000 : l.rent,
-      memo: `Rent ${period} — ${l.tenant}`, source: "import", created_at: now,
+    await postMoney({
+      companyId, ownerId: l.ownerId, propertyId: l.propertyId,
+      unitId: l.unitId, leaseId: l.id, date: `${period}-03`,
+      kind: "rent_payment", amountCents: i === 0 ? l.rent - 30000 : l.rent,
+      memo: `Rent ${period} — ${l.tenant}`, source: "import",
+      sourceType: "lease", sourceId: l.id, postedBy: "seed",
     });
   }
 }
@@ -324,11 +344,12 @@ async function wo({ leaseIdx, category, severity, summary, detail, status, vendo
       actor: "Marcus Bell", kind: "completed", note: `${detail || "Repaired"}`, tenant_visible: 1,
     });
     if (actual) {
-      await insert("ledger_entry", {
-        id: id(), company_id: companyId, owner_id: l.ownerId, property_id: l.propertyId,
-        unit_id: l.unitId, lease_id: l.id, date: addDays(T, -(ageDays - 2)),
-        kind: "expense", amount_cents: -actual, memo: `${summary}`,
-        source: "work_order", work_order_id: woId, created_at: now,
+      await postMoney({
+        companyId, ownerId: l.ownerId, propertyId: l.propertyId,
+        unitId: l.unitId, leaseId: l.id, date: addDays(T, -(ageDays - 2)),
+        kind: "expense", amountCents: -actual, memo: `${summary}`,
+        source: "work_order", workOrderId: woId,
+        sourceType: "work_order", sourceId: woId, postedBy: "seed",
       });
     }
   }
