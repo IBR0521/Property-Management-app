@@ -48,7 +48,7 @@ import { registerPlatform, activeImpersonation, impersonationForbids } from "./f
 import { registerPayments } from "./features/payments.js";
 import { registerPayouts } from "./features/payouts.js";
 import { registerPortal } from "./features/portal.js";
-import { registerPortalTenant } from "./features/portal-tenant.js";
+import { registerPortalTenant, registerPortalTenantSelfService } from "./features/portal-tenant.js";
 import { registerPortalOwner } from "./features/portal-owner.js";
 
 const router = createRouter();
@@ -81,6 +81,7 @@ registerPayments(router);
 registerPayouts(router);
 registerPortal(router);
 registerPortalTenant(router);
+registerPortalTenantSelfService(router);
 registerPortalOwner(router);
 
 /* Routes that need a signed-in staff member. Everything under /app except the
