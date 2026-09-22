@@ -189,6 +189,7 @@ const ROUTE_CAPABILITY = [
   ["/app/banking", "bank.link"],
   ["/app/owners", "money.view"],
   ["/app/payments", "money.view"],
+  ["/app/payouts", "money.view"],
   ["/app/rent", "money.view"],
   ["/app/vendors/1099", "money.view"],
   ["/app/vendors/invoices", "money.view"],
@@ -214,6 +215,8 @@ const WRITE_CAPABILITY = [
   /* Connecting a payment account, changing who bears a fee, and putting a
      lease on cash-only are all decisions about money, not about settings. */
   ["/app/payments", "money.write"],
+  /* Releasing a run posts journals and commits cheque numbers. */
+  ["/app/payouts", "money.write"],
   ["/app/vendors/invoices", "money.write"],
   ["/app/portfolio", "property.edit"],
 ];

@@ -60,6 +60,23 @@ to check the day keys exist.
 
 ---
 
+## Payouts — what only a real bank and real paper can settle
+
+The formats are built against the published record layouts and a hand-computed
+fixture. What no test here can tell you is whether *your* bank accepts *your*
+file, because most of it is per-institution.
+
+| | What | Why it matters |
+|---|---|---|
+| O1 | **Your ACH company identification**, from the bank that sets up origination | Ten digits they assign. It is not your tax number unless they say so, and the wrong one gets the file rejected. Entered on Payments out → Bank details. |
+| O2 | **Ask whether they want a balanced file** | Some banks want the offsetting debit written into the file; others take it from the account. There is a switch for it and sending the wrong one is a rejection. |
+| O3 | **Send one small run first** | One payee, a few dollars, to an account you control. The first file is the only real test of the format against that bank's parser. |
+| O4 | **Print the alignment sheet on plain paper** and hold it against a blank cheque | The offsets are the common US business layout. Stock differs between suppliers, and a cheque two millimetres out is rejected by the bank's reader. `check_layout` on the company row takes an override. |
+| O5 | **Confirm the positive-pay column order and date format** | Both differ between banks and both are parameters. The default is the most common shape; an empty account column is the usual reason one is rejected, and the run screen warns about that one. |
+| O6 | **Buy cheque stock with the MICR line pre-printed** | We deliberately do not draw it: it needs the E-13B typeface and magnetic toner, and drawn in an ordinary font it looks right and is not machine readable. |
+
+---
+
 ## Security — overdue, and not blocked on anything
 
 | | What | Why it matters |
@@ -77,6 +94,7 @@ to check the day keys exist.
 |---|---|---|
 | 5 | **The production Vercel URL**, set as `APP_BASE_URL` | Twilio signs webhooks over the full URL; a mismatch rejects every callback. Also used for links inside messages. I have only ever seen a preview URL. |
 | 6 | **Confirm the deploy succeeds with the cron block restored** | A cron entry broke a deploy once by exceeding the Hobby plan limit. One daily entry is within it, but I cannot deploy to confirm. |
+| 7a | **Two npm advisories in `@vercel/blob`'s `undici`** (1 high, 1 moderate) | Pre-existing, not from the `pdf-lib` install. `npm audit fix --force` upgrades `@vercel/blob` 0.27 → 2.8, which is a breaking change, so it is your call rather than something to do quietly. |
 | 7 | **`APP_ENCRYPTION_KEY` set in every environment** | Bank tokens and taxpayer IDs refuse to store without it. Losing it makes sealed fields unrecoverable, so it belongs in a secret manager. |
 
 ---
