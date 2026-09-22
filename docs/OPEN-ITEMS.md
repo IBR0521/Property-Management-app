@@ -9,40 +9,36 @@ thing arrives.
 
 ---
 
-## Urgent — I emptied the production database on 2026-09-22
+## Resolved — the production database, emptied and re-seeded on 2026-09-22
 
-**What happened.** I ran the test suite against a single file with
-`node --env-file=.env.local --test`. That loaded the production
-`DATABASE_URL` and did not set `NODE_ENV=test`. The guard in `config.js` only
-swaps in `TEST_DATABASE_URL` when `NODE_ENV=test`, so with it unset the suite
-was handed the live Supabase URL exactly as asked, and the harness's first
-action is `DROP SCHEMA public CASCADE` followed by a rebuild from the
-migrations.
+**What happened.** I ran one test file with `node --env-file=.env.local --test`
+and without `NODE_ENV=test`. `config.js` only swaps in `TEST_DATABASE_URL`
+when that variable is set, so the suite was handed the live Supabase URL
+exactly as asked, and the harness's first action is `DROP SCHEMA public
+CASCADE`. Every row went, including the two owners' opening journals from the
+Phase 3 conversion.
 
-**What is gone.** Every row. The schema came back complete (all 24 migrations,
-RLS on 30 tables), but the data did not: the two owners' opening journals from
-the Phase 3 conversion ($6,864.75 and $5,912.60), the properties, units,
-leases, tenants, work orders and staff. The database now holds one leftover
-test fixture, a company called "Payments Co", which I have left in place rather
-than delete anything further without you.
-
-**What I have not done.** I have not re-seeded and I have not deleted the
-fixture, because either would overwrite what a restore would bring back. That
-is your call, and it wants making before anything else writes to that database.
+**What you decided.** No backup; re-seed. Done — the database now holds the
+Leafridge demo portfolio: 3 owners, 5 properties, 8 units, 7 leases, 7
+vendors, 4 work orders, 3 open delinquencies, 21 obligations, and 20 ledger
+entries with 20 journals behind them. Parity clean, journal balanced at
+$14,742.65 on both sides, schema at `024`.
 
 | | What | Why it matters |
 |---|---|---|
-| 0a | **Restore from a Supabase backup, if you have one** — Dashboard → Database → Backups. Point-in-time recovery to just before 08:12 UTC on 2026-09-22 would return everything. | PITR is a Pro-plan feature. On the free plan there may be a daily backup, or nothing. I cannot see which applies to your project. |
-| 0b | **If there is no backup: say so, and I will re-seed** | `npm run seed` rebuilds a working demo dataset. Anything you had entered through the deployed app by hand is not recoverable that way. |
-| 0c | **Turn on PITR if the plan allows it** | This is the second time this database has been the only copy of something. |
+| 0a | **The demo sign-in was reset and is in the chat, not in this file** | The seed prints a generated password once. Its first run was cut off before that line, so I set a new one and gave it to you directly. Change it when you next sign in. |
+| 0b | **Turn on point-in-time recovery if the plan allows it** | There was no backup to restore from. This database has twice been the only copy of something. |
 
-**What I changed so it cannot recur.** The destructive calls in
-`test/helpers/db.js` now check for themselves rather than trusting that
-something upstream already did: they refuse unless the pool was built from
-`TEST_DATABASE_URL` *and* the database it actually connected to is named like
-a throwaway. `npm test` now reads a committed `.env.test`, so it no longer
-depends on my remembering to set anything. Four tests in `test/security.test.js`
-assert all of that, and the exact command that caused this is now refused.
+**What stops it recurring.** The destructive calls in `test/helpers/db.js` now
+check for themselves rather than trusting something upstream: they refuse
+unless the pool came from `TEST_DATABASE_URL` *and* the connected database is
+named like a throwaway. `npm test` reads a committed `.env.test`, so it no
+longer depends on my remembering to set anything. The exact command that
+caused this is now refused, and four tests in `test/security.test.js` hold
+that in place.
+
+A related gap closed with it: `npm run seed` had been broken for two phases
+because nothing ran it. `test/seed.test.js` now does, on every suite run.
 
 ---
 
