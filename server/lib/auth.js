@@ -188,6 +188,7 @@ const ROUTE_CAPABILITY = [
   ["/app/accounting", "money.view"],
   ["/app/banking", "bank.link"],
   ["/app/owners", "money.view"],
+  ["/app/payments", "money.view"],
   ["/app/rent", "money.view"],
   ["/app/vendors/1099", "money.view"],
   ["/app/vendors/invoices", "money.view"],
@@ -210,6 +211,9 @@ const WRITE_CAPABILITY = [
   ["/app/banking", "money.write"],
   ["/app/rent", "money.write"],
   ["/app/owners", "money.write"],
+  /* Connecting a payment account, changing who bears a fee, and putting a
+     lease on cash-only are all decisions about money, not about settings. */
+  ["/app/payments", "money.write"],
   ["/app/vendors/invoices", "money.write"],
   ["/app/portfolio", "property.edit"],
 ];

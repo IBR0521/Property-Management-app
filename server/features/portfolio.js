@@ -516,6 +516,13 @@ export function registerPortfolio(router) {
                       <div><dt>Lease</dt><dd>${human(lease.start_date)} to ${lease.end_date ? human(lease.end_date) : "open"}
                         ${lease.end_date ? html`<span class="cellsub">${daysBetween(today(), lease.end_date)} days left</span>` : ""}</dd></div>
                       <div><dt>Deposit held</dt><dd>${usd(lease.deposit_cents)}</dd></div>
+                      <div><dt>Pay rent link</dt><dd>
+                        ${Number(lease.payments_blocked)
+                          ? html`<span class="chip" data-tone="warn">cash only</span>
+                                 <span class="cellsub">${lease.payments_blocked_reason || ""}</span>`
+                          : html`<a href="/pay/${lease.pay_token}" style="word-break:break-all">${ctx.url.protocol}//${ctx.url.host}/pay/${lease.pay_token}</a>
+                                 <span class="cellsub">Send this once; it does not expire and shows only this home.</span>`}
+                      </dd></div>
                     </dl>`
                   : empty("Vacant", "No active lease on this unit.")}
               </div>

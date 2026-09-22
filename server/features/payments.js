@@ -22,7 +22,13 @@ import { human, humanStamp, monthKey, today, dueDateFor, stamp } from "../lib/da
 import { sendHtml, redirect } from "../lib/http.js";
 import { NotFound } from "../lib/db.js";
 import { html, attr, raw } from "../lib/render.js";
-import { publicPage, notice, empty } from "../views/layout.js";
+import { appPage, publicPage, notice, empty } from "../views/layout.js";
+import { navCounts } from "../lib/counts.js";
+import { log } from "../lib/logger.js";
+import { token } from "../lib/ids.js";
+import {
+  connectConfigured, authorizeUrl, exchangeCode, accountStatus,
+} from "../lib/connect.js";
 import { check, clientIp } from "../lib/ratelimit.js";
 import { APP_BASE_URL } from "../lib/config.js";
 import { quote, describeQuote, availableMethods } from "../lib/fees.js";
@@ -43,6 +49,8 @@ const STATUS_TONE = {
 };
 
 export function registerPayments(router) {
+  registerPaymentSettings(router);
+
   /* --- the page ----------------------------------------------------------- */
 
   router.get("/pay/:tok", async (ctx) => {
@@ -66,8 +74,8 @@ export function registerPayments(router) {
       heading: "Pay your rent",
       lede: `${unit.line1}${unit.label ? `, unit ${unit.label}` : ""}`,
       body: html`
-        ${ctx.query.e ? notice("warn", null, decodeURIComponent(ctx.query.e)) : ""}
-        ${ctx.query.m ? notice("ok", null, decodeURIComponent(ctx.query.m)) : ""}
+        ${ctx.query.e ? notice("warn", null, ctx.query.e) : ""}
+        ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
 
         ${balanceTiles(balance)}
 
@@ -709,4 +717,535 @@ async function rememberSavedMethod(company, payment, session) {
     created_at: stamp(),
   });
   return methodId;
+}
+
+/* ==========================================================================
+   Staff: connecting an account, and what it costs
+   --------------------------------------------------------------------------
+   Everything the tenant-facing half needs in order to work at all lives here,
+   and until now none of it had a screen — the connection, the fee model and
+   the payment blocks could only be set with a database client, which makes
+   them settings nobody can actually change.
+   ========================================================================== */
+
+function registerPaymentSettings(router) {
+  router.get("/app/payments", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const company = await one("SELECT * FROM company WHERE id = ?", cid);
+    const origin = `${ctx.url.protocol}//${ctx.url.host}`;
+
+    const [blocked, recent, totals] = await Promise.all([
+      all(`SELECT l.id, l.payments_blocked_reason, l.payments_blocked_at, l.payments_blocked_by,
+                  u.label, p.line1
+             FROM lease l JOIN unit u ON u.id = l.unit_id JOIN property p ON p.id = u.property_id
+            WHERE l.company_id = ? AND l.payments_blocked = 1
+            ORDER BY l.payments_blocked_at DESC`, cid),
+      all(`SELECT tp.*, u.label, p.line1 FROM tenant_payment tp
+             LEFT JOIN unit u ON u.id = tp.unit_id
+             LEFT JOIN property p ON p.id = u.property_id
+            WHERE tp.company_id = ? ORDER BY tp.created_at DESC LIMIT 10`, cid),
+      get(`SELECT
+             COUNT(*) FILTER (WHERE status = 'processing')::int AS clearing,
+             COALESCE(SUM(amount_cents) FILTER (WHERE status = 'processing'), 0)::bigint AS clearing_cents,
+             COUNT(*) FILTER (WHERE status = 'returned')::int AS returned,
+             COUNT(*) FILTER (WHERE status = 'succeeded')::int AS settled
+           FROM tenant_payment WHERE company_id = ?`, cid),
+    ]);
+
+    sendHtml(ctx.res, appPage({
+      staff: ctx.staff, csrf: ctx.csrf, active: "payments", counts: await navCounts(cid),
+      title: "Tenant payments",
+      subtitle: company.stripe_account_id
+        ? "Rent paid online, into your own account"
+        : "Not connected yet",
+      body: html`
+        ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
+        ${ctx.query.e ? notice("danger", null, ctx.query.e) : ""}
+
+        ${connectPanel({ company, csrf: ctx.csrf, connectReady: connectConfigured() })}
+
+        ${company.stripe_account_id ? html`
+          ${totalsPanel(totals)}
+          ${feesPanel({ company, csrf: ctx.csrf })}
+          ${linksPanel({ company, origin })}
+        ` : ""}
+
+        ${blockPanel({ blocked, csrf: ctx.csrf })}
+        ${recentPanel(recent)}`,
+    }));
+  });
+
+  /* --- connecting ---------------------------------------------------------- */
+
+  /* The state parameter is ours and is checked on the way back. Without it
+     anybody could hand a signed-in manager a link that attaches somebody
+     else's Stripe account to their company, and every rent payment after that
+     would settle into a stranger's bank. */
+  router.post("/app/payments/connect", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    if (!connectConfigured()) {
+      return redirect(ctx.res, `/app/payments?e=${encodeURIComponent(
+        "Stripe Connect is not configured on this deployment yet.")}`);
+    }
+    const company = await one("SELECT * FROM company WHERE id = ?", cid);
+    const state = token();
+    await putSetting(cid, CONNECT_STATE_KEY, JSON.stringify({ state, at: stamp(), by: ctx.staff.id }));
+    return redirect(ctx.res, authorizeUrl({ state, email: company.billing_email || ctx.staff.email }));
+  });
+
+  router.get("/app/payments/connected", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const fail = (m) => redirect(ctx.res, `/app/payments?e=${encodeURIComponent(m)}`);
+
+    if (ctx.query.error) {
+      return fail(String(ctx.query.error_description || ctx.query.error));
+    }
+
+    const stored = await readSetting(cid, CONNECT_STATE_KEY);
+    await putSetting(cid, CONNECT_STATE_KEY, null);
+
+    /* Expired as well as wrong. A state that has been sitting in the database
+       for a week is one somebody left in a browser tab, not a flow in
+       progress. */
+    if (!stored || stored.state !== String(ctx.query.state || "")) {
+      return fail("That connection link did not match. Start again from this page.");
+    }
+    if (minutesSince(stored.at) > 30) {
+      return fail("That connection attempt expired. Start again from this page.");
+    }
+
+    let accountId;
+    try {
+      const payload = await exchangeCode(String(ctx.query.code || ""));
+      accountId = payload.stripe_user_id;
+    } catch (err) {
+      return fail(err.message || "Stripe refused the connection.");
+    }
+
+    /* One Stripe account per company. The column is unique, so the second
+       company to try gets a clear message rather than a constraint error. */
+    const taken = await get(
+      "SELECT id FROM company WHERE stripe_account_id = ? AND id <> ?", accountId, cid);
+    if (taken) {
+      return fail("That Stripe account is already connected to another company on this platform.");
+    }
+
+    await update("company", cid, { stripe_account_id: accountId, stripe_checked_at: stamp() });
+    await refreshAccount(cid, accountId);
+
+    log.info("stripe account connected", { company: cid, by: ctx.staff.id });
+    return redirect(ctx.res, `/app/payments?m=${encodeURIComponent("Your Stripe account is connected.")}`);
+  });
+
+  /* What the account can actually do, read from Stripe rather than assumed
+     from "they clicked connect". An account can exist and still be unable to
+     take a payment — a document rejected weeks later does that. */
+  router.post("/app/payments/refresh", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const company = await one("SELECT * FROM company WHERE id = ?", cid);
+    if (!company.stripe_account_id) return redirect(ctx.res, "/app/payments");
+
+    try {
+      await refreshAccount(cid, company.stripe_account_id);
+    } catch (err) {
+      return redirect(ctx.res, `/app/payments?e=${encodeURIComponent(
+        `Stripe could not be reached: ${err.message}`)}`);
+    }
+    return redirect(ctx.res, `/app/payments?m=${encodeURIComponent("Checked with Stripe.")}`);
+  });
+
+  router.post("/app/payments/disconnect", async (ctx) => {
+    const cid = ctx.staff.company_id;
+
+    /* Money in flight is the reason this is not a simple clear. A payment
+       that is still clearing settles against the account it was created on,
+       and forgetting the id would leave the webhook unable to find the
+       company it belongs to. */
+    const inFlight = await get(
+      `SELECT COUNT(*)::int AS n FROM tenant_payment
+        WHERE company_id = ? AND status IN ('pending', 'processing')`, cid);
+    if (Number(inFlight.n) > 0) {
+      return redirect(ctx.res, `/app/payments?e=${encodeURIComponent(
+        `${inFlight.n} payment${Number(inFlight.n) === 1 ? " is" : "s are"} still clearing. `
+        + `Disconnecting now would lose track of ${Number(inFlight.n) === 1 ? "it" : "them"}. `
+        + `Try again once they have settled.`)}`);
+    }
+
+    await update("company", cid, {
+      stripe_account_id: null, stripe_charges_enabled: 0, stripe_payouts_enabled: 0,
+      stripe_requirements: null, stripe_checked_at: null,
+    });
+    log.warn("stripe account disconnected", { company: cid, by: ctx.staff.id });
+    return redirect(ctx.res, `/app/payments?m=${encodeURIComponent(
+      "Disconnected. Tenants can no longer pay online.")}`);
+  });
+
+  /* --- what it costs, and who bears it ------------------------------------- */
+
+  router.post("/app/payments/fees", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const f = ctx.fields;
+
+    const model = (v, fallback) =>
+      ["absorb", "pass", "split"].includes(String(v)) ? String(v) : fallback;
+    const percent = (v) => Math.min(100, Math.max(0, Number(v) || 0));
+
+    await update("company", cid, {
+      accept_ach: f.accept_ach ? 1 : 0,
+      accept_card: f.accept_card ? 1 : 0,
+      ach_fee_model: model(f.ach_fee_model, "absorb"),
+      card_fee_model: model(f.card_fee_model, "pass"),
+      ach_fee_split_percent: percent(f.ach_fee_split_percent),
+      card_fee_split_percent: percent(f.card_fee_split_percent),
+      /* The rates used to quote a tenant. Stored rather than hard-coded
+         because they change and are negotiable at volume, and a quoted fee
+         that does not match what is charged is worse than not quoting one. */
+      ach_fee_bps: Math.max(0, Number(f.ach_fee_bps) || 0),
+      ach_fee_cap_cents: Math.max(0, parseMoney(f.ach_fee_cap) ?? 0),
+      card_fee_bps: Math.max(0, Number(f.card_fee_bps) || 0),
+      card_fee_fixed_cents: Math.max(0, parseMoney(f.card_fee_fixed) ?? 0),
+    });
+
+    return redirect(ctx.res, `/app/payments?m=${encodeURIComponent("Saved.")}`);
+  });
+
+  /* --- blocking a lease ----------------------------------------------------- */
+
+  router.post("/app/payments/block", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const lease = await one(
+      "SELECT * FROM lease WHERE id = ? AND company_id = ?",
+      String(ctx.fields.lease_id || ""), cid);
+
+    if (String(ctx.fields.action) === "unblock") {
+      await run(
+        `UPDATE lease SET payments_blocked = 0, payments_blocked_reason = NULL,
+                payments_blocked_at = NULL, payments_blocked_by = NULL WHERE id = ?`, lease.id);
+      return redirect(ctx.res, `/app/payments?m=${encodeURIComponent("Online payment is back on for that home.")}`);
+    }
+
+    /* A reason is required and is shown to the tenant verbatim. "Payment
+       unavailable" with no explanation generates the phone call this product
+       exists to remove. */
+    const reason = String(ctx.fields.reason || "").trim();
+    if (reason.length < 10) {
+      return redirect(ctx.res, `/app/payments?e=${encodeURIComponent(
+        "Give a reason the tenant can act on — they see it on their payment page.")}`);
+    }
+
+    await run(
+      `UPDATE lease SET payments_blocked = 1, payments_blocked_reason = ?,
+              payments_blocked_at = ?, payments_blocked_by = ? WHERE id = ?`,
+      reason.slice(0, 300), stamp(), ctx.staff.id, lease.id);
+    await run("UPDATE autopay SET active = 0, last_error = ? WHERE lease_id = ?",
+      "online payment was switched off for this home", lease.id);
+
+    return redirect(ctx.res, `/app/payments?m=${encodeURIComponent(
+      "That home is now cash-only, and any automatic payment has been stopped.")}`);
+  });
+}
+
+/* --- reading the account back from Stripe ---------------------------------- */
+
+async function refreshAccount(companyId, accountId) {
+  const status = await accountStatus(accountId);
+  await update("company", companyId, {
+    stripe_charges_enabled: status.chargesEnabled ? 1 : 0,
+    stripe_payouts_enabled: status.payoutsEnabled ? 1 : 0,
+    stripe_requirements: JSON.stringify(status.requirements).slice(0, 900),
+    stripe_checked_at: stamp(),
+  });
+  return status;
+}
+
+const CONNECT_STATE_KEY = "stripe_connect_state";
+
+async function putSetting(companyId, key, value) {
+  if (value === null) {
+    await run("DELETE FROM setting WHERE company_id = ? AND key = ?", companyId, key);
+    return;
+  }
+  await run(
+    `INSERT INTO setting (company_id, key, value) VALUES (?, ?, ?)
+     ON CONFLICT (company_id, key) DO UPDATE SET value = EXCLUDED.value`,
+    companyId, key, value);
+}
+
+async function readSetting(companyId, key) {
+  const row = await get("SELECT value FROM setting WHERE company_id = ? AND key = ?", companyId, key);
+  if (!row?.value) return null;
+  try { return JSON.parse(row.value); } catch { return null; }
+}
+
+function minutesSince(iso) {
+  if (!iso) return Infinity;
+  return (Date.now() - new Date(iso).getTime()) / 60000;
+}
+
+/* --- staff views ----------------------------------------------------------- */
+
+function connectPanel({ company, csrf, connectReady }) {
+  if (!company.stripe_account_id) {
+    return html`
+      <div class="panel">
+        <div class="panel__head">
+          <h2>Connect your Stripe account</h2>
+          <p>Rent goes from your tenant to your bank. It never passes through us.</p>
+        </div>
+        <div class="panel__body">
+          ${empty("Not connected",
+            html`Tenants cannot pay online until this is done. You will complete Stripe's own
+                 onboarding and hold the account yourself, which is what keeps your money out
+                 of our hands and your chargebacks in yours.`)}
+          ${connectReady ? "" : notice("warn", "Not available on this deployment",
+            "Stripe Connect needs STRIPE_SECRET_KEY and STRIPE_CONNECT_CLIENT_ID to be set.")}
+        </div>
+        <div class="panel__foot">
+          <form method="post" action="/app/payments/connect">
+            <input type="hidden" name="_csrf" value="${csrf}" />
+            <button class="pill solid"${attr("disabled", !connectReady)} type="submit">
+              Connect with Stripe
+            </button>
+          </form>
+        </div>
+      </div>`;
+  }
+
+  const requirements = parseList(company.stripe_requirements);
+  const charges = Number(company.stripe_charges_enabled) === 1;
+  const payouts = Number(company.stripe_payouts_enabled) === 1;
+
+  return html`
+    <div class="panel">
+      <div class="panel__head">
+        <h2>Your Stripe account</h2>
+        <p>${company.stripe_account_id}</p>
+      </div>
+      <div class="panel__body">
+        ${charges ? notice("ok", "Ready to take payments",
+            payouts ? "Charges and payouts are both enabled."
+              : "Charges are enabled. Payouts to your bank are not yet — Stripe still needs something from you.")
+          : requirements.length
+            ? notice("warn", "Stripe needs something from you",
+                html`Tenants cannot pay until this is resolved.
+                     <span style="display:block;margin-top:0.5rem">${requirements.join(", ")}</span>`)
+            : notice("warn", "Stripe is still reviewing your account",
+                "Nothing is outstanding and nothing you do will speed it up. This is the "
+                + "common case a day or two after connecting.")}
+
+        <dl class="dl" style="margin-top:1rem">
+          <div><dt>Take payments</dt><dd>${charges ? "Yes" : "Not yet"}</dd></div>
+          <div><dt>Pay out to your bank</dt><dd>${payouts ? "Yes" : "Not yet"}</dd></div>
+          <div><dt>Last checked</dt>
+            <dd>${company.stripe_checked_at ? humanStamp(company.stripe_checked_at) : "never"}</dd></div>
+        </dl>
+      </div>
+      <div class="panel__foot">
+        <div class="btnrow">
+          <form method="post" action="/app/payments/refresh">
+            <input type="hidden" name="_csrf" value="${csrf}" />
+            <button class="pill outline sm" type="submit">Check with Stripe again</button>
+          </form>
+          <a class="pill outline sm" href="https://dashboard.stripe.com/" target="_blank" rel="noopener">
+            Open your Stripe dashboard
+          </a>
+          <form method="post" action="/app/payments/disconnect">
+            <input type="hidden" name="_csrf" value="${csrf}" />
+            <button class="pill outline sm" type="submit">Disconnect</button>
+          </form>
+        </div>
+      </div>
+    </div>`;
+}
+
+function totalsPanel(t) {
+  return html`
+    <div class="grid grid--3">
+      <div class="tile"><span class="tile__label">Settled</span><span class="tile__value">${Number(t.settled)}</span></div>
+      <div class="tile"${attr("data-tone", Number(t.clearing) ? "warn" : null)}>
+        <span class="tile__label">Clearing</span>
+        <span class="tile__value">${usd(t.clearing_cents)}</span>
+      </div>
+      <div class="tile"${attr("data-tone", Number(t.returned) ? "danger" : null)}>
+        <span class="tile__label">Returned</span><span class="tile__value">${Number(t.returned)}</span>
+      </div>
+    </div>`;
+}
+
+function feesPanel({ company, csrf }) {
+  const q = (method, amount) => describeQuote(quote({ company, method, amountCents: amount }));
+
+  return html`
+    <form method="post" action="/app/payments/fees">
+      <input type="hidden" name="_csrf" value="${csrf}" />
+      <div class="panel">
+        <div class="panel__head">
+          <h2>What tenants can use, and who pays the fee</h2>
+          <p>Shown to the tenant in full before they authorise anything.</p>
+        </div>
+        <div class="panel__body">
+          <div class="formgrid formgrid--2">
+            ${methodFields({ company, method: "ach", label: "Bank transfer (ACH)",
+              help: "The fee is capped, which is why rent belongs here." })}
+            ${methodFields({ company, method: "card", label: "Debit or credit card",
+              help: "The fee is a percentage with no cap, so it scales with the rent." })}
+          </div>
+
+          ${notice("warn", "Passing a card fee on is regulated",
+            "Card-network rules restrict surcharging, and several US states restrict it "
+            + "further, with different limits for credit and debit. This setting does what "
+            + "you tell it. Check it against the states you operate in.")}
+
+          <div style="margin-top:1rem">
+            <span class="tile__label">On a $1,450 rent, today's settings mean</span>
+            <ul style="margin:0.5rem 0 0;padding-left:1.1rem">
+              ${company.accept_ach ? html`<li>Bank transfer — ${q("ach", 145000)}</li>` : ""}
+              ${company.accept_card ? html`<li>Card — ${q("card", 145000)}</li>` : ""}
+              ${!company.accept_ach && !company.accept_card
+                ? html`<li>Nothing. No method is switched on, so no tenant can pay online.</li>` : ""}
+            </ul>
+          </div>
+        </div>
+        <div class="panel__foot">
+          <button class="pill solid sm" type="submit">Save</button>
+        </div>
+      </div>
+    </form>`;
+}
+
+function methodFields({ company, method, label, help }) {
+  const on = Number(company[`accept_${method}`]) === 1;
+  const model = company[`${method}_fee_model`];
+  return html`
+    <div class="field">
+      <div class="radioset">
+        <label class="radiotile">
+          <input type="checkbox" name="accept_${method}"${attr("checked", on)} />
+          <span>Offer ${label}<small>${help}</small></span>
+        </label>
+      </div>
+
+      <label for="${method}_fee_model" style="margin-top:0.75rem">Who pays the processing fee</label>
+      <select id="${method}_fee_model" name="${method}_fee_model">
+        <option value="absorb"${attr("selected", model === "absorb")}>We do — the tenant is charged the rent exactly</option>
+        <option value="pass"${attr("selected", model === "pass")}>The tenant does — added to what they are charged</option>
+        <option value="split"${attr("selected", model === "split")}>Split it</option>
+      </select>
+
+      <label for="${method}_fee_split_percent" style="margin-top:0.5rem">Tenant's share when split (%)</label>
+      <input id="${method}_fee_split_percent" name="${method}_fee_split_percent" type="number"
+             min="0" max="100" step="1" value="${Number(company[`${method}_fee_split_percent`] ?? 50)}" />
+
+      <label for="${method}_fee_bps" style="margin-top:0.5rem">Your Stripe rate (basis points)</label>
+      <input id="${method}_fee_bps" name="${method}_fee_bps" type="number" min="0" step="1"
+             value="${Number(company[`${method}_fee_bps`] ?? 0)}" />
+      <span class="field__help">
+        ${method === "ach" ? "80 is Stripe's published 0.80%." : "290 is Stripe's published 2.90%."}
+        Change it if you have negotiated a different rate — a quote that does not match what
+        is charged is worse than no quote.
+      </span>
+
+      ${method === "ach"
+        ? html`
+          <label for="ach_fee_cap" style="margin-top:0.5rem">Fee cap</label>
+          <input id="ach_fee_cap" name="ach_fee_cap" type="text" inputmode="decimal"
+                 value="${(Number(company.ach_fee_cap_cents ?? 0) / 100).toFixed(2)}" />
+          <span class="field__help">Stripe's published cap is $5.00. Zero means no cap.</span>`
+        : html`
+          <label for="card_fee_fixed" style="margin-top:0.5rem">Fixed amount per card payment</label>
+          <input id="card_fee_fixed" name="card_fee_fixed" type="text" inputmode="decimal"
+                 value="${(Number(company.card_fee_fixed_cents ?? 0) / 100).toFixed(2)}" />
+          <span class="field__help">Stripe's published fixed amount is $0.30.</span>`}
+    </div>`;
+}
+
+function linksPanel({ company, origin }) {
+  return html`
+    <div class="panel">
+      <div class="panel__head">
+        <h2>How a tenant gets to their page</h2>
+        <p>Each lease has its own link. There is no account and no password.</p>
+      </div>
+      <div class="panel__body">
+        ${empty("On the unit",
+          html`Open a unit under Properties and its payment link is on the tenancy panel. Send
+               it once and the tenant can bookmark it — it does not expire, and it only ever
+               shows that one home.`)}
+        <span class="field__help" style="display:block;margin-top:0.75rem">
+          Links look like <code>${origin}/pay/&hellip;</code>
+        </span>
+      </div>
+    </div>`;
+}
+
+function blockPanel({ blocked, csrf }) {
+  return html`
+    <div class="panel">
+      <div class="panel__head">
+        <h2>Homes on cash only</h2>
+        <p>During an eviction, accepting rent can waive the proceeding.</p>
+      </div>
+      <div class="panel__body">
+        ${blocked.length === 0
+          ? empty("None", "Every active tenancy can pay online.")
+          : html`
+            <div class="tablewrap">
+              <table class="data">
+                <thead><tr><th>Home</th><th>What the tenant is told</th><th>Since</th><th></th></tr></thead>
+                <tbody>
+                  ${blocked.map((l) => html`
+                    <tr>
+                      <td>${l.line1}${l.label ? html`<div class="cellsub">Unit ${l.label}</div>` : ""}</td>
+                      <td>${l.payments_blocked_reason || "—"}</td>
+                      <td>${l.payments_blocked_at ? humanStamp(l.payments_blocked_at) : "—"}</td>
+                      <td class="shrink">
+                        <form method="post" action="/app/payments/block">
+                          <input type="hidden" name="_csrf" value="${csrf}" />
+                          <input type="hidden" name="lease_id" value="${l.id}" />
+                          <input type="hidden" name="action" value="unblock" />
+                          <button class="pill outline sm" type="submit">Allow again</button>
+                        </form>
+                      </td>
+                    </tr>`)}
+                </tbody>
+              </table>
+            </div>`}
+      </div>
+    </div>`;
+}
+
+function recentPanel(recent) {
+  if (!recent.length) return "";
+  return html`
+    <div class="panel">
+      <div class="panel__head"><h2>Recent payments</h2></div>
+      <div class="panel__body panel__body--flush">
+        <div class="tablewrap">
+          <table class="data">
+            <thead><tr><th>When</th><th>Home</th><th>Amount</th><th>Fee</th><th>Status</th></tr></thead>
+            <tbody>
+              ${recent.map((p) => html`
+                <tr>
+                  <td>${humanStamp(p.created_at)}</td>
+                  <td>${p.line1 || "—"}${p.label ? html`<div class="cellsub">Unit ${p.label}</div>` : ""}</td>
+                  <td class="num">${usd(p.amount_cents)}</td>
+                  <td class="num">${usd(p.fee_cents)}
+                    ${Number(p.tenant_fee_cents) > 0
+                      ? html`<div class="cellsub">${usd(p.tenant_fee_cents)} from the tenant</div>` : ""}</td>
+                  <td>
+                    <span class="chip"${attr("data-tone", STATUS_TONE[p.status] || "")}>
+                      ${STATUS_LABEL[p.status] || p.status}
+                    </span>
+                    ${p.return_code ? html`<div class="cellsub">${p.return_code}</div>` : ""}
+                  </td>
+                </tr>`)}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+}
+
+function parseList(json) {
+  try { const v = JSON.parse(json || "[]"); return Array.isArray(v) ? v : []; } catch { return []; }
 }

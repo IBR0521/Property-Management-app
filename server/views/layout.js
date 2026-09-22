@@ -32,6 +32,7 @@ const NAV = [
   { group: "Money", items: [
     { href: "/app/accounting", key: "accounting", icon: "cash", label: "Accounting", need: "money.view" },
     { href: "/app/banking", key: "banking", icon: "loop", label: "Banking", need: "bank.link" },
+    { href: "/app/payments", key: "payments", icon: "cash", label: "Tenant payments", need: "money.view" },
     { href: "/app/vendors", key: "vendors", icon: "wrench", label: "Contractors", need: "vendor.manage" },
   ] },
   { group: "Leasing", items: [

@@ -51,6 +51,7 @@ to check the day keys exist.
 
 | | What | Why it matters |
 |---|---|---|
+| P0 | **`STRIPE_CONNECT_CLIENT_ID`**, from Stripe → Settings → Connect → Platform settings | Without it the Connect button on `/app/payments` is disabled and says so. It is the first thing needed; everything else on that screen follows from it. |
 | P1 | **`STRIPE_CONNECT_WEBHOOK_SECRET`**, from the Connect endpoint in the Stripe dashboard | Connect events have their own endpoint (`/api/webhooks/stripe-connect`) and their own signing secret, deliberately not shared with the subscription webhook. Unset means tenant payments never settle. |
 | P2 | **Confirm the event names for an ACH return** | The documented shapes differ between `charge.failed`, `payment_intent.payment_failed` and a dispute depending on the return code. The handler routes by the *payment's own state* rather than the event name — settled-then-failed is a return, never-settled is a failure — so an unanticipated name degrades to a recorded "not handled" rather than to money silently staying on the books. Worth confirming anyway. |
 | P3 | **Confirm `us_bank_account` is enabled** on the connected account | Checkout is created with `payment_method_types: ["us_bank_account"]`. If the account has not enabled ACH, the session errors and the tenant sees a failure nobody can explain. |
