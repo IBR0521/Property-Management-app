@@ -21,6 +21,7 @@ import { id } from "../ids.js";
 import { log } from "../logger.js";
 import { verifySvix, verifyTwilio } from "./signatures.js";
 import { record as recordConsent, classifyInbound, normalise } from "./consent.js";
+import { fileInbound } from "../inbox.js";
 import {
   RESEND_WEBHOOK_SECRET, TWILIO_AUTH_TOKEN, APP_BASE_URL,
 } from "../config.js";
@@ -124,7 +125,15 @@ export async function handleTwilio({ rawBody, headers, url, now = Date.now() }) 
       });
     }
 
-    return await ingest({
+    /* Anything that is not a keyword is somebody talking to us, so it goes
+       into the inbox as well as onto the event log.
+
+       Order matters and it is the order above: STOP and START are handled
+       first and return before reaching here. An opt-out must never become a
+       chat message — a carrier instruction is not a conversation, and filing
+       it as one would leave it sitting unread in a queue while the law says
+       it took effect immediately. */
+    const event = await ingest({
       provider: "twilio",
       providerEventId: messageSid || `inbound-${from}-${Date.now()}`,
       kind: "inbound.message",
@@ -135,6 +144,26 @@ export async function handleTwilio({ rawBody, headers, url, now = Date.now() }) 
       channel: "sms",
       detail: String(inboundBody).slice(0, 300),
     });
+
+    /* Not inside `ingest`: a duplicate webhook returns there before this
+       runs, which is exactly the behaviour wanted — the same text delivered
+       twice is one message in the conversation. */
+    if (event.outcome !== "duplicate" && company) {
+      try {
+        await fileInbound({
+          companyId: company, channel: "sms",
+          fromContact: from, body: inboundBody,
+          providerMessageId: messageSid || null,
+        });
+      } catch (err) {
+        /* The event is recorded either way. A failure to thread is worth
+           knowing about and is not worth telling the carrier to retry, which
+           would duplicate the consent handling above. */
+        log.error("could not file an inbound text", { reason: String(err.message).slice(0, 200) });
+      }
+    }
+
+    return event;
   }
 
   // A status callback for something we sent.

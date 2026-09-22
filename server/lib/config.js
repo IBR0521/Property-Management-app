@@ -208,6 +208,24 @@ export const STRIPE_PUBLISHABLE_KEY = raw("STRIPE_PUBLISHABLE_KEY");
 export const STRIPE_CONNECT_CLIENT_ID = raw("STRIPE_CONNECT_CLIENT_ID");
 export const STRIPE_CONNECT_WEBHOOK_SECRET = raw("STRIPE_CONNECT_WEBHOOK_SECRET");
 
+/* --- inbound messaging ------------------------------------------------------
+
+   The domain replies come back to. Outbound email on a thread is sent with a
+   reply-to of `reply+<token>@<this>`, and that token is the only *certain*
+   way to know which conversation a reply belongs to.
+
+   Unset is a working state, not a broken one: threading falls back to
+   In-Reply-To headers and to matching the sender's address, which are good
+   enough for most replies. The inbox says which mode it is in rather than
+   quietly being worse. */
+export const PORTAL_REPLY_DOMAIN = raw("PORTAL_REPLY_DOMAIN");
+
+/* Verifies the provider's inbound-parse webhook. Without it an unauthenticated
+   endpoint would let anybody post a message into any company's inbox as any
+   tenant, so inbound email is refused outright when it is unset rather than
+   accepted unverified. */
+export const RESEND_INBOUND_SECRET = raw("RESEND_INBOUND_SECRET");
+
 /* A price id per band, read by name so a missing one identifies itself. */
 export const STRIPE_PRICES = {
   starter: raw("STRIPE_PRICE_STARTER"),
