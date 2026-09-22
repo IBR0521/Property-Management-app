@@ -187,6 +187,63 @@ export async function createSetupIntent({ accountId, customerId, kinds = ["us_ba
   });
 }
 
+/* --- the tenant-facing checkout -------------------------------------------
+
+   A tenant with a browser in front of them is sent to Stripe's own hosted
+   page rather than typing a bank account into ours. Three things follow from
+   that, and all three are the point:
+
+   the card and bank details never reach this server, so the PCI surface is
+   Stripe's; there is no client-side JavaScript, so the page works the same
+   with scripts blocked; and the content security policy stays `script-src
+   'self'` rather than being opened up for a third-party script.
+
+   Autopay uses `createPaymentIntent` instead, because nobody is present to
+   complete a hosted page at two in the morning. */
+export async function createCheckoutSession({
+  accountId, amountCents, currency = "usd", methods = ["us_bank_account"],
+  description, successUrl, cancelUrl, customerId = null,
+  saveForFuture = false, metadata = {}, idempotencyKey = null,
+}) {
+  const body = {
+    mode: "payment",
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+    payment_method_types: methods,
+    metadata,
+    "line_items[0][quantity]": 1,
+    "line_items[0][price_data][currency]": currency,
+    "line_items[0][price_data][unit_amount]": Math.round(amountCents),
+    "line_items[0][price_data][product_data][name]": description || "Rent",
+    "payment_intent_data[metadata][payment_id]": metadata.payment_id || "",
+    "payment_intent_data[description]": description || "Rent",
+  };
+  if (customerId) body.customer = customerId;
+
+  /* Only when the tenant asked for autopay. A mandate to charge somebody's
+     bank account later is not a side effect of paying once. */
+  if (saveForFuture) {
+    body["payment_intent_data[setup_future_usage]"] = "off_session";
+    if (!customerId) body.customer_creation = "always";
+  }
+
+  return await callAs(accountId, "/checkout/sessions", { body, idempotencyKey });
+}
+
+export async function getCheckoutSession(accountId, sessionId) {
+  return await callAs(
+    accountId,
+    `/checkout/sessions/${encodeURIComponent(sessionId)}?expand[]=payment_intent`,
+    { method: "GET" });
+}
+
+/* What a completed session saved, so it can be stored as a payment method the
+   tenant recognises. Read from Stripe rather than guessed. */
+export async function getPaymentMethod(accountId, paymentMethodId) {
+  return await callAs(
+    accountId, `/payment_methods/${encodeURIComponent(paymentMethodId)}`, { method: "GET" });
+}
+
 export async function listPayouts(accountId, { limit = 20 } = {}) {
   return await callAs(accountId, `/payouts?limit=${Number(limit)}`, { method: "GET" });
 }

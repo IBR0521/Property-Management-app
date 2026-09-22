@@ -20,6 +20,10 @@ export const LIMITS = {
   /* An open signup form creates rows in somebody else's database, and a
      legitimate person does this once. */
   signup: { max: 5, windowMinutes: 60 },
+  /* The pay link is public and every post creates a Stripe session. Generous
+     enough for somebody who mistypes an amount twice and comes back, tight
+     enough that the link cannot be used to run up API calls. */
+  pay: { max: 10, windowMinutes: 30 },
 };
 
 /* Best-effort client address. Vercel and most proxies set x-forwarded-for;

@@ -44,6 +44,7 @@ import { registerTwoFactor } from "./features/twofactor.js";
 import { registerCompany } from "./features/company.js";
 import { registerBilling, companyIsReadOnly, readOnlyExempt } from "./features/billing.js";
 import { registerPlatform, activeImpersonation, impersonationForbids } from "./features/platform.js";
+import { registerPayments } from "./features/payments.js";
 
 const router = createRouter();
 
@@ -71,6 +72,7 @@ registerTwoFactor(router);
 registerCompany(router);
 registerBilling(router);
 registerPlatform(router);
+registerPayments(router);
 
 /* Routes that need a signed-in staff member. Everything under /app except the
    sign-in pages, which register themselves as public. */

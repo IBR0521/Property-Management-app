@@ -20,6 +20,8 @@ import { deliver } from "./delivery/index.js";
 import { outcomeFor, MAX_ATTEMPTS } from "./delivery/retry.js";
 import { senderFor } from "./outbox.js";
 import { log } from "./logger.js";
+import { runAutopay, paidForPeriod } from "./payments.js";
+import { todayIn } from "./timezone.js";
 
 const EVERY_MS = 10 * 60 * 1000;
 
@@ -76,6 +78,9 @@ export async function tick(reason = "manual") {
     delinquenciesAdvanced: 0,
     noticesQueued: 0,
     promisesJudged: 0,
+    autopayCharged: 0,
+    autopaySkipped: 0,
+    autopayFailed: 0,
     delivered: 0,
     sessionsPruned: 0,
   };
@@ -84,6 +89,10 @@ export async function tick(reason = "manual") {
     Object.assign(out, sumInto(out, await generateObligations(company)));
     Object.assign(out, sumInto(out, await ageObligations(company)));
     Object.assign(out, sumInto(out, await queueObligationReminders(company)));
+    /* Before the delinquency pass, not after. Autopay charges rent a few days
+       before it is due; running it after the pass that decides what is late
+       would be deciding on a balance this run is about to change. */
+    Object.assign(out, sumInto(out, await autopayFor(company)));
     Object.assign(out, sumInto(out, await openDelinquencies(company)));
     Object.assign(out, sumInto(out, await advanceDelinquencies(company)));
     Object.assign(out, sumInto(out, await judgePromises(company)));
@@ -246,6 +255,20 @@ async function queueObligationReminders(company) {
 /* ==========================================================================
    F4  Rent: open a delinquency once rent is late, then walk the ladder
    ========================================================================== */
+/* Autopay, in the company's own timezone. "Three days before the first" is a
+   different instant in Honolulu than in New York, and the wrong one charges a
+   day early or a day late every month. */
+async function autopayFor(company) {
+  try {
+    return await runAutopay(company, { localToday: todayIn(company.timezone) });
+  } catch (err) {
+    /* One company's bad configuration does not stop the rest of the rent
+       roll being charged. */
+    log.warn("autopay run failed", { company: company.id, reason: String(err.message).slice(0, 160) });
+    return { autopayFailed: 1 };
+  }
+}
+
 async function openDelinquencies(company) {
   const out = { delinquenciesOpened: 0 };
   const now = today();
@@ -259,14 +282,11 @@ async function openDelinquencies(company) {
     const lateFrom = addDays(due, lease.grace_days);
     if (now <= lateFrom) continue;               // still inside grace
 
-    // Charges and payments both live in the reporting ledger; the balance for
-    // the period is what decides whether this is late.
-    const paid = (await get(
-      `SELECT COALESCE(SUM(amount_cents),0) AS c FROM ledger_entry
-        WHERE lease_id = ? AND kind = 'rent_payment' AND date >= ? AND date <= ?`,
-      lease.id, `${period}-01`, addDays(`${period}-01`, 45)
-    )).c;
-    const owed = lease.rent_cents - paid;
+    /* The same computation the tenant's own page and the manual rent screen
+       use. This summed ledger entries dated within 45 days of the 1st, which
+       reads a returned payment as still paid whenever the return arrives
+       outside that window — so a bounced payment left the delinquency shut. */
+    const owed = lease.rent_cents - await paidForPeriod(lease.id, period);
     if (owed <= 0) continue;
 
     const existing = await get("SELECT * FROM delinquency WHERE lease_id = ? AND period = ?", lease.id, period);

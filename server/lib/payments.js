@@ -22,9 +22,10 @@
    and without credentials. The default is the real boundary. */
 import { all, get, one, insert, update, run, tx } from "./db.js";
 import { id } from "./ids.js";
-import { stamp, today, monthKey, addDays } from "./dates.js";
+import { stamp, today, monthKey, addDays, dueDateFor } from "./dates.js";
 import { log } from "./logger.js";
 import { quote, methodAvailable } from "./fees.js";
+import { usd } from "./money.js";
 import { postMoney } from "./ledger.js";
 import * as defaultStripe from "./connect.js";
 
@@ -128,10 +129,13 @@ export async function balanceFor(leaseId, period = monthKey(today())) {
 
 /* --- creating -------------------------------------------------------------- */
 
-export async function createPayment({
-  companyId, leaseId, amountCents, kind = "ach",
-  paymentMethodId = null, initiatedBy = "tenant", period = null,
-  stripe = defaultStripe,
+/* Everything both payment paths need before either talks to Stripe: the
+   refusals, the quote, and the row. Shared so that a rule enforced on the
+   tenant's page — a blocked lease, a method the company does not offer —
+   cannot be missing from the autopay run, which is the path with nobody
+   watching it. */
+async function openPaymentRow({
+  companyId, leaseId, amountCents, kind, paymentMethodId, initiatedBy, period,
 }) {
   const company = await one("SELECT * FROM company WHERE id = ?", companyId);
   const lease = await one(
@@ -162,6 +166,72 @@ export async function createPayment({
     period: forPeriod, status: "pending",
     initiated_by: initiatedBy, created_at: stamp(),
   });
+
+  return { ok: true, paymentId, quote: q, company, lease, period: forPeriod };
+}
+
+/* --- the tenant, with a browser in front of them --------------------------
+
+   Sent to Stripe's own hosted page. Their bank details never reach this
+   server, and the whole flow is two form posts and a redirect, so it works
+   with JavaScript switched off. */
+export async function startCheckout({
+  companyId, leaseId, amountCents, kind = "ach", period = null,
+  successUrl, cancelUrl, saveForFuture = false, stripe = defaultStripe,
+}) {
+  const opened = await openPaymentRow({
+    companyId, leaseId, amountCents, kind, paymentMethodId: null,
+    initiatedBy: "tenant", period,
+  });
+  if (!opened.ok) return opened;
+
+  const { paymentId, quote: q, company, lease } = opened;
+
+  try {
+    const session = await stripe.createCheckoutSession({
+      accountId: company.stripe_account_id,
+      amountCents: q.tenantPaysCents,
+      methods: kind === "ach" ? ["us_bank_account"] : ["card"],
+      description: `Rent ${opened.period}`,
+      successUrl, cancelUrl, saveForFuture,
+      metadata: {
+        company_id: companyId, lease_id: lease.id,
+        payment_id: paymentId, period: opened.period,
+      },
+      idempotencyKey: `co:${paymentId}`,
+    });
+
+    await update("tenant_payment", paymentId, {
+      stripe_checkout_session_id: session.id,
+      stripe_payment_intent_id: typeof session.payment_intent === "string"
+        ? session.payment_intent : session.payment_intent?.id || null,
+      submitted_at: stamp(),
+    });
+
+    return { ok: true, paymentId, quote: q, url: session.url, session };
+  } catch (err) {
+    await update("tenant_payment", paymentId, {
+      status: "failed", failed_at: stamp(),
+      failure_code: err.stripeCode || null,
+      failure_reason: String(err.message || "").slice(0, 300),
+    });
+    log.warn("checkout could not be started", { paymentId, reason: err.message });
+    return { ok: false, reason: err.message, paymentId };
+  }
+}
+
+export async function createPayment({
+  companyId, leaseId, amountCents, kind = "ach",
+  paymentMethodId = null, initiatedBy = "tenant", period = null,
+  stripe = defaultStripe,
+}) {
+  const opened = await openPaymentRow({
+    companyId, leaseId, amountCents, kind, paymentMethodId, initiatedBy, period,
+  });
+  if (!opened.ok) return opened;
+
+  const { paymentId, quote: q, company, lease } = opened;
+  const forPeriod = opened.period;
 
   try {
     const intent = await stripe.createPaymentIntent({
@@ -433,3 +503,179 @@ export async function recomputeDelinquency(leaseId, period) {
   });
   return { resolved: false, owedCents: owed };
 }
+
+/* --- autopay --------------------------------------------------------------
+
+   A standing instruction to take money out of somebody's bank account without
+   asking again. Three things follow from that, and none of them is optional.
+
+   **It is bounded.** The tenant sets a ceiling. Rent rises, and an instruction
+   to take whatever is owed does not expire on its own — somebody who agreed to
+   $1,450 should not silently be charged $1,800 after a renewal. Over the
+   ceiling, the run stops and says so rather than charging the old amount,
+   which would leave them short and late at the same time.
+
+   **It is early.** The charge goes out `days_before_due` days ahead, because an
+   ACH debit takes two to five days to settle and rent that settles on the 4th
+   was paid late.
+
+   **It explains itself.** A run that decided not to charge records why. "On"
+   is not the same as "worked", and the difference is what a tenant finds out
+   the hard way otherwise. */
+
+export async function enrolAutopay({
+  companyId, leaseId, paymentMethodId, daysBeforeDue = 3,
+  maxAmountCents = null, ip = null,
+}) {
+  const lease = await one("SELECT * FROM lease WHERE id = ? AND company_id = ?", leaseId, companyId);
+  const blocked = blockedReason(lease);
+  if (blocked) return { ok: false, reason: blocked };
+
+  const method = await get(
+    "SELECT * FROM tenant_payment_method WHERE id = ? AND lease_id = ? AND status = 'active'",
+    paymentMethodId, leaseId);
+  if (!method) {
+    return { ok: false, reason: "We need a saved bank account before autopay can be switched on." };
+  }
+  if (!method.mandate_accepted_at) {
+    /* Charging off-session against a method with no recorded consent is the
+       thing an R10 dispute is decided on. */
+    return { ok: false, reason: "That payment method has no recorded authorisation." };
+  }
+
+  const days = Math.min(28, Math.max(0, Math.round(Number(daysBeforeDue) || 0)));
+  const ceiling = maxAmountCents == null ? null : Math.max(0, Math.round(Number(maxAmountCents)));
+
+  const existing = await get("SELECT * FROM autopay WHERE lease_id = ?", leaseId);
+  if (existing) {
+    await update("autopay", existing.id, {
+      payment_method_id: paymentMethodId, days_before_due: days,
+      max_amount_cents: ceiling, active: 1, cancelled_at: null,
+      last_error: null, last_skip_reason: null,
+    });
+    return { ok: true, autopayId: existing.id, updated: true };
+  }
+
+  const autopayId = id();
+  await insert("autopay", {
+    id: autopayId, company_id: companyId, lease_id: leaseId,
+    payment_method_id: paymentMethodId, days_before_due: days,
+    max_amount_cents: ceiling, active: 1,
+    enrolled_at: stamp(), created_at: stamp(),
+  });
+  log.info("autopay enrolled", { leaseId, days, ceiling, ip });
+  return { ok: true, autopayId };
+}
+
+export async function cancelAutopay(leaseId) {
+  const row = await get("SELECT * FROM autopay WHERE lease_id = ?", leaseId);
+  if (!row) return { ok: true, alreadyOff: true };
+  await update("autopay", row.id, { active: 0, cancelled_at: stamp() });
+  return { ok: true };
+}
+
+/* Is today the day this lease's autopay should run, and for which month?
+
+   Worked forwards from today rather than backwards from this month's due
+   date. The difference only shows at a month boundary, and there it is the
+   whole thing: rent due on the 1st, charged three days early, is charged on
+   the 29th of the month *before* — so deriving the period from today's month
+   asks for August's rent on the day September's is being collected, and the
+   two never line up. The date three days out names the month being paid.
+
+   Computed in the company's own timezone, because "three days before the
+   first" is a different instant in Honolulu than in New York, and the wrong
+   one charges a day early or a day late every month. */
+export function autopayDueToday(lease, autopay, localToday) {
+  const days = Number(autopay.days_before_due || 0);
+  const target = addDays(localToday, days);
+  const period = monthKey(target);
+  const due = dueDateFor(period, lease.rent_due_day);
+  const charge = addDays(due, -days);
+  return { period, due, charge, isToday: localToday === charge };
+}
+
+/* One company's autopay run.
+
+   Deliberately conservative: anything unexpected skips this lease with a
+   recorded reason and moves on. A run that throws halfway leaves the rest of
+   the rent roll uncharged, and nobody finds out until the delinquencies open. */
+export async function runAutopay(company, { localToday, stripe = defaultStripe } = {}) {
+  const out = { autopayCharged: 0, autopaySkipped: 0, autopayFailed: 0 };
+  const day = localToday || today();
+
+  const rows = await all(
+    `SELECT a.*, l.rent_cents, l.rent_due_day, l.status AS lease_status,
+            l.payments_blocked, l.payments_blocked_reason,
+            m.stripe_payment_method_id, m.status AS method_status, m.kind AS method_kind
+       FROM autopay a
+       JOIN lease l ON l.id = a.lease_id
+       LEFT JOIN tenant_payment_method m ON m.id = a.payment_method_id
+      WHERE a.company_id = ? AND a.active = 1`, company.id);
+
+  for (const row of rows) {
+    const skip = async (reason) => {
+      out.autopaySkipped++;
+      await update("autopay", row.id, {
+        last_run_at: stamp(), last_skip_reason: reason,
+      });
+    };
+
+    const { period, isToday } = autopayDueToday(
+      { rent_due_day: row.rent_due_day }, row, day);
+
+    if (!isToday) continue;
+    if (row.last_period === period) continue;   // already ran this month
+
+    if (row.lease_status !== "active") { await skip("the tenancy is no longer active"); continue; }
+    if (row.payments_blocked) {
+      await skip(row.payments_blocked_reason || "online payment is switched off for this home");
+      continue;
+    }
+    if (!row.stripe_payment_method_id || row.method_status !== "active") {
+      await skip("the saved bank account is no longer usable");
+      continue;
+    }
+
+    const balance = await balanceFor(row.lease_id, period);
+    if (balance.outstandingCents <= 0) { await skip("nothing was owed"); continue; }
+
+    /* The ceiling the tenant set. Over it, nothing is charged — not the
+       ceiling amount, not the old rent. A part payment made without being
+       asked leaves them short and late at once, and the point of the ceiling
+       is that a change in what is owed gets a human decision. */
+    const ceiling = row.max_amount_cents == null ? null : Number(row.max_amount_cents);
+    if (ceiling != null && balance.outstandingCents > ceiling) {
+      await skip(
+        `the amount due was ${usd(balance.outstandingCents)}, over the `
+        + `${usd(ceiling)} limit you set`);
+      continue;
+    }
+
+    const made = await createPayment({
+      companyId: company.id, leaseId: row.lease_id,
+      amountCents: balance.outstandingCents, kind: row.method_kind || "ach",
+      paymentMethodId: row.payment_method_id, initiatedBy: "autopay",
+      period, stripe,
+    });
+
+    if (!made.ok) {
+      out.autopayFailed++;
+      await update("autopay", row.id, {
+        last_run_at: stamp(), last_error: String(made.reason || "").slice(0, 300),
+        last_skip_reason: null,
+      });
+      log.warn("autopay could not charge", { leaseId: row.lease_id, reason: made.reason });
+      continue;
+    }
+
+    out.autopayCharged++;
+    await update("autopay", row.id, {
+      last_period: period, last_run_at: stamp(),
+      last_error: null, last_skip_reason: null,
+    });
+  }
+
+  return out;
+}
+

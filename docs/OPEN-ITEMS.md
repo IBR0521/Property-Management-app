@@ -42,6 +42,23 @@ because nothing ran it. `test/seed.test.js` now does, on every suite run.
 
 ---
 
+## Payments — what real Stripe keys will settle
+
+Everything below is built and tested against a replaced `fetch`, so the request
+shapes, the headers and the failure handling are exercised. What is *not*
+exercised is whether Stripe behaves as documented. These are the first things
+to check the day keys exist.
+
+| | What | Why it matters |
+|---|---|---|
+| P1 | **`STRIPE_CONNECT_WEBHOOK_SECRET`**, from the Connect endpoint in the Stripe dashboard | Connect events have their own endpoint (`/api/webhooks/stripe-connect`) and their own signing secret, deliberately not shared with the subscription webhook. Unset means tenant payments never settle. |
+| P2 | **Confirm the event names for an ACH return** | The documented shapes differ between `charge.failed`, `payment_intent.payment_failed` and a dispute depending on the return code. The handler routes by the *payment's own state* rather than the event name — settled-then-failed is a return, never-settled is a failure — so an unanticipated name degrades to a recorded "not handled" rather than to money silently staying on the books. Worth confirming anyway. |
+| P3 | **Confirm `us_bank_account` is enabled** on the connected account | Checkout is created with `payment_method_types: ["us_bank_account"]`. If the account has not enabled ACH, the session errors and the tenant sees a failure nobody can explain. |
+| P4 | **Verify the `{CHECKOUT_SESSION_ID}` placeholder** comes back in the success URL | The return page finds the payment by session id. If Stripe does not substitute it, the tenant lands on a generic "it will appear shortly" message instead of their receipt. |
+| P5 | **Decide whether to pass on the return charge** | A returned payment posts the bank's charge to `5300 Return charges` as the company's cost. Passing it to the tenant is a policy decision with state-law limits, and nothing does it automatically. |
+
+---
+
 ## Security — overdue, and not blocked on anything
 
 | | What | Why it matters |
