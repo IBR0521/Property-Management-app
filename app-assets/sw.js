@@ -128,6 +128,66 @@ async function networkThenCache(request) {
   }
 }
 
+/* --- notifications --------------------------------------------------------
+
+   What arrives here has already been through the payload builder on the
+   server, which refuses anything carrying money, a name or an address. This
+   end does not get to add any: it renders the title and body it was given and
+   nothing from the request, the URL or the device. */
+
+self.addEventListener("push", (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    /* Undecryptable or not ours. Chrome requires a notification for every
+       push that arrives, and a silent failure here shows the browser's own
+       "This site has been updated in the background" — which is worse than
+       saying plainly that something happened. */
+    payload = {};
+  }
+
+  event.waitUntil(self.registration.showNotification(
+    typeof payload.title === "string" ? payload.title : "Property operations",
+    {
+      body: typeof payload.body === "string" ? payload.body : "Open the app to see.",
+      /* Five new messages should be one badge, not five buzzes. */
+      tag: typeof payload.tag === "string" ? payload.tag : "general",
+      icon: "/app-assets/icons/icon-192.png",
+      data: { url: safePath(payload.url) },
+    }));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const path = safePath(event.notification.data && event.notification.data.url);
+
+  event.waitUntil((async () => {
+    /* An open window is focused and navigated rather than a second one
+       opened, so tapping four notifications does not leave four copies of the
+       application running. */
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const client of windows) {
+      if (new URL(client.url).origin !== self.location.origin) continue;
+      await client.focus();
+      if ("navigate" in client) await client.navigate(path);
+      return;
+    }
+    await self.clients.openWindow(path);
+  })());
+});
+
+/* A notification that can send somebody to another origin is a phishing
+   primitive arriving with our name on it, so the destination is reduced to a
+   path on this origin or discarded. The server already does this; doing it
+   again here means a payload that reached the device by some other route
+   still cannot. */
+function safePath(value) {
+  if (typeof value !== "string") return "/app";
+  if (!value.startsWith("/") || value.startsWith("//")) return "/app";
+  return value;
+}
+
 /* A page. If the network is gone, the offline page — never a cached copy of
    the page that was asked for, which is the whole point. */
 async function networkThenOffline(request) {

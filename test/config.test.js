@@ -124,6 +124,43 @@ describe("the config summary never carries a secret", () => {
   });
 });
 
+describe("web push keys", () => {
+  const BASE = {
+    VERCEL: "1", CRON_SECRET: "x".repeat(32),
+    DATABASE_URL: "postgresql://u:p@h.pooler.supabase.com:6543/postgres",
+    APP_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+  };
+
+  test("none of them is a working state — push is simply off", () => {
+    assert.equal(load(BASE).ok, true);
+  });
+
+  test("all three together is fine", () => {
+    assert.equal(load({
+      ...BASE,
+      VAPID_PUBLIC_KEY: "a-public-key", VAPID_PRIVATE_KEY: "a-private-key",
+      VAPID_SUBJECT: "mailto:ops@example.test",
+    }).ok, true);
+  });
+
+  test("half of a pair is refused at boot, not at three in the morning", () => {
+    /* A public key with no private one hands browsers a subscription nothing
+       can ever send to, and that failure is otherwise completely silent —
+       every device subscribes, every send fails, nothing says why. */
+    for (const half of [
+      { VAPID_PUBLIC_KEY: "only-this" },
+      { VAPID_PRIVATE_KEY: "only-this" },
+      { VAPID_PUBLIC_KEY: "a", VAPID_PRIVATE_KEY: "b" },  // no subject
+    ]) {
+      const r = load({ ...BASE, ...half });
+      assert.equal(r.ok, false, JSON.stringify(half));
+      assert.match(r.message, /half configured/);
+      assert.match(r.message, /npm run vapid/, "the message must say how to fix it");
+    }
+  });
+});
+
+
 /* --- and that somebody can find out what to set --------------------------- */
 
 describe("every variable is written down", () => {

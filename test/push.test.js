@@ -22,9 +22,14 @@ import {
   subscribe, unsubscribe, subscriptionsFor, sendTo, notify,
   pruneDeadSubscriptions, PUSH_CONFIGURED,
 } from "../server/lib/push/index.js";
-import { generateVapidKeys } from "../server/lib/push/vapid.js";
+import { generateVapidKeys, verifyToken } from "../server/lib/push/vapid.js";
+import { VAPID_PUBLIC_KEY } from "../server/lib/config.js";
 import { encryptPayload, toBase64Url } from "../server/lib/push/encrypt.js";
 import { randomBytes, createECDH } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const PUSH_MODULE = fileURLToPath(new URL("../server/lib/push/index.js", import.meta.url));
 
 let world;
 
@@ -133,48 +138,201 @@ describe("a device subscribing", () => {
   });
 });
 
-/* --- sending --------------------------------------------------------------------- */
+/* --- sending --------------------------------------------------------------------
+
+   The suite sets a VAPID pair (see .env.test), so these drive the real path —
+   encryption, headers, and what each answer from a push service means — with
+   `fetch` replaced. Before the pair was set every one of these stopped at
+   "push is not configured", which checked nothing. */
 
 describe("sending", () => {
-  /* VAPID is unset in the test environment, which is itself a state worth
-     asserting; the tests that need it set stub the module's inputs by
-     importing a configured copy is not possible, so they check the refusal
-     instead and the encrypted-send path is exercised in pushcrypto.test.js. */
-
-  test("with no keys configured it refuses rather than pretending", async () => {
-    assert.equal(PUSH_CONFIGURED, false, "the test environment has no VAPID keys");
-
+  async function subscribed(endpoint) {
     const res = await subscribe({
       companyId: world.companyId, staffId: world.staff.admin.id,
-      subscription: browserSubscription(),
+      subscription: browserSubscription(endpoint),
     });
-    const row = await get("SELECT * FROM push_subscription WHERE id = ?", res.subscriptionId);
+    return await get("SELECT * FROM push_subscription WHERE id = ?", res.subscriptionId);
+  }
 
-    const sent = await sendTo({ subscription: row, kind: "emergency", fetchImpl: fakePushService() });
-    assert.equal(sent.ok, false);
-    assert.match(sent.reason, /not configured/);
+  test("the keys are configured, which is what makes the rest of this real", async () => {
+    assert.equal(PUSH_CONFIGURED, true);
   });
 
-  test("notifying somebody says so too, rather than reporting a success", async () => {
-    const out = await notify({ staffId: world.staff.admin.id, kind: "emergency" });
-    assert.equal(out.configured, false);
-    assert.equal(out.sent, 0);
-  });
+  test("the body on the wire is encrypted", async () => {
+    /* The payload for this kind says "Emergency job". If that string is
+       readable in what we post, the encryption is not running. */
+    const row = await subscribed();
+    const service = fakePushService();
+    const sent = await sendTo({ subscription: row, kind: "emergency", fetchImpl: service });
 
-  test("the body is encrypted and the headers are what a push service reads", async () => {
-    /* Driven through the encryption directly, since the send path is gated
-       on configuration. What matters is that the wire format is right. */
-    const subscription = browserSubscription();
-    const { body } = encryptPayload({
-      payload: JSON.stringify({ title: "Emergency job", body: "Open the app." }),
-      p256dh: subscription.keys.p256dh,
-      auth: subscription.keys.auth,
-    });
-
-    assert.ok(body.length > 86, "header plus ciphertext");
+    assert.equal(sent.ok, true);
+    const { body } = service.calls[0];
+    assert.ok(Buffer.isBuffer(body));
+    assert.ok(!body.includes(Buffer.from("Emergency")), "the payload is in the clear");
     assert.equal(body.readUInt32BE(16), 4096, "record size");
-    assert.equal(body.readUInt8(20), 65, "key length");
-    assert.ok(!body.includes(Buffer.from("Emergency job")), "the payload is not in the clear");
+    assert.equal(body.readUInt8(20), 65, "the sender's key follows");
+  });
+
+  test("the headers are the ones a push service reads", async () => {
+    const row = await subscribed();
+    const service = fakePushService();
+    await sendTo({ subscription: row, kind: "emergency", fetchImpl: service });
+
+    const { headers } = service.calls[0];
+    assert.equal(headers["content-encoding"], "aes128gcm");
+    assert.equal(headers["content-type"], "application/octet-stream");
+    assert.ok(Number(headers.ttl) > 0, "without a TTL the service may hold it forever");
+    assert.match(headers.authorization, /^vapid t=[\w-]+\.[\w-]+\.[\w-]+, k=[\w-]+$/);
+  });
+
+  test("the token in the header verifies, and is addressed to the right origin", async () => {
+    /* A signature that is well-formed and wrong is reported by a push service
+       as an unhelpful "invalid JWT" long after the code looked fine. */
+    const row = await subscribed("https://updates.push.services.mozilla.com/wpush/v2/abc");
+    const service = fakePushService();
+    await sendTo({ subscription: row, kind: "emergency", fetchImpl: service });
+
+    const token = /t=([^,]+)/.exec(service.calls[0].headers.authorization)[1];
+    const check = verifyToken({ token, publicKey: VAPID_PUBLIC_KEY });
+    assert.equal(check.ok, true);
+    assert.equal(check.claims.aud, "https://updates.push.services.mozilla.com",
+      "the audience is the origin, never the endpoint");
+  });
+
+  test("an emergency is sent urgent and a message is not", async () => {
+    /* Urgency is what decides whether a phone wakes for it. */
+    const row = await subscribed();
+    const service = fakePushService();
+    await sendTo({ subscription: row, kind: "emergency", fetchImpl: service });
+    await sendTo({ subscription: row, kind: "message_received", fetchImpl: service });
+
+    assert.equal(service.calls[0].headers.urgency, "high");
+    assert.equal(service.calls[1].headers.urgency, "normal");
+  });
+
+  test("a success clears the failure count and records when", async () => {
+    const row = await subscribed();
+    await run("UPDATE push_subscription SET failures = 4, last_error = 'x' WHERE id = ?", row.id);
+    await sendTo({ subscription: row, kind: "emergency", fetchImpl: fakePushService() });
+
+    const after = await get("SELECT * FROM push_subscription WHERE id = ?", row.id);
+    assert.equal(after.failures, 0);
+    assert.equal(after.last_error, null);
+    assert.ok(after.last_used_at, "so a dormant device can be told from a broken one");
+  });
+
+  test("a kind nobody wrote down is refused before anything is sent", async () => {
+    /* The guard that stops a notification being assembled at a call site
+       with a tenant's name in it. */
+    const row = await subscribed();
+    const service = fakePushService();
+    await assert.rejects(
+      () => sendTo({ subscription: row, kind: "rent_overdue_for_priya", fetchImpl: service }),
+      /is not a notification/);
+    assert.equal(service.calls.length, 0, "and nothing left the machine");
+  });
+});
+
+describe("what a push service's answer means", () => {
+  async function subscribed(endpoint) {
+    const res = await subscribe({
+      companyId: world.companyId, staffId: world.staff.admin.id,
+      subscription: browserSubscription(endpoint),
+    });
+    return await get("SELECT * FROM push_subscription WHERE id = ?", res.subscriptionId);
+  }
+
+  for (const status of [404, 410]) {
+    test(`${status} means the device is gone, so the row goes too`, async () => {
+      /* Keeping it means failing forever against an endpoint that will never
+         answer again. */
+      const row = await subscribed();
+      const sent = await sendTo({
+        subscription: row, kind: "emergency",
+        fetchImpl: fakePushService({ status }),
+      });
+
+      assert.equal(sent.gone, true);
+      assert.equal(await get("SELECT id FROM push_subscription WHERE id = ?", row.id), undefined);
+    });
+  }
+
+  test("500 is counted, not acted on — a service can be having a bad day", async () => {
+    const row = await subscribed();
+    await sendTo({
+      subscription: row, kind: "emergency",
+      fetchImpl: fakePushService({ status: 500, bodyText: "upstream unavailable" }),
+    });
+
+    const after = await get("SELECT * FROM push_subscription WHERE id = ?", row.id);
+    assert.equal(after.failures, 1);
+    assert.match(after.last_error, /500/);
+  });
+
+  test("a network error is counted the same way and never thrown at the caller", async () => {
+    const row = await subscribed();
+    const res = await sendTo({
+      subscription: row, kind: "emergency",
+      fetchImpl: async () => { throw new Error("getaddrinfo ENOTFOUND"); },
+    });
+
+    assert.equal(res.ok, false);
+    const after = await get("SELECT * FROM push_subscription WHERE id = ?", row.id);
+    assert.equal(after.failures, 1);
+  });
+});
+
+describe("notifying a person", () => {
+  test("every device they have, and nobody else's", async () => {
+    const pid = id();
+    await insert("person", { id: pid, email: "other@example.test", created_at: stamp() });
+    for (const e of ["https://fcm.googleapis.com/fcm/send/one", "https://fcm.googleapis.com/fcm/send/two"]) {
+      await subscribe({
+        companyId: world.companyId, staffId: world.staff.admin.id,
+        subscription: browserSubscription(e),
+      });
+    }
+    await subscribe({
+      companyId: world.companyId, personId: pid,
+      subscription: browserSubscription("https://fcm.googleapis.com/fcm/send/three"),
+    });
+
+    const service = fakePushService();
+    const out = await notify({ staffId: world.staff.admin.id, kind: "emergency", fetchImpl: service });
+
+    assert.equal(out.sent, 2);
+    assert.equal(service.calls.length, 2);
+    assert.ok(!service.calls.some((c) => c.url.endsWith("three")), "that is somebody else's device");
+  });
+
+  test("a device that fails does not stop the others being told", async () => {
+    /* The rule with teeth: a failure to notify is never a failure of the
+       thing being notified about, and it is not a failure of the next device
+       either. */
+    for (const e of ["https://fcm.googleapis.com/fcm/send/bad", "https://fcm.googleapis.com/fcm/send/good"]) {
+      await subscribe({
+        companyId: world.companyId, staffId: world.staff.admin.id,
+        subscription: browserSubscription(e),
+      });
+    }
+
+    let first = true;
+    const out = await notify({
+      staffId: world.staff.admin.id, kind: "emergency",
+      fetchImpl: async (url) => {
+        if (first) { first = false; throw new Error("connection reset"); }
+        return new Response("", { status: 201 });
+      },
+    });
+
+    assert.equal(out.devices, 2);
+    assert.equal(out.sent, 1);
+  });
+
+  test("notifying somebody with no devices is a no-op, not an error", async () => {
+    const out = await notify({ staffId: world.staff.admin.id, kind: "emergency", fetchImpl: fakePushService() });
+    assert.equal(out.sent, 0);
+    assert.equal(out.configured, true);
   });
 });
 
@@ -233,4 +391,47 @@ describe("a device that is gone", () => {
     });
     assert.deepEqual(await subscriptionsFor({}), []);
   });
+});
+
+/* --- with no keys at all ---------------------------------------------------- */
+
+describe("when VAPID is not configured", () => {
+  /* The suite sets a pair, which is what makes everything above real — so
+     this one case runs in its own process with the keys stripped out. It is
+     the state every deployment starts in, and the rule is that the
+     application says so rather than offering a button that silently does
+     nothing. */
+  function withoutVapid(script) {
+    const env = { ...process.env };
+    delete env.VAPID_PUBLIC_KEY;
+    delete env.VAPID_PRIVATE_KEY;
+    delete env.VAPID_SUBJECT;
+    return execFileSync(process.execPath, ["--input-type=module", "-e", script],
+      { env, encoding: "utf8" }).trim();
+  }
+
+  test("sending refuses, and says why, rather than reporting a success", () => {
+    const out = withoutVapid(`
+      const p = await import(${JSON.stringify(PUSH_MODULE)});
+      const res = await p.sendTo({
+        subscription: { id: "x", endpoint: "https://x.test/1", p256dh: "a", auth: "b" },
+        kind: "emergency",
+        fetchImpl: async () => { throw new Error("nothing should have been sent"); },
+      });
+      console.log(JSON.stringify({ configured: p.PUSH_CONFIGURED, ok: res.ok, reason: res.reason }));
+    `);
+    const res = JSON.parse(out);
+    assert.equal(res.configured, false);
+    assert.equal(res.ok, false);
+    assert.match(res.reason, /not configured/);
+  });
+
+  test("notifying reports nothing sent rather than throwing", () => {
+    const out = withoutVapid(`
+      const p = await import(${JSON.stringify(PUSH_MODULE)});
+      console.log(JSON.stringify(await p.notify({ staffId: "whoever", kind: "emergency" })));
+    `);
+    assert.deepEqual(JSON.parse(out), { sent: 0, configured: false });
+  });
+
 });

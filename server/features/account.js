@@ -10,6 +10,7 @@ import { html } from "../lib/render.js";
 import { appPage, notice } from "../views/layout.js";
 import { navCounts } from "../lib/counts.js";
 import { check, clear, clientIp } from "../lib/ratelimit.js";
+import { notificationsPanel } from "./push.js";
 
 const MIN_LENGTH = 12;
 
@@ -69,7 +70,10 @@ export function registerAccount(router) {
               <button class="pill outline sm" type="submit">Sign out everywhere else</button>
             </form>
           </div>
-        </div>`,
+        </div>
+
+        ${await notificationsPanel({ csrf: ctx.csrf, staffId: ctx.staff.id, base: "/app/push" })}
+        <script src="/app-assets/js/push.js" defer></script>`,
     }));
   });
 

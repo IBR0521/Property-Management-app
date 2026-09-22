@@ -20,6 +20,7 @@ import { sendHtml, redirect } from "../lib/http.js";
 import { NotFound } from "../lib/db.js";
 import { html, attr } from "../lib/render.js";
 import { portalPage, notice, empty } from "../views/layout.js";
+import { notificationsPanel } from "./push.js";
 import { balanceFor, blockedReason } from "../lib/payments.js";
 import { leasesFor, leaseIfHeld, rolesIn } from "../lib/identity.js";
 import { portalTabs } from "./portal.js";
@@ -566,7 +567,10 @@ export function registerPortalTenantSelfService(router) {
           ? html`<div class="panel"><div class="panel__body">
               ${empty("Nothing to change", "You have no live tenancy with this company.")}
             </div></div>`
-          : ""}`,
+          : ""}
+
+        ${await notificationsPanel({ csrf: ctx.csrf, personId, base: "/portal/push" })}
+        <script src="/app-assets/js/push.js" defer></script>`,
     }));
   });
 
