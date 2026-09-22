@@ -80,6 +80,7 @@ export async function makeLease(companyId, unitId, {
   const lid = id();
   await insert("lease", {
     id: lid, company_id: companyId, unit_id: unitId,
+    pay_token: token(),
     start_date: startDate, end_date: endDate,
     rent_cents: rentCents, deposit_cents: rentCents,
     rent_due_day: dueDay, grace_days: graceDays, status,
