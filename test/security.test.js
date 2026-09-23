@@ -8,6 +8,8 @@ import { readFileSync } from "node:fs";
 import { freshDatabase, truncateAll, closeDb, all, get, run } from "./helpers/db.js";
 import { startApp, client } from "./helpers/http.js";
 import * as f from "./helpers/factories.js";
+import { NAV } from "../server/views/layout.js";
+import { CAPABILITIES, capabilitiesFor, can, requiredCapability } from "../server/lib/auth.js";
 
 let app, world;
 
@@ -17,7 +19,7 @@ before(async () => {
   app = await startApp();
   world = await f.makeWorld({
     name: "Security Co",
-    staffRoles: ["admin", "manager", "accountant", "leasing", "maintenance"],
+    staffRoles: ["admin", "manager", "accountant", "leasing", "maintenance", "technician"],
   });
 });
 
@@ -115,6 +117,91 @@ describe("the role gate", () => {
       fs.readFileSync(new URL("../server/app.js", import.meta.url), "utf8"));
     assert.match(appSrc, /requiredCapability\(path, req\.method\)/,
       "app.js must consult the capability table for every request");
+  });
+
+  /* The sidebar and the gate are two tables that have to agree, and the ways
+     they can drift are not equally visible.
+
+     A link hidden from somebody who could open it is a nuisance nobody
+     reports. A path left open to somebody the sidebar hides it from is a hole
+     nobody finds, because the person it is open to has no reason to type the
+     address — until one of them does. Three entries had drifted that way:
+     /app/company, /app/billing and /app/company/access all declared
+     `settings.manage` in the nav and had no entry in the gate at all, so any
+     signed-in account could rename the company, change its public handle and
+     change the emergency number. /app/messages had neither, and exposed every
+     message to every tenant. */
+  const ROLES = ["admin", "manager", "accountant", "leasing", "maintenance", "technician"];
+  const asRole = (role) => ({ active: 1, role });
+
+  test("every link the sidebar promises is backed by the gate", () => {
+    const items = NAV.flatMap((group) => group.items);
+    assert.ok(items.length > 10, "the nav should not have emptied itself");
+
+    for (const item of items) {
+      if (!item.need) continue;
+      const gate = requiredCapability(item.href);
+      assert.ok(gate, `${item.href} is shown only to ${item.need} and the gate lets anyone in`);
+
+      for (const role of ROLES) {
+        const staff = asRole(role);
+        if (can(staff, item.need)) continue;
+        assert.equal(can(staff, gate), false,
+          `a ${role} is not shown ${item.href} and can still open it`);
+      }
+    }
+  });
+
+  test("and a route nobody is shown is a route nobody may open", async () => {
+    /* Driven through HTTP rather than through the table, because the table
+       agreeing with itself is what the test above covers. Each route is asked
+       of a role that genuinely lacks what it needs — a maintenance account
+       holds queue.view, so asking it about the outbox would have proved
+       nothing and passed. */
+    const cases = [
+      ["maintenance", "/app/company"],
+      ["maintenance", "/app/company/access"],
+      ["maintenance", "/app/billing"],
+      ["technician", "/app/messages"],
+    ];
+
+    for (const [role, route] of cases) {
+      const c = client(app.origin);
+      const res = await c.signIn(world.staff[role].email, f.PASSWORD);
+      assert.equal(res.signedIn, true, `${role} must be able to sign in`);
+      const r = await c.get(route);
+      assert.equal(r.status, 403, `a ${role} account must not reach ${route}`);
+    }
+  });
+
+  test("renaming the company is not something any signed-in account may do", async () => {
+    const c = client(app.origin);
+    await c.signIn(world.staff.maintenance.email, f.PASSWORD);
+    /* No CSRF token to take, because the page that carries one is refused —
+       which is the point: the gate answers before the form does. */
+    const res = await c.post("/app/company", { name: "Taken Over Ltd" }, { csrf: null });
+    assert.equal(res.status >= 400, true);
+
+    const company = await get("SELECT name FROM company WHERE id = ?", world.companyId);
+    assert.equal(company.name, "Security Co");
+  });
+
+  test("an admin is still shown, and can still open, all of them", async () => {
+    const c = client(app.origin);
+    await c.signIn(world.staff.admin.email, f.PASSWORD);
+    for (const route of ["/app/company", "/app/company/access", "/app/billing", "/app/messages"]) {
+      const r = await c.get(route);
+      assert.equal(r.status, 200, `admin must reach ${route}`);
+    }
+  });
+
+  test("every capability is reachable by some role, or it gates nothing", () => {
+    /* A capability no role holds is a permanently closed door with a name,
+       and the name is what makes somebody think it is open to somebody. */
+    for (const capability of CAPABILITIES) {
+      const holder = ROLES.find((role) => capabilitiesFor(role).has(capability));
+      assert.ok(holder, `no role holds ${capability}`);
+    }
   });
 
   test("signed out, an app route redirects to sign-in rather than answering", async () => {

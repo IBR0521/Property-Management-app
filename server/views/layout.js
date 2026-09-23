@@ -41,7 +41,11 @@ ${install ? html`<link rel="manifest" href="${install}" />
 /* Four destinations, plus the two sections that only some roles hold. Items
    carry the capability they need so the sidebar shows a person what they can
    actually open — a nav full of links that 403 is worse than a shorter nav. */
-const NAV = [
+/* Exported so a test can hold it against the capability table. The comment
+   above says the routing gate is the enforcement and this only stops showing
+   people doors that will not open — which stayed true of most of it and
+   silently stopped being true of three entries. */
+export const NAV = [
   { group: null, items: [
     { href: "/app", key: "queue", icon: "inbox", label: "Queue", badge: "queue" },
     { href: "/app/portfolio", key: "properties", icon: "home", label: "Properties", badge: "properties" },

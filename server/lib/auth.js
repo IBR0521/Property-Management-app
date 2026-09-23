@@ -226,6 +226,11 @@ const ROUTE_CAPABILITY = [
   ["/app/listings", "leasing.work"],
   ["/app/applications", "leasing.work"],
   ["/app/inbox", "queue.view"],
+  /* The outbox: every message to every tenant and owner, with its body, and
+     the buttons that discard or re-send them. Same omission as /app/company —
+     it had no entry, so the person in the van could read the company's
+     correspondence and drop a rent notice out of the queue. */
+  ["/app/messages", "queue.view"],
   ["/app/maintenance", "maintenance.work"],
   ["/app/turns", "maintenance.work"],
   ["/app/compliance", "property.view"],
@@ -242,6 +247,20 @@ const ROUTE_CAPABILITY = [
   ["/app/portfolio", "property.view"],
   ["/app/setup", "settings.manage"],
   ["/app/staff", "staff.manage"],
+  /* The sidebar has claimed these need `settings.manage` since they were
+     built, and the gate had no entry for any of them — so the nav hid the
+     links and the paths were open to anyone signed in. A technician typing
+     /app/company could rename the company, change the emergency number, and
+     change the public handle that every printed QR sticker points at.
+
+     The comment above the nav says the routing gate is the enforcement and
+     the nav only stops showing people doors that will not open. That was
+     true of every other entry and not of these three. A test now holds the
+     two tables against each other, because the drift is silent in exactly
+     one direction: hiding a link nobody can open is invisible, and so is
+     leaving open a path nobody is shown. */
+  ["/app/company", "settings.manage"],
+  ["/app/billing", "settings.manage"],
 ];
 
 /* Write paths need more than read paths on the same prefix. Checked in
