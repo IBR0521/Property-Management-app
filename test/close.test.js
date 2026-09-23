@@ -53,7 +53,22 @@ async function soundBook({ date = today(), cents = 100000 } = {}) {
     date, kind: "rent_payment", amount_cents: cents, memo: "rent",
     source: "manual", journal_id: jid, created_at: stamp(),
   });
-  /* A connected trust account holding exactly it, so all three legs agree. */
+  /* The deposit too. The factory puts one on every lease, and a book with a
+     deposit recorded on a lease and posted to no account does not reconcile —
+     which is the point of refusing to close over it. */
+  const lease = await get("SELECT deposit_cents FROM lease WHERE id = ?", world.leaseId);
+  const depositCents = Number(lease.deposit_cents || 0);
+  if (depositCents > 0) {
+    await postJournal({
+      companyId: world.companyId, date, memo: "deposit received",
+      splits: [
+        { code: "1010", debit: depositCents, leaseId: world.leaseId },
+        { code: "2100", credit: depositCents, leaseId: world.leaseId },
+      ],
+    });
+  }
+
+  /* A connected trust account holding exactly it, so every leg agrees. */
   const itemId = id();
   await insert("bank_item", {
     id: itemId, company_id: world.companyId, provider: "manual",
@@ -62,7 +77,7 @@ async function soundBook({ date = today(), cents = 100000 } = {}) {
   await insert("bank_account", {
     id: id(), company_id: world.companyId, item_id: itemId,
     external_id: `ext-${itemId}`, name: "Trust", mask: "0001",
-    type: "depository", balance_cents: cents, is_trust: 1, active: 1,
+    type: "depository", balance_cents: cents + depositCents, is_trust: 1, active: 1,
     created_at: stamp(),
   });
   return jid;
@@ -234,10 +249,16 @@ describe("closing", () => {
     await soundBook({ date: addDays(today(), -5), cents: 100000 });
     await closePeriod(world.companyId, { through: today(), by: "Dana" });
 
+    /* Rent and the deposit: the book holds both, and taking the figure from
+       the fixture rather than writing it out again is what keeps this test
+       about the snapshot rather than about arithmetic. */
+    const lease = await get("SELECT deposit_cents FROM lease WHERE id = ?", world.leaseId);
+    const held = 100000 + Number(lease.deposit_cents || 0);
+
     const saved = await reconciliationsFor(world.companyId);
     assert.equal(saved.length, 1);
     assert.equal(saved[0].balanced, 1);
-    assert.equal(Number(saved[0].book_cents), 100000);
+    assert.equal(Number(saved[0].book_cents), held);
     assert.equal(saved[0].signed_by, "Dana");
 
     /* Post afterwards. The snapshot must not move. */
@@ -250,7 +271,7 @@ describe("closing", () => {
     });
 
     const after = await reconciliationsFor(world.companyId);
-    assert.equal(Number(after[0].book_cents), 100000,
+    assert.equal(Number(after[0].book_cents), held,
       "a stored reconciliation is a record, not a live query");
   });
 

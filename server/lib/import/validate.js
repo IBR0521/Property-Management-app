@@ -352,7 +352,11 @@ function resolve({ entity, index, existing, errors, bySource, byNatural, what, r
   const sourceId = String(bySource ?? "").trim();
   if (sourceId) {
     const inFile = index[entity]?.bySource.get(sourceId);
-    if (inFile) return { kind: "file", entity, sourceId };
+    /* The row number travels with every reference, not only the ones matched
+       by name. The commit resolves a reference to a row that may have no id
+       of its own, and without the row number there would be nothing to look
+       it up by. */
+    if (inFile) return { kind: "file", entity, sourceId, row: inFile.row };
     if (existing[entity]?.has(sourceId)) return { kind: "existing", entity, sourceId };
     if (required) {
       errors.push(`No ${what} with the id "${sourceId}" — not in this import and not already here.`);

@@ -315,9 +315,40 @@ describe("the bank leg", () => {
       "nothing has left the account on the strength of a draft");
   });
 
-  test("all three legs agreeing is reported as balanced", async () => {
+  test("every leg agreeing is reported as balanced", async () => {
     /* The only construction in this file where the report is allowed to say
-       yes. */
+       yes — and it needs the deposit posted as well as the rent.
+
+       The factory gives every lease a deposit, so this fixture carried an
+       unposted one for as long as the reconciliation compared all client
+       money against the owners' ledgers alone. It now checks deposits
+       against the leases too, and a sound book is one where that agrees. */
+    const deposit = await get("SELECT deposit_cents FROM lease WHERE id = ?", world.leaseId);
+    const depositCents = Number(deposit.deposit_cents);
+
+    await trustAccount(RENT + depositCents);
+    await post("rent received", [
+      { code: "1010", debit: RENT, ownerId: world.ownerId },
+      { code: "2200", credit: RENT, ownerId: world.ownerId },
+    ]);
+    await ledgerEntry({ kind: "rent_payment", amountCents: RENT });
+    await post("deposit received", [
+      { code: "1010", debit: depositCents, leaseId: world.leaseId },
+      { code: "2100", credit: depositCents, leaseId: world.leaseId },
+    ]);
+
+    const r = await trustReconciliation(world.companyId);
+    assert.equal(r.legs.bank.cents, RENT + depositCents);
+    assert.equal(r.legs.book.cents, RENT + depositCents);
+    assert.equal(r.legs.clients.cents, RENT + depositCents);
+    assert.equal(r.legs.subledger.cents, RENT, "the owners' share of it");
+    assert.equal(r.balanced, true);
+    assert.deepEqual(r.unchecked, []);
+  });
+
+  test("a deposit on a lease and not in the books is caught", async () => {
+    /* The finding the old comparison could not make, because it measured
+       tenant deposits against the owners' ledgers. */
     await trustAccount(RENT);
     await post("rent received", [
       { code: "1010", debit: RENT, ownerId: world.ownerId },
@@ -326,12 +357,33 @@ describe("the bank leg", () => {
     await ledgerEntry({ kind: "rent_payment", amountCents: RENT });
 
     const r = await trustReconciliation(world.companyId);
-    assert.equal(r.legs.bank.cents, RENT);
-    assert.equal(r.legs.book.cents, RENT);
-    assert.equal(r.legs.clients.cents, RENT);
-    assert.equal(r.legs.subledger.cents, RENT);
-    assert.equal(r.balanced, true);
-    assert.deepEqual(r.unchecked, []);
+    assert.equal(r.balanced, false);
+    assert.ok(r.findings.some((f) => /posted nowhere/.test(f.title)));
+    assert.notEqual(r.variances.find((v) => v.key === "deposits_vs_leases").cents, 0);
+  });
+
+  test("owner funds are measured against the owners' ledgers and nothing else", async () => {
+    /* A tenant's deposit is not the owner's money. Sweeping it into the
+       comparison made every company with posted deposits read as having a
+       control account that disagreed with its subsidiary ledger — by exactly
+       the deposits it correctly held. */
+    const deposit = 120000;
+    await run("UPDATE lease SET deposit_cents = ? WHERE id = ?", deposit, world.leaseId);
+    await post("rent received", [
+      { code: "1010", debit: RENT, ownerId: world.ownerId },
+      { code: "2200", credit: RENT, ownerId: world.ownerId },
+    ]);
+    await ledgerEntry({ kind: "rent_payment", amountCents: RENT });
+    await post("deposit received", [
+      { code: "1010", debit: deposit, leaseId: world.leaseId },
+      { code: "2100", credit: deposit, leaseId: world.leaseId },
+    ]);
+
+    const r = await trustReconciliation(world.companyId);
+    assert.equal(r.variances.find((v) => v.key === "clients_vs_subledger").cents, 0,
+      "the owners' side agrees");
+    assert.equal(r.variances.find((v) => v.key === "deposits_vs_leases").cents, 0,
+      "and so does the tenants' side");
   });
 });
 

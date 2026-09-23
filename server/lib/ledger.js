@@ -200,6 +200,11 @@ export async function postMoney({
   journalSource = null, journalId: existingJournalId = null,
 }) {
   const amount = Math.abs(Math.round(Number(amountCents) || 0));
+
+  /* Rent received splits across two liabilities — earned and held — but the
+     owner's statement gets the whole receipt, because the whole receipt is
+     theirs: 2200 and 2300 are both money this company holds for that owner,
+     and the reconciliation compares their sum against the owner ledgers. */
   const splits = kind === "rent_payment" && amount > 0
     ? await rentPaymentSplits({ companyId, leaseId, amount })
     : postingFor(kind, amountCents);

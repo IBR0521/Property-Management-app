@@ -173,6 +173,24 @@ export async function trustReconciliation(companyId, { asOf = today() } = {}) {
   const bookCents = assets.reduce((n, b) => n + b.balance, 0);
   const clientsCents = liabilities.reduce((n, b) => n + b.balance, 0);
 
+  /* Client money is owed to two different sets of people, and they have two
+     different subsidiary ledgers behind them.
+
+       2200 owner funds + 2300 prepaid rent   the owners', against `ledger_entry`
+       2100 tenant deposits                   the tenants', against the leases
+
+     Comparing the whole of it against the owners' ledgers was wrong, and it
+     went unnoticed because deposits had never been posted — the moment an
+     import posted some, every migrated company read as having a control
+     account that disagreed with its subsidiary ledger by exactly the deposits
+     it correctly held. Found by importing a portfolio. */
+  const ownerHeldCents = liabilities
+    .filter((b) => b.code === "2200" || b.code === "2300")
+    .reduce((n, b) => n + b.balance, 0);
+  const depositsBookedCents = liabilities
+    .filter((b) => b.code === "2100")
+    .reduce((n, b) => n + b.balance, 0);
+
   /* The bank's figure brought onto the same footing as the book: money paid
      out that the bank has not yet acted on is already gone as far as the book
      is concerned. */
@@ -215,9 +233,16 @@ export async function trustReconciliation(companyId, { asOf = today() } = {}) {
     },
     {
       key: "clients_vs_subledger",
-      label: "The control account against the individual ledgers",
-      question: "Does the total agree with the records each client is shown?",
-      cents: clientsCents - sub.ownersCents,
+      label: "Owner funds against the owners' own ledgers",
+      question: "Does the total agree with the statements each owner is shown?",
+      cents: ownerHeldCents - sub.ownersCents,
+      unavailable: null,
+    },
+    {
+      key: "deposits_vs_leases",
+      label: "Deposits held against the leases",
+      question: "Is every deposit on a lease in the books, and every one in the books on a lease?",
+      cents: depositsBookedCents - sub.depositsOnLeases.cents,
       unavailable: null,
     },
   ];
@@ -303,18 +328,24 @@ function explain({ legs, variances, balances }) {
     });
   }
 
-  if (legs.subledger.depositsOnLeases.cents > 0) {
+  const depositsGap = by("deposits_vs_leases");
+  if (depositsGap && depositsGap.cents !== 0) {
     const held = balances.find((b) => b.code === "2100");
-    if (!held || held.balance === 0) {
-      out.push({
-        severity: "error",
-        title: "Deposits are recorded on leases and posted nowhere",
-        detail: `${legs.subledger.depositsOnLeases.count} active lease(s) record a deposit, `
-          + "and the deposits-held account has never been posted to. The money is "
-          + "somebody else's and the books do not know it exists.",
-        cents: legs.subledger.depositsOnLeases.cents,
-      });
-    }
+    const booked = held?.balance || 0;
+    out.push({
+      severity: "error",
+      title: booked === 0
+        ? "Deposits are recorded on leases and posted nowhere"
+        : "The deposits in the books and the deposits on the leases disagree",
+      detail: booked === 0
+        ? `${legs.subledger.depositsOnLeases.count} active lease(s) record a deposit, and the `
+          + "deposits-held account has never been posted to. The money is somebody "
+          + "else's and the books do not know it exists."
+        : "One of the two is wrong. A deposit is money held in trust for a tenant, so "
+          + "the difference is either money unaccounted for or a lease recording "
+          + "something that was never taken.",
+      cents: depositsGap.cents,
+    });
   }
 
   if (legs.bank.unavailable) {
