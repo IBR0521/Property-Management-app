@@ -48,6 +48,29 @@ export async function paymentPayload({ entryId, journalId }) {
   };
 }
 
+/* A returned payment. The lease's own state comes with it because a return
+   often changes it — a closed account puts the tenancy on cash-only — and a
+   receiver that had to ask a second question to find that out would be
+   looking at a different moment by the time it did. */
+export async function paymentReturnedPayload(paymentId) {
+  const payment = await get(
+    `SELECT ${cols("payments")} FROM tenant_payment WHERE id = ?`, paymentId);
+  if (!payment) return null;
+
+  const lease = await get(
+    `SELECT id, payments_blocked, payments_blocked_reason FROM lease WHERE id = ?`,
+    payment.lease_id);
+
+  return {
+    payment: shape(RESOURCES.payments, payment),
+    lease: lease ? {
+      id: lease.id,
+      payments_blocked: Boolean(Number(lease.payments_blocked)),
+      payments_blocked_reason: lease.payments_blocked_reason || null,
+    } : null,
+  };
+}
+
 export async function leaseSignedPayload(documentId) {
   const doc = await get(
     `SELECT id, lease_id, unit_id, title, kind, status, completed_at, created_at

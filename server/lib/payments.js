@@ -523,6 +523,17 @@ export async function returnPayment({
       paymentId: payment.id, returnCode, amount: payment.amount_cents,
     });
 
+    /* Inside the same transaction as the reversal it describes. A return is
+       the event an integration most wants to hear about — the rent is owed
+       again and somebody has to be told — so it is queued with everything
+       else that just happened rather than after it. */
+    const [{ emit }, { paymentReturnedPayload }] = await Promise.all([
+      import("./webhooks/events.js"), import("./webhooks/payloads.js")]);
+    await emit({
+      companyId: payment.company_id, event: "payment.returned",
+      data: await paymentReturnedPayload(payment.id),
+    });
+
     return { ok: true, reversalJournalId: reversalId };
   });
 }

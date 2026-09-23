@@ -280,6 +280,49 @@ describe("the events the application actually fires", () => {
     assert.equal(net, 0, "the payload carries the real posting");
   });
 
+  test("a returned payment queues one, with what it did to the lease", async () => {
+    /* The event an integration most wants: the rent is owed again and
+       somebody has to be told. */
+    await endpoint();
+    const { postMoney } = await import("../server/lib/ledger.js");
+    const { returnPayment } = await import("../server/lib/payments.js");
+    const { insert } = await import("../server/lib/db.js");
+    const { id: newId } = await import("../server/lib/ids.js");
+
+    const posted = await postMoney({
+      companyId: world.companyId, ownerId: world.ownerId, leaseId: world.leaseId,
+      date: "2026-06-01", kind: "rent_payment", amountCents: 145000, memo: "June" });
+
+    const paymentId = newId();
+    await insert("tenant_payment", {
+      id: paymentId, company_id: world.companyId, lease_id: world.leaseId,
+      unit_id: world.unitId, owner_id: world.ownerId,
+      kind: "ach", amount_cents: 145000, charged_cents: 145000,
+      period: "2026-06", status: "succeeded",
+      ledger_entry_id: posted.entryId, journal_id: posted.journalId,
+      created_at: stamp(), settled_at: stamp(),
+    });
+
+    await run("DELETE FROM webhook_delivery");
+    await returnPayment({ paymentId, returnCode: "R02", reason: "account closed" });
+
+    const row = await get("SELECT * FROM webhook_delivery WHERE event = 'payment.returned'");
+    assert.ok(row, "a return has to reach anybody listening");
+
+    /* And the reversal must not also read as a payment. `returnPayment`
+       reverses by posting a `rent_payment` for a negative amount, and telling
+       a receiver that a payment of minus fourteen hundred dollars was
+       *recorded* is worse than telling them nothing. */
+    assert.equal(
+      (await all("SELECT id FROM webhook_delivery WHERE event = 'payment.recorded'")).length, 0,
+      "a reversal is not a payment");
+    const body = JSON.parse(row.payload);
+    assert.equal(body.data.payment.status, "returned");
+    assert.equal(body.data.payment.failure_reason, "account closed");
+    assert.equal(body.data.lease.payments_blocked, true,
+      "R02 is terminal, so the tenancy went cash-only and the receiver is told");
+  });
+
   test("a deposit does not — only the events that were declared", async () => {
     await endpoint();
     const { postMoney } = await import("../server/lib/ledger.js");

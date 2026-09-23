@@ -39,6 +39,7 @@ One origin serves everything:
 | `/apply` `/a/:token` | rental application and document upload |
 | `/o/a/:token` `/o/s/:token` | owner approval and monthly statement |
 | `/app/*` | back office, staff session required |
+| `/api/v1/*` | the public API — a key, never a session |
 
 ## Dependencies
 
@@ -52,6 +53,12 @@ Everything else is Node built-ins. No build step, no framework, no CDN.
 
 **Nothing here costs money to run.** There is no payment API and no metered
 third-party call anywhere in the code — the app deliberately never moves funds.
+
+Some things that would ordinarily be a dependency are written out instead,
+because each one is either small enough to read or is the sort of thing a
+customer's trust rests on: the PDF writer, the ZIP writer, the CSV reader and
+writer, the NACHA file, the push-notification crypto, and the webhook
+signature and address checks.
 
 ## Deploying
 

@@ -1,7 +1,6 @@
 # Phase 7b — A public API and outbound webhooks. What was built, and what it found.
 
-Two commits of substance, `9a856e0` and `0e44539`, plus what follows. Four
-test files added.
+Four commits, `9a856e0` to `d0fc98c`. Four test files added; **1584 green**, from 1452 at the end of Phase 7a.
 
 Both halves are the same thing from two directions: somebody else's software
 asking this application questions, and this application telling somebody
@@ -105,9 +104,9 @@ Delivery honesty holds through a JSON response as well as through a screen.
 
 ## Webhooks
 
-Five events, queued from the one place each of them actually happens:
+Six events, queued from the one place each of them actually happens:
 `work_order.raised`, `work_order.completed`, `payment.recorded`,
-`lease.signed`, `owner_approval.decided`.
+`payment.returned`, `lease.signed`, `owner_approval.decided`.
 
 `payment.recorded` fires inside `postMoney`, which is the single writer of
 owner-visible money — so a screen, the API, a bank import and the autopay run
@@ -201,6 +200,14 @@ attempt, which is right for a sign-in form a person uses eight times an hour
 and wrong for an API a script uses a thousand times. The API counts into one
 row per key per hour with an upsert: the cost of limiting must not grow with
 the traffic it is limiting.
+
+**A reversal is not a payment.** `returnPayment` claws a payment back by
+posting a `rent_payment` for a *negative* amount, which meant the
+`payment.recorded` event fired with minus fourteen hundred dollars in it.
+Telling a receiver that is worse than telling them nothing, so the event is
+positive amounts only and a return has its own event — which says what
+actually happened, and whether the tenancy went cash-only as a result. Found
+by writing the returned-payment test, not by reading the code.
 
 ### Two bugs the tests caught
 

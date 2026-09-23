@@ -248,7 +248,12 @@ export async function postMoney({
        owner-visible money: a screen, the API, a bank import and the autopay
        run all come through it, and an event emitted per call site would be
        four chances to forget. */
-    if (kind === "rent_payment") {
+    /* Positive only. A `rent_payment` for a negative amount is a reversal —
+       `returnPayment` posts one when the bank takes a payment back — and
+       telling a receiver that a payment of minus fourteen hundred dollars was
+       *recorded* is worse than telling them nothing. The return has its own
+       event, which says what actually happened and what it did to the lease. */
+    if (kind === "rent_payment" && Math.round(Number(amountCents)) > 0) {
       const [{ emit }, { paymentPayload }] = await Promise.all([
         import("./webhooks/events.js"), import("./webhooks/payloads.js")]);
       await emit({

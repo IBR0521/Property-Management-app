@@ -40,6 +40,11 @@ export const EVENTS = {
     describes: "Rent was received and reached both books.",
     payload: "The ledger entry and the journal behind it.",
   },
+  "payment.returned": {
+    describes: "A payment came back — the bank or the card refused it after the fact.",
+    payload: "The payment, with the return code and what it means, and whether the "
+      + "lease was put on cash-only as a result.",
+  },
   "lease.signed": {
     describes: "Every party a lease document needed has signed it.",
     payload: "The document, the lease and the unit.",
