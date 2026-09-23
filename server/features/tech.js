@@ -114,6 +114,11 @@ export function registerTech(router) {
         ORDER BY at DESC LIMIT 20`, wo.id);
 
     const partsTotal = parts.reduce((n, p) => n + Number(p.cost_cents), 0);
+    /* What happens to the number they are about to type. A technician told
+       afterwards that their figure was replaced reads it as the application
+       losing their work. */
+    const { costOutlook } = await import("../lib/repaircost.js");
+    const outlook = await costOutlook(ctx.staff.company_id, wo);
     const address = [wo.line1, wo.city, wo.state, wo.zip].filter(Boolean).join(", ");
     const onSite = Boolean(wo.checked_in_at) && !wo.checked_out_at;
 
@@ -266,6 +271,9 @@ export function registerTech(router) {
 
         <div class="panel" style="margin-top:1.25rem">
           <div class="panel__head"><h2>Finish the job</h2></div>
+          ${outlook.reason
+            ? html`<div class="panel__body">${notice("warn", "Already billed", outlook.reason)}</div>`
+            : ""}
           <div class="panel__body">
             <form method="post" action="/app/jobs/${wo.id}/complete"
                   enctype="multipart/form-data" class="formgrid">
@@ -275,10 +283,12 @@ export function registerTech(router) {
                 <input id="actual" name="actual" type="text" inputmode="decimal"
                        value="${partsTotal ? (partsTotal / 100).toFixed(2) : ""}" placeholder="0.00" />
                 <span class="field__help">
-                  ${parts.length
-                    ? html`Filled in from the parts above. Change it if labour or anything else should be included.`
-                    : html`Leave it empty if somebody at the office is invoicing this.`}
-                  It posts to the owner's ledger with this job attached.
+                  ${outlook.reason ? html`${outlook.reason}`
+                    : outlook.warning ? html`${outlook.warning}`
+                    : html`${parts.length
+                        ? "Filled in from the parts above. Change it if labour or anything else should be included."
+                        : "Leave it empty if somebody at the office is invoicing this."}
+                       It posts to the owner's ledger with this job attached.`}
                 </span>
               </div>
               <div class="field">

@@ -518,6 +518,10 @@ export function registerMaintenance(router) {
       "SELECT * FROM owner_approval WHERE work_order_id = ? ORDER BY requested_at DESC LIMIT 1", wo.id);
     const triage = wo.triage_answers ? JSON.parse(wo.triage_answers) : null;
     const done = wo.status === "complete" || wo.status === "cancelled";
+    /* What will happen to the figure somebody is about to type, said before
+       they type it. */
+    const { costOutlook } = await import("../lib/repaircost.js");
+    const outlook = done ? null : await costOutlook(cid, wo);
 
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
@@ -582,7 +586,7 @@ export function registerMaintenance(router) {
           </div>
 
           <div style="display:flex;flex-direction:column;gap:1.25rem">
-            ${done ? "" : actionPanels({ wo, vendors, csrf: ctx.csrf })}
+            ${done ? "" : actionPanels({ wo, vendors, csrf: ctx.csrf, outlook })}
             <div class="panel">
               <div class="panel__head"><h2>History</h2><p>${events.length} entries</p></div>
               <div class="panel__body">
@@ -932,6 +936,7 @@ function labelEvent(kind) {
     completed: "Work completed", cancelled: "Cancelled", note: "Note",
     /* From the technician's view. A time, and deliberately not a place. */
     arrived: "Arrived on site", left: "Left site",
+    cost_superseded: "Cost replaced by the contractor's invoice",
   }[kind] || kind;
 }
 
@@ -1104,7 +1109,7 @@ function intakeStepTwo({ company, unit, cat, csrf, error }) {
     </div>`;
 }
 
-function actionPanels({ wo, vendors, csrf }) {
+function actionPanels({ wo, vendors, csrf, outlook = null }) {
   return html`
     <div class="panel">
       <div class="panel__head"><h2>Move it along</h2></div>
@@ -1150,7 +1155,9 @@ function actionPanels({ wo, vendors, csrf }) {
             <div class="field">
               <label for="actual">Final cost</label>
               <input id="actual" name="actual" type="text" inputmode="decimal" placeholder="412.50" />
-              <span class="field__help">Posts to the owner's ledger with this job attached.</span>
+              <span class="field__help">
+                ${outlook?.reason || outlook?.warning || "Posts to the owner's ledger with this job attached."}
+              </span>
             </div>
             <div class="field">
               <label for="cphotos">Completion photos</label>

@@ -164,7 +164,8 @@ export async function recordInvoice({
     const superseded = workOrderId
       ? await supersedeCloseOutCost({
           companyId, workOrderId, by: createdBy, date: invoiceDate || today(),
-          reason: `Superseded by ${vendor.name}'s invoice${invoiceNo ? ` (${invoiceNo})` : ""}`,
+          reason: `Superseded by ${vendor.name}'s invoice${invoiceNo ? ` (${invoiceNo})` : ""}.`,
+          replacedWithCents: amountCents + taxCents,
         })
       : { superseded: false, cents: 0 };
 

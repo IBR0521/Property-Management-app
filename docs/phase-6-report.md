@@ -217,8 +217,9 @@ The three missing exports — payout runs, bank reconciliation, lease documents 
 are each an afternoon and would close the "every table" gap honestly rather
 than by redefining it.
 
-Before that, A1's sibling is worth settling: there is still no guard stopping a
-manager recording an `actual_cents` that contradicts an invoice they are about
-to enter. The books are right either way now, but the screen does not warn
-them, and being told afterwards that their number was superseded is worse than
-being told at the time.
+A1's sibling is now settled. A job with a contractor assigned says, before
+anybody types a figure, that the bill will replace it; a job already billed
+says the figure will be recorded and not posted; and when an invoice does
+supersede a close-out, the job's own history records what was entered and what
+was billed. Being told afterwards reads as the application losing your work.
+Being told at the time reads as it knowing what it is doing.

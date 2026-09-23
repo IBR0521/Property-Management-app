@@ -63,21 +63,52 @@ export async function invoiceFor(companyId, workOrderId) {
     companyId, workOrderId);
 }
 
-/* Whether closing this job should post its cost, and if not, why not — so the
-   screen can say it rather than leaving somebody to wonder where their number
-   went. */
-export async function shouldPostCloseOutCost(companyId, workOrderId) {
+/* Whether closing this job should post its cost, and what to tell the person
+   before they type a number.
+
+   Two halves, and the second is the one that was missing. Being told
+   afterwards that your figure was superseded is worse than being told at the
+   time: the first reads as the application losing your work, the second reads
+   as the application knowing what it is doing. */
+export async function costOutlook(companyId, workOrder) {
+  const workOrderId = typeof workOrder === "string" ? workOrder : workOrder?.id;
   const invoice = await invoiceFor(companyId, workOrderId);
-  if (!invoice) return { post: true, invoice: null, reason: null };
+
+  if (invoice) {
+    return {
+      post: false,
+      invoice,
+      expectInvoice: false,
+      reason: `${usd(Number(invoice.amount_cents) + Number(invoice.tax_cents || 0))} has already been `
+        + "billed by the contractor for this job, so the cost comes from their invoice. "
+        + "The figure entered here is recorded on the job and not posted again.",
+      warning: null,
+    };
+  }
+
+  /* A contractor is on the job and has not billed yet. Whatever is typed
+     here will post, and will be replaced the moment their invoice arrives.
+     Said now rather than discovered later. */
+  const vendor = (typeof workOrder === "object" && workOrder?.vendor_id)
+    ? await get("SELECT name FROM vendor WHERE id = ?", workOrder.vendor_id)
+    : null;
 
   return {
-    post: false,
-    invoice,
-    reason: `${usd(Number(invoice.amount_cents) + Number(invoice.tax_cents || 0))} has already been `
-      + "billed by the contractor for this job, so the cost comes from their invoice. "
-      + "The figure entered here is recorded on the job and not posted again.",
+    post: true,
+    invoice: null,
+    expectInvoice: Boolean(vendor),
+    reason: null,
+    warning: vendor
+      ? `${vendor.name} is assigned to this job. What you enter here is posted now and `
+        + "replaced when their invoice arrives, so it does not need to be exact."
+      : null,
   };
 }
+
+/* The old name, kept because two call sites use it and the shape is a
+   superset. */
+export const shouldPostCloseOutCost = (companyId, workOrderId) =>
+  costOutlook(companyId, workOrderId);
 
 /* Take the close-out posting back out, because the bill has arrived and it is
    the one that counts.
@@ -88,7 +119,9 @@ export async function shouldPostCloseOutCost(companyId, workOrderId) {
    statement would still carry the close-out figure while the books carried the
    invoice, and the control account and the subsidiary ledger would disagree by
    the difference. */
-export async function supersedeCloseOutCost({ companyId, workOrderId, by, date, reason }) {
+export async function supersedeCloseOutCost({
+  companyId, workOrderId, by, date, reason, replacedWithCents = null,
+}) {
   const posting = await costPostingFor(companyId, workOrderId);
   if (!posting) return { superseded: false, cents: 0 };
 
@@ -121,6 +154,20 @@ export async function supersedeCloseOutCost({ companyId, workOrderId, by, date, 
     });
   }
 
+  /* On the job's own history, because that is what a manager reads. Without
+     it the figure simply changes and the only record of why is a journal memo
+     nobody is looking at.
+
+     Not tenant-visible: how a repair was costed is between the manager, the
+     contractor and the owner. */
+  const was = Math.abs(Number(entry?.amount_cents || 0));
+  const { event } = await import("../features/maintenance.js");
+  await event(workOrderId, by || "system", "cost_superseded",
+    `Recorded at close-out: ${usd(was)}.`
+    + (replacedWithCents != null ? ` Billed: ${usd(replacedWithCents)}.` : "")
+    + ` ${reason || "Superseded by the contractor's invoice."}`,
+    0);
+
   log.info("close-out cost superseded by an invoice", { workOrderId });
-  return { superseded: true, cents: Math.abs(Number(entry?.amount_cents || 0)), reversalId };
+  return { superseded: true, cents: was, reversalId };
 }

@@ -272,3 +272,152 @@ describe("through every order of events", () => {
     }
   });
 });
+
+/* --- telling somebody before they type, not after -------------------------- */
+
+describe("what the screen says before a figure is entered", () => {
+  const workOrder = async () => await get("SELECT * FROM work_order WHERE id = ?", world.workOrderId);
+
+  test("with a contractor assigned and no bill yet, it says the bill will replace it", async () => {
+    /* The gap this closes. Being told afterwards that your figure was
+       superseded reads as the application losing your work; being told at
+       the time reads as it knowing what it is doing. */
+    const { costOutlook } = await import("../server/lib/repaircost.js");
+    await run("UPDATE work_order SET vendor_id = ? WHERE id = ?", world.vendorId, world.workOrderId);
+
+    const outlook = await costOutlook(world.companyId, await workOrder());
+
+    assert.equal(outlook.post, true, "it still posts — nothing else is going to");
+    assert.equal(outlook.expectInvoice, true);
+    assert.match(outlook.warning, /replaced when their invoice arrives/);
+    assert.match(outlook.warning, new RegExp((await get("SELECT name FROM vendor WHERE id = ?", world.vendorId)).name));
+  });
+
+  test("with no contractor at all it says nothing alarming", async () => {
+    const { costOutlook } = await import("../server/lib/repaircost.js");
+    const outlook = await costOutlook(world.companyId, await workOrder());
+
+    assert.equal(outlook.post, true);
+    assert.equal(outlook.expectInvoice, false);
+    assert.equal(outlook.warning, null);
+  });
+
+  test("with a bill already in, it says the figure will not be posted", async () => {
+    const { costOutlook } = await import("../server/lib/repaircost.js");
+    await invoice(25000);
+
+    const outlook = await costOutlook(world.companyId, await workOrder());
+    assert.equal(outlook.post, false);
+    assert.match(outlook.reason, /already been billed/);
+    assert.match(outlook.reason, /\$250\.00/);
+  });
+
+  test("the manager's close-out form carries it", async () => {
+    const { startApp, client } = await import("./helpers/http.js");
+    const app = await startApp();
+    try {
+      await run("UPDATE work_order SET vendor_id = ? WHERE id = ?", world.vendorId, world.workOrderId);
+      const c = client(app.origin);
+      await c.signIn(world.staff.admin.email, f.PASSWORD);
+
+      const { body } = await c.text(`/app/maintenance/${world.workOrderId}`);
+      assert.match(body, /replaced when their invoice arrives/);
+    } finally { await app.close(); }
+  });
+
+  test("and so does the technician's", async () => {
+    const { startApp, client } = await import("./helpers/http.js");
+    const app = await startApp();
+    try {
+      await run("UPDATE work_order SET vendor_id = ?, assigned_staff_id = ? WHERE id = ?",
+        world.vendorId, world.staff.admin.id, world.workOrderId);
+      const c = client(app.origin);
+      await c.signIn(world.staff.admin.email, f.PASSWORD);
+
+      const { body } = await c.text(`/app/jobs/${world.workOrderId}`);
+      assert.match(body, /replaced when their invoice arrives/);
+    } finally { await app.close(); }
+  });
+
+  test("the technician is warned loudly when it is already billed", async () => {
+    /* A line of help text is enough for "this may change"; a figure that
+       will not be posted at all deserves a notice. */
+    const { startApp, client } = await import("./helpers/http.js");
+    const app = await startApp();
+    try {
+      await invoice(25000);
+      await run("UPDATE work_order SET assigned_staff_id = ? WHERE id = ?",
+        world.staff.admin.id, world.workOrderId);
+      const c = client(app.origin);
+      await c.signIn(world.staff.admin.email, f.PASSWORD);
+
+      const { body } = await c.text(`/app/jobs/${world.workOrderId}`);
+      assert.match(body, /Already billed/);
+    } finally { await app.close(); }
+  });
+});
+
+/* --- and afterwards, on the job's own history ------------------------------- */
+
+describe("the history records the supersede", () => {
+  test("it says what was recorded and what was billed", async () => {
+    /* Without this the figure simply changes, and the only record of why is
+       a journal memo nobody is looking at. */
+    await close(20000);
+    await invoice(25000);
+
+    const entry = await get(
+      "SELECT * FROM work_order_event WHERE work_order_id = ? AND kind = 'cost_superseded'",
+      world.workOrderId);
+
+    assert.ok(entry, "the job's history should carry it");
+    assert.match(entry.note, /Recorded at close-out: \$200\.00/);
+    assert.match(entry.note, /Billed: \$250\.00/);
+  });
+
+  test("it is not shown to the tenant", async () => {
+    /* How a repair was costed is between the manager, the contractor and the
+       owner. */
+    await close(20000);
+    await invoice(25000);
+
+    const entry = await get(
+      "SELECT tenant_visible FROM work_order_event WHERE work_order_id = ? AND kind = 'cost_superseded'",
+      world.workOrderId);
+    assert.equal(Number(entry.tenant_visible), 0);
+
+    const wo = await get("SELECT public_token FROM work_order WHERE id = ?", world.workOrderId);
+    const { startApp, client } = await import("./helpers/http.js");
+    const app = await startApp();
+    try {
+      const { body } = await client(app.origin).text(`/t/${wo.public_token}`);
+      assert.ok(!body.includes("Recorded at close-out"));
+    } finally { await app.close(); }
+  });
+
+  test("it reads as English on the manager's timeline", async () => {
+    await close(20000);
+    await invoice(25000);
+
+    const { startApp, client } = await import("./helpers/http.js");
+    const app = await startApp();
+    try {
+      const c = client(app.origin);
+      await c.signIn(world.staff.admin.email, f.PASSWORD);
+      const { body } = await c.text(`/app/maintenance/${world.workOrderId}`);
+      /* Without the apostrophe: the renderer escapes it to &#39;, so a
+         regex carrying one matches the source and not the page. */
+      assert.match(body, /Cost replaced by the contractor/);
+    } finally { await app.close(); }
+  });
+
+  test("nothing is written when there was nothing to supersede", async () => {
+    /* An invoice on a job nobody closed out has replaced nothing, and a
+       history entry saying otherwise would be a small lie. */
+    await invoice(25000);
+    const entry = await get(
+      "SELECT id FROM work_order_event WHERE work_order_id = ? AND kind = 'cost_superseded'",
+      world.workOrderId);
+    assert.equal(entry, undefined);
+  });
+});
