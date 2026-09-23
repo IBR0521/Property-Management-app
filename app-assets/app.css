@@ -544,3 +544,31 @@ table.data a:hover{ text-decoration:underline; }
 }
 .impersonating b{ color:var(--warn); }
 .impersonating .pill{ flex:none; }
+
+/* --- tapping, on a phone -------------------------------------------------- */
+
+/* Measured at 375px, not guessed: the compact pill renders 33-35px tall and a
+   navigation link 35px. Both are under the ~44px a thumb needs, and these are
+   the action controls — "Do it", "Open", "Remove". The failure is somebody
+   standing in a stairwell hitting the wrong one.
+
+   The fix is a hit area and deliberately not a size. An absolutely positioned
+   ::after centred on the control carries the tap up to 44px while the control
+   itself renders exactly as it did: same height, same padding, same type, same
+   spacing between rows. Nothing about the design changes, which is the point —
+   this is a mis-tap fix, not a redesign, and it needed nobody's approval to be
+   correct.
+
+   Phones only. A pointer does not need it, and on a wider screen the few
+   pixels of overlap between two stacked controls would be a cost for no
+   benefit. */
+@media (max-width:40rem){
+  .pill, .navlink{ position:relative; }
+  .pill::after, .navlink::after{
+    content:"";
+    position:absolute;
+    left:0; right:0; top:50%;
+    height:44px;
+    transform:translateY(-50%);
+  }
+}
