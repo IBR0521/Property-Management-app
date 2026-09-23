@@ -181,7 +181,10 @@ export function openApiSpec({ baseUrl = null } = {}) {
         + "changes their keys in the same moment.\n\n"
         + "Amounts are integers in cents. Dates are `YYYY-MM-DD`. Timestamps are "
         + "ISO-8601 in UTC. Lists are paged with `starting_after`, which is the "
-        + "id of the last row you saw.",
+        + "id of the last row you saw.\n\n"
+        + "**There are no CORS headers, and that is deliberate.** A key is a "
+        + "secret; anything a browser can send, a person can read out of the "
+        + "page. Call this from your own server.",
     },
     servers: [{ url: `${baseUrl || ""}/api/${API_VERSION}` }],
     paths,

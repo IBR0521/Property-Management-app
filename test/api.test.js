@@ -287,6 +287,37 @@ describe("reading", () => {
     assert.equal(odd.status, 200);
   });
 
+  test("an endpoint that does not exist answers in JSON, like everything else", async () => {
+    /* A client that parses every response has to parse this one too. Handing
+       it `Not found` as text/plain is how an integration reports "unexpected
+       token N" instead of a 404. */
+    const res = await call("/api/v1/unicorns");
+    assert.equal(res.status, 404);
+    assert.equal(res.headers.get("content-type"), "application/json; charset=utf-8");
+    assert.equal(res.json.error.type, "not_found");
+    assert.ok(res.json.request_id);
+  });
+
+  test("the wrong method on a real path says which methods it does answer", async () => {
+    const res = await call("/api/v1/properties", { method: "POST", body: {} });
+    assert.equal(res.status, 405);
+    assert.equal(res.json.error.type, "invalid_request");
+    assert.match(res.json.error.message, /GET/);
+    assert.match(res.headers.get("allow") || "", /GET/);
+  });
+
+  test("a body that is not JSON fails in JSON", async () => {
+    const res = await fetch(`${app.origin}/api/v1/work-orders`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${adminKey}`, "content-type": "application/json" },
+      body: "{not json",
+    });
+    assert.equal(res.status, 400);
+    const json = JSON.parse(await res.text());
+    assert.equal(json.error.type, "invalid_request");
+    assert.match(json.error.message, /JSON/);
+  });
+
   test("a missing record is a 404 that says which company it looked in", async () => {
     const res = await call("/api/v1/units/no-such-unit");
     assert.equal(res.status, 404);
@@ -465,19 +496,10 @@ describe("rate limiting", () => {
 
 /* --- the log -------------------------------------------------------------------
 
-   The log is written after the response is sent, on purpose: an audit row is
-   bookkeeping and a caller should not wait on it. That makes it a thing the
-   test has to wait for rather than assume, which is the honest shape — a test
-   that read it synchronously would be asserting an ordering the API does not
-   promise. */
-async function eventually(check, { tries = 40, every = 25 } = {}) {
-  for (let i = 0; i < tries; i++) {
-    const value = await check();
-    if (value) return value;
-    await new Promise((r) => setTimeout(r, every));
-  }
-  return null;
-}
+   The record is written before the answer goes out, so these read it
+   straight away. That ordering is the property being asserted: when a caller
+   is told their request succeeded, the record that it happened already
+   exists. */
 
 
 
@@ -486,9 +508,8 @@ describe("what the company can see afterwards", () => {
     await call("/api/v1/payments", {
       method: "POST", body: { lease_id: world.leaseId, amount: "1234.56", memo: "secret memo" } });
 
-    const post = await eventually(async () => (await all(
-      "SELECT * FROM api_request WHERE company_id = ? AND method = 'POST'",
-      world.companyId))[0]);
+    const post = await get(
+      "SELECT * FROM api_request WHERE company_id = ? AND method = 'POST'", world.companyId);
     assert.ok(post, "the call was never logged");
     const rows = await all(
       "SELECT * FROM api_request WHERE company_id = ?", world.companyId);
@@ -501,14 +522,23 @@ describe("what the company can see afterwards", () => {
     assert.doesNotMatch(dump, /1234/);
   });
 
+  test("the record exists by the time the caller is told it worked", async () => {
+    /* Written before the answer goes out. A company auditing API access
+       should not have to wonder whether the last row made it — and writing
+       after the response left those writes in flight while the next request
+       was already running, which Postgres reported as a deadlock. */
+    const before = (await all("SELECT id FROM api_request")).length;
+    const res = await call("/api/v1/properties");
+    assert.equal(res.status, 200);
+    const after = await all("SELECT id FROM api_request");
+    assert.equal(after.length, before + 1, "no waiting, no polling — it is already there");
+  });
+
   test("the key records that it was used", async () => {
     const { key } = await authenticate(`Bearer ${adminKey}`);
     await call("/api/v1/properties");
-    const row = await eventually(async () => {
-      const r = await get("SELECT * FROM api_key WHERE id = ?", key.id);
-      return r.last_used_at ? r : null;
-    });
-    assert.ok(row, "the key never recorded being used");
+    const row = await get("SELECT * FROM api_key WHERE id = ?", key.id);
+    assert.ok(row.last_used_at, "the key never recorded being used");
     assert.ok(Number(row.calls) >= 1);
   });
 
@@ -517,11 +547,8 @@ describe("what the company can see afterwards", () => {
       companyId: world.companyId, staffId: world.staff.leasing.id,
       name: "narrow", scopes: ["portfolio:read"] });
     await call("/api/v1/owners", { key });
-    const rows = await eventually(async () => {
-      const r = await all(
-        "SELECT * FROM api_request WHERE company_id = ? AND status = 403", world.companyId);
-      return r.length ? r : null;
-    });
-    assert.equal(rows?.length, 1, "a refusal is worth recording too");
+    const rows = await all(
+      "SELECT * FROM api_request WHERE company_id = ? AND status = 403", world.companyId);
+    assert.equal(rows.length, 1, "a refusal is worth recording too");
   });
 });

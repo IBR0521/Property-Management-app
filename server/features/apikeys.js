@@ -21,7 +21,7 @@
    only time. */
 import { all, get, one } from "../lib/db.js";
 import { stamp, human, humanStamp } from "../lib/dates.js";
-import { sendHtml, redirect, BadRequest } from "../lib/http.js";
+import { sendHtml, sendJson, redirect } from "../lib/http.js";
 import { html, attr } from "../lib/render.js";
 import { appPage, notice, empty } from "../views/layout.js";
 import { navCounts } from "../lib/counts.js";
@@ -57,6 +57,19 @@ export function registerApiKeys(router) {
 
     ctx.log.info("api key issued", { keyId: record.id, scopes });
     sendHtml(ctx.res, await page(ctx, { issued: { key, record } }));
+  });
+
+  /* The same specification, reachable with a session instead of a key.
+
+     `/api/v1/openapi.json` needs a key like everything else under /api, which
+     is right — and it makes the link on this page answer 401 in a browser,
+     which is not. An integrator reading the shape before they have been given
+     a key is the ordinary case, and the document is the shape of the API
+     rather than anything secret. */
+  router.get("/app/setup/api/openapi.json", async (ctx) => {
+    const { openApiSpec } = await import("../lib/api/openapi.js");
+    const { APP_BASE_URL } = await import("../lib/config.js");
+    sendJson(ctx.res, openApiSpec({ baseUrl: APP_BASE_URL || null }));
   });
 
   router.post("/app/setup/api/:id/revoke", async (ctx) => {
@@ -126,7 +139,11 @@ async function page(ctx, { issued = null, error = null }) {
               the same moment, and deactivating your account stops them.
               <br /><br />
               That is also why there is no "who holds this" field: a key held by somebody with
-              more access than the person making it would be a way to borrow their account.`)}
+              more access than the person making it would be a way to borrow their account.
+              <br /><br />
+              <b>Call the API from your own server, not from a browser.</b> There are no CORS
+              headers and there will not be: anything a browser can send, somebody can read out
+              of the page, and a key read out of a page is a key that has been given away.`)}
 
           <form method="post" action="/app/setup/api" class="formgrid" style="margin-top:1.25rem">
             <input type="hidden" name="_csrf" value="${ctx.csrf}" />
@@ -162,7 +179,7 @@ async function page(ctx, { issued = null, error = null }) {
 
       <div class="panel">
         <div class="panel__head"><h2>Keys</h2>
-          <p><a href="${API_PREFIX}/openapi.json">The specification</a> — it needs a key too</p>
+          <p><a href="/app/setup/api/openapi.json">The specification</a> — also at <code>${API_PREFIX}/openapi.json</code>, with a key</p>
         </div>
         <div class="panel__body panel__body--flush">
           ${keys.length ? html`<div class="tablewrap"><table class="data">

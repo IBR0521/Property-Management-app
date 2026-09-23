@@ -80,6 +80,7 @@ export function registerApi(router) {
       const ip = clientIp(ctx.req);
       let auth = null;
       let status = 500;
+      let body = null;
 
       try {
         auth = await authenticate(ctx.req.headers.authorization);
@@ -126,29 +127,44 @@ export function registerApi(router) {
 
         const out = result instanceof ApiResponse ? result : new ApiResponse(result);
         status = out.status;
-        sendJson(ctx.res, out.body, status);
+        body = out.body;
       } catch (err) {
         status = err instanceof ApiError ? err.status : 500;
-        const safe = err instanceof ApiError
-          ? { type: err.type, message: err.message }
-          : { type: "server_error",
-              message: "Something went wrong at our end. The request id below is in our log." };
+        body = {
+          error: err instanceof ApiError
+            ? { type: err.type, message: err.message }
+            : { type: "server_error",
+                message: "Something went wrong at our end. The request id below is in our log." },
+          request_id: ctx.requestId,
+        };
 
         if (status >= 500) ctx.log.error("api request failed", { path, err });
         else ctx.log.warn("api request rejected", { path, status, reason: err.message });
-
-        if (!ctx.res.headersSent) {
-          sendJson(ctx.res, { error: safe, request_id: ctx.requestId }, status);
-        }
-      } finally {
-        if (auth?.ok) {
-          await recordUse(auth.key.id, ip);
-          await logRequest(ctx, {
-            company_id: auth.key.company_id, key_id: auth.key.id,
-            method, route: path, status, ms: Date.now() - began, ip,
-          });
-        }
       }
+
+      /* Written before the answer goes out, not after.
+
+         The obvious shape is to respond and then log, so a caller does not
+         wait on bookkeeping. It costs two statements here and it buys a
+         property worth more than them: when a caller is told their request
+         succeeded, the record that it happened already exists. A company
+         auditing API access should not have to wonder whether the last row
+         made it.
+
+         It also removes a race that was real rather than theoretical. Writing
+         after the response meant those writes were still in flight while the
+         next request — or, in the suite, the next test's TRUNCATE — was
+         already running, and Postgres reported a deadlock. Found by a test
+         that asked for the log immediately. */
+      if (auth?.ok) {
+        await recordUse(auth.key.id, ip);
+        await logRequest(ctx, {
+          company_id: auth.key.company_id, key_id: auth.key.id,
+          method, route: path, status, ms: Date.now() - began, ip,
+        });
+      }
+
+      if (!ctx.res.headersSent) sendJson(ctx.res, body, status);
     });
   }
 

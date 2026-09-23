@@ -123,6 +123,22 @@ export async function attempt(delivery, {
     });
   }
 
+  /* Redirects are not followed, and that is a security decision rather than
+     a missing feature. Every address this URL resolves to was checked a
+     moment ago; a redirect is a new URL, chosen by the endpoint, that has had
+     none of that done to it — following one would hand the endpoint a way to
+     point this application at 169.254.169.254 after the check had passed.
+
+     Retrying would not help either, so it stops and says what to do. */
+  if (code >= 300 && code < 400) {
+    await noteFailure(endpoint, { fatal: false });
+    return await finish(delivery, {
+      status: "failed", attempts, at, responseStatus: code, body,
+      error: `the endpoint answered ${code}. Redirects are not followed — a redirect is a `
+        + "new address that has not been checked — so point the endpoint at its final URL.",
+    });
+  }
+
   /* A considered refusal. Retrying it for six hours helps nobody. */
   if (code >= 400 && code < 500 && code !== 408 && code !== 429) {
     await noteFailure(endpoint, { fatal: false });

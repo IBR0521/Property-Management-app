@@ -193,10 +193,29 @@ export async function handle(req, res) {
     /* --- routing --------------------------------------------------------- */
     const hit = router.match(req.method, path);
     if (!hit) {
+      /* An API answers in JSON even when the answer is "there is nothing
+         here". A client that parses every response has to parse this one
+         too, and handing it `Not found` as text/plain is how an integration
+         reports "unexpected token N" instead of a 404. */
+      const underApi = path === "/api" || path.startsWith("/api/");
       const others = router.methodsFor(path);
       if (others.length) {
+        if (underApi) {
+          res.setHeader("Allow", others.join(", "));
+          return sendJson(res, {
+            error: { type: "invalid_request",
+              message: `That path answers ${others.join(" and ")}, not ${req.method}.` },
+            request_id: requestId,
+          }, 405);
+        }
         res.writeHead(405, { Allow: others.join(", "), "Content-Type": "text/plain" });
         return res.end("Method not allowed");
+      }
+      if (underApi) {
+        return sendJson(res, {
+          error: { type: "not_found", message: "There is no such endpoint." },
+          request_id: requestId,
+        }, 404);
       }
       return sendText(res, "Not found", 404);
     }
@@ -376,6 +395,22 @@ export async function handle(req, res) {
       : status === 404
       ? "We could not find that. The link may be old, or the record may have been removed."
       : "Something went wrong at our end. Try again, or call us if it keeps happening.";
+
+    /* Under /api the answer is JSON whatever the request asked for, and in
+       the shape every other API error uses — a client should not have to
+       handle two error formats depending on how far the request got before it
+       failed. An unparseable JSON body fails here rather than in a handler,
+       and that is exactly the case an integrator hits first. */
+    const underApi = path === "/api" || path.startsWith("/api/");
+    if (underApi) {
+      const type = status === 400 ? "invalid_request"
+        : status === 401 ? "unauthenticated"
+        : status === 403 ? "forbidden"
+        : status === 404 ? "not_found"
+        : status === 413 ? "invalid_request"
+        : "server_error";
+      return sendJson(res, { error: { type, message: safe }, request_id: requestId }, status);
+    }
 
     const wantsJson = (req.headers.accept || "").includes("application/json");
     if (wantsJson) return sendJson(res, { error: safe, requestId }, status);

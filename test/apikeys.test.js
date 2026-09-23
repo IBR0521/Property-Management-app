@@ -183,6 +183,29 @@ describe("who may reach this page at all", () => {
     assert.equal((await all("SELECT id FROM api_key")).length, 0);
   });
 
+  test("the specification is readable with a session, not only with a key", async () => {
+    /* An integrator reading the shape before anybody has given them a key is
+       the ordinary case, and a link on this page that answers 401 in a
+       browser is a link that does not work. */
+    const res = await agent.get("/app/setup/api/openapi.json");
+    assert.equal(res.status, 200);
+    const spec = JSON.parse(await res.text());
+    assert.equal(spec.openapi, "3.1.0");
+    assert.ok(spec.paths["/units"]);
+
+    const { body } = await agent.text("/app/setup/api");
+    assert.match(body, /\/app\/setup\/api\/openapi\.json/);
+  });
+
+  test("and a signed-out visitor gets neither", async () => {
+    const stranger = client(app.origin);
+    const viaApp = await stranger.get("/app/setup/api/openapi.json");
+    assert.equal(viaApp.status, 303, "the app sends them to sign in");
+
+    const viaApi = await fetch(`${app.origin}/api/v1/openapi.json`);
+    assert.equal(viaApi.status, 401);
+  });
+
   test("it is linked from setup", async () => {
     const { body } = await agent.text("/app/setup");
     assert.match(body, /\/app\/setup\/api/);

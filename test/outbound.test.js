@@ -380,6 +380,22 @@ describe("delivering", () => {
     assert.match(out.error, /refusal rather than a wobble/);
   });
 
+  test("a redirect is not followed, because a redirect has not been checked", async () => {
+    /* Every address the URL resolved to was vetted a moment earlier. A
+       redirect is a new URL chosen by the endpoint that has had none of that
+       done to it, so following one would hand the endpoint a way round the
+       whole check. */
+    const e = await endpoint();
+    const d = await delivery(e.id);
+    const { send, calls } = recorder({ status: 302, body: "" });
+
+    const out = await attempt(d, { send, lookup: publicLookup });
+    assert.equal(out.status, "failed");
+    assert.equal(calls.length, 1, "the first request went, the redirect did not");
+    assert.match(out.error, /Redirects are not followed/);
+    assert.match(out.error, /final URL/, "and says what to do about it");
+  });
+
   test("a 429 is a wobble, not a refusal", async () => {
     const e = await endpoint();
     const d = await delivery(e.id);
