@@ -195,17 +195,31 @@ export async function reverseJournal(journalId, { companyId, by = "system", memo
 /* --- reporting ------------------------------------------------------------ */
 
 export async function trialBalance(companyId, { from, to } = {}) {
+  /* The date test is inside the SUM and not on the join, and that is the whole
+     correctness of this query.
+
+     It used to sit on `LEFT JOIN journal ... AND j.date <= ?`. Because the
+     split is joined from the account, a split whose journal fell outside the
+     range still produced a row — the journal came back NULL and the split's
+     own debit and credit were summed anyway. The filter did nothing at all:
+     the screen offered From and To, said "filtered" underneath them, and
+     returned the all-time figure. Filtering to 1990 on seeded data returned
+     every penny of 2026. */
   const rows = await all(
     `SELECT a.id, a.code, a.name, a.type, a.normal_balance, a.is_trust,
-            COALESCE(SUM(s.debit_cents), 0)::bigint  AS debits,
-            COALESCE(SUM(s.credit_cents), 0)::bigint AS credits
+            COALESCE(SUM(CASE WHEN (?::text IS NULL OR j.date >= ?)
+                               AND (?::text IS NULL OR j.date <= ?)
+                              THEN s.debit_cents ELSE 0 END), 0)::bigint  AS debits,
+            COALESCE(SUM(CASE WHEN (?::text IS NULL OR j.date >= ?)
+                               AND (?::text IS NULL OR j.date <= ?)
+                              THEN s.credit_cents ELSE 0 END), 0)::bigint AS credits
        FROM account a
        LEFT JOIN journal_split s ON s.account_id = a.id
        LEFT JOIN journal j ON j.id = s.journal_id
-        AND (?::text IS NULL OR j.date >= ?) AND (?::text IS NULL OR j.date <= ?)
       WHERE a.company_id = ?
       GROUP BY a.id, a.code, a.name, a.type, a.normal_balance, a.is_trust
       ORDER BY a.code`,
+    from || null, from || null, to || null, to || null,
     from || null, from || null, to || null, to || null, companyId);
 
   return rows.map((r) => {

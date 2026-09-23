@@ -247,3 +247,93 @@ describe("the accounts the payment paths need", () => {
     assert.equal(paid.type, "expense");
   });
 });
+
+/* --- the period filter --------------------------------------------------- */
+
+describe("the trial balance's date filter", () => {
+  /* It did not filter. The condition sat on the journal join — `LEFT JOIN
+     journal j ON j.id = s.journal_id AND j.date <= ?` — and because the split
+     is reached from the account, a split whose journal fell outside the range
+     still contributed its own debit and credit while the journal came back
+     NULL. So the screen offered From and To, printed "filtered" underneath
+     them, and returned the all-time figure.
+
+     Found while building the trust reconciliation, by copying the same query
+     shape and watching a test fail. Every report in the reporting phase reads
+     a period, so it is worth a test of its own rather than a fix nobody can
+     see. */
+  test("a range that excludes everything returns nothing", async () => {
+    const { trialBalance, postJournal } = await import("../server/features/accounting.js");
+    const world = await f.makeWorld({ name: "Filter Co" });
+
+    await postJournal({
+      companyId: world.companyId, date: "2026-06-15", memo: "in range",
+      splits: [
+        { code: "1010", debit: 50000, ownerId: world.ownerId },
+        { code: "2200", credit: 50000, ownerId: world.ownerId },
+      ],
+    });
+
+    const allTime = await trialBalance(world.companyId);
+    assert.equal(allTime.reduce((n, r) => n + r.debits, 0), 50000);
+
+    const before = await trialBalance(world.companyId, { from: "1990-01-01", to: "1990-12-31" });
+    assert.equal(before.reduce((n, r) => n + r.debits, 0), 0,
+      "a filter that returns the all-time figure is not a filter");
+    assert.equal(before.reduce((n, r) => n + r.credits, 0), 0);
+  });
+
+  test("a range that includes only part of the book returns that part", async () => {
+    const { trialBalance, postJournal } = await import("../server/features/accounting.js");
+    const world = await f.makeWorld({ name: "Partial Co" });
+
+    for (const [date, cents] of [["2026-01-10", 10000], ["2026-06-10", 20000], ["2026-11-10", 40000]]) {
+      await postJournal({
+        companyId: world.companyId, date, memo: `posted ${date}`,
+        splits: [
+          { code: "1010", debit: cents, ownerId: world.ownerId },
+          { code: "2200", credit: cents, ownerId: world.ownerId },
+        ],
+      });
+    }
+
+    const firstHalf = await trialBalance(world.companyId, { from: "2026-01-01", to: "2026-06-30" });
+    assert.equal(firstHalf.reduce((n, r) => n + r.debits, 0), 30000);
+
+    const fromOnly = await trialBalance(world.companyId, { from: "2026-06-01" });
+    assert.equal(fromOnly.reduce((n, r) => n + r.debits, 0), 60000);
+
+    const toOnly = await trialBalance(world.companyId, { to: "2026-06-30" });
+    assert.equal(toOnly.reduce((n, r) => n + r.debits, 0), 30000);
+  });
+
+  test("a filtered trial balance still balances", async () => {
+    /* Summing one side inside a CASE and not the other would be a new and
+       much worse bug than the one it replaced. */
+    const { trialBalance, postJournal } = await import("../server/features/accounting.js");
+    const world = await f.makeWorld({ name: "Balanced Co" });
+
+    await postJournal({
+      companyId: world.companyId, date: "2026-03-01", memo: "one",
+      splits: [
+        { code: "1010", debit: 12345, ownerId: world.ownerId },
+        { code: "2200", credit: 12345, ownerId: world.ownerId },
+      ],
+    });
+    await postJournal({
+      companyId: world.companyId, date: "2026-09-01", memo: "two",
+      splits: [
+        { code: "1010", debit: 67890, ownerId: world.ownerId },
+        { code: "2200", credit: 67890, ownerId: world.ownerId },
+      ],
+    });
+
+    for (const range of [{}, { from: "2026-01-01" }, { to: "2026-06-30" },
+                         { from: "2026-02-01", to: "2026-04-01" }]) {
+      const rows = await trialBalance(world.companyId, range);
+      const dr = rows.reduce((n, r) => n + r.debits, 0);
+      const cr = rows.reduce((n, r) => n + r.credits, 0);
+      assert.equal(dr, cr, `out of balance for ${JSON.stringify(range)}`);
+    }
+  });
+});
