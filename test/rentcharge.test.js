@@ -174,16 +174,33 @@ describe("the charge", () => {
     assert.equal(await balanceOf(world.companyId, "2200"), 0, "nothing is owed until it arrives");
   });
 
-  test("it is dated the end of the period it covers, not the day it ran", async () => {
-    /* A catch-up run in November must not move three months of charges into
-       November. */
+  test("it is dated the start of the period, not the day it ran", async () => {
+    /* It used to be the last day of the period, which put a charge for
+       September on the 30th when the rent was due on the 1st — so an aged
+       receivables report would not see it until the month was nearly over
+       and would then read it as already a month late.
+
+       A catch-up run still dates each charge inside its own period, which
+       was the original point. */
+    await run("UPDATE lease SET rent_due_day = ? WHERE id = ?", 1, world.leaseId);
     const res = await chargeRent(world.companyId, { period: "2026-06" });
-    assert.equal(res.date, "2026-06-30");
+    assert.equal(res.firstDue, "2026-06-01");
 
     const j = await get(
       "SELECT date, source_type, source_id FROM journal WHERE source_type = 'rent_charge'");
-    assert.equal(j.date, "2026-06-30");
+    assert.equal(j.date, "2026-06-01");
     assert.equal(j.source_id, `${world.leaseId}:2026-06`);
+  });
+
+  test("a lease due on the fifteenth is still posted on the first", async () => {
+    /* Posted at the start of the period, due on the lease's own rent day.
+       Keeping those apart is what lets a report say rent is charged and not
+       yet due, which for the first two weeks of the month it is. */
+    await run("UPDATE lease SET rent_due_day = ? WHERE id = ?", 15, world.leaseId);
+    const res = await chargeRent(world.companyId, { period: "2026-06" });
+    const j = await get("SELECT date FROM journal WHERE source_type = 'rent_charge'");
+    assert.equal(j.date, "2026-06-01", "posted");
+    assert.equal(res.firstDue, "2026-06-15", "due");
   });
 
   test("it writes nothing to the owner's ledger", async () => {

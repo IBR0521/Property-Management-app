@@ -29,7 +29,7 @@
    moved. A charge is not money that moved. Writing one would inflate every
    owner statement by the amount charged on top of the amount received. */
 import { all, get, one } from "./db.js";
-import { today, monthKey, monthRange } from "./dates.js";
+import { today, monthKey, monthRange, dueDateFor } from "./dates.js";
 import { usd } from "./money.js";
 import { log } from "./logger.js";
 import { prorate, occupancyIn, basisOf } from "./proration.js";
@@ -71,6 +71,9 @@ export async function planCharges(companyId, { period = monthKey(today()) } = {}
     if (!charge.charge || charge.cents <= 0) continue;
 
     rows.push({
+      /* When it falls due, from the lease's own rent day. Computed here so
+         the screen, the dry run and the posting all say the same date. */
+      dueDate: dueDateFor(period, lease.rent_due_day || 1),
       leaseId: lease.id, ownerId: lease.owner_id, propertyId: lease.property_id,
       unitId: lease.unit_id, where: `${lease.line1}${lease.label ? ` unit ${lease.label}` : ""}`,
       rentCents: lease.rent_cents,
@@ -105,18 +108,35 @@ async function alreadyCharged(companyId, leaseId, period) {
 export async function chargeRent(companyId, { period = monthKey(today()), postedBy = "system" } = {}) {
   const { postJournal, ACCT, PeriodClosed } = await import("../features/accounting.js");
   const plan = await planCharges(companyId, { period });
-  const { end } = monthRange(`${period}-01`);
 
-  /* Dated the last day of the period it covers, not the day the job happened
-     to run. A charge for September belongs in September, and a catch-up run in
-     November must not move three months of income into November. */
-  const date = end;
+  /* Dated the first day of the period it covers — never the day the job
+     happened to run, and not the day it falls due either.
+
+     It was the last day of the period, which put a charge for September on
+     the 30th when the rent was due on the 1st: an aged receivables report
+     reads a charge as arising when it is dated, so September's rent sat
+     outside the report until the month was nearly over and then appeared
+     already a month late.
+
+     Dating it on the due date instead fixed that and broke something
+     quieter — there was then no moment at which rent was charged and not
+     yet due, so the Current bucket could never hold anything. Rent due on
+     the fifteenth is genuinely current for the first two weeks of the
+     month, and a report that cannot say so is hiding money that is going
+     to arrive.
+
+     The period's first day gets both: the income lands in the right month
+     whenever the job runs, and the due date is derived from the lease's own
+     rent day rather than from when the charge happened to be posted. Both
+     of these were found by building the aging, not by reading this. */
+  const { start: periodStart } = monthRange(`${period}-01`);
 
   let charged = 0, skipped = 0, closed = 0, cents = 0, applied = 0;
 
   for (const row of plan.rows) {
     if (row.already) { skipped += 1; continue; }
 
+    const date = periodStart;
     const memo = row.prorated
       ? `Rent ${period} — ${row.where} (${row.explain}, ${row.basis})`
       : `Rent ${period} — ${row.where}`;
@@ -161,7 +181,14 @@ export async function chargeRent(companyId, { period = monthKey(today()), posted
     }
   }
 
-  return { period, date, charged, skipped, closed, cents, applied, basis: plan.basis };
+  /* No single date any more: each charge falls due on its own lease's rent
+     day. The range is reported instead, which is what a caller can actually
+     use. */
+  const dates = plan.rows.map((r) => r.dueDate).sort();
+  return {
+    period, charged, skipped, closed, cents, applied, basis: plan.basis,
+    firstDue: dates[0] || null, lastDue: dates.at(-1) || null,
+  };
 }
 
 /* Settling a fresh charge out of money the tenant already paid.
