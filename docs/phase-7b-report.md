@@ -1,6 +1,6 @@
 # Phase 7b — A public API and outbound webhooks. What was built, and what it found.
 
-Four commits, `9a856e0` to `d0fc98c`. Four test files added; **1584 green**, from 1452 at the end of Phase 7a.
+Four commits, `9a856e0` to `aaae2ee`. Four test files added; **1584 green**, from 1452 at the end of Phase 7a.
 
 Both halves are the same thing from two directions: somebody else's software
 asking this application questions, and this application telling somebody
