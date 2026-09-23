@@ -329,6 +329,32 @@ describe("the panel on the application", () => {
     assert.match(body, /score 612 recorded on the notice/);
   });
 
+  test("an outstanding notice is on the list, not only inside the record", async () => {
+    /* A compliance obligation visible only if somebody happens to open the
+       application is not much of a reminder. */
+    await setUpAgency();
+    const a = await application();
+    await applicant.post(`/a/${a.token}/consent`,
+      { typed_name: "Ravi Bhatt" }, { csrfFrom: `/a/${a.token}/consent` });
+    await agent.post(`/app/applications/${a.id}/screening/order`, {},
+      { csrfFrom: `/app/applications/${a.id}` });
+    const request = await get("SELECT * FROM screening_request WHERE application_id = ?", a.id);
+    await agent.post(`/app/applications/${a.id}/screening/${request.id}/report`,
+      { summary: "Several judgements, none of them satisfied." },
+      { csrfFrom: `/app/applications/${a.id}` });
+
+    let list = await agent.text("/app/applications");
+    assert.doesNotMatch(list.body, /adverse\s+action notice due/,
+      "nothing is due until a decision is made");
+
+    await agent.post(`/app/applications/${a.id}/decide`,
+      { status: "declined", reason: "Judgements outstanding." },
+      { csrfFrom: `/app/applications/${a.id}` });
+
+    list = await agent.text("/app/applications");
+    assert.match(list.body, /adverse\s+action notice due/);
+  });
+
   test("saying a score was used without giving it is refused", async () => {
     await setUpAgency();
     const a = await application({ status: "declined" });

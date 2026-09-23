@@ -270,7 +270,16 @@ export function registerApplications(router) {
     const rows = await all(
       `SELECT a.*, u.label, p.line1,
               (SELECT COUNT(*) FROM application_doc d WHERE d.application_id = a.id) AS docs,
-              (SELECT COUNT(*) FROM application_check c WHERE c.application_id = a.id AND c.result = 'pending') AS pending
+              (SELECT COUNT(*) FROM application_check c WHERE c.application_id = a.id AND c.result = 'pending') AS pending,
+              /* A decline that a consumer report contributed to needs a
+                 written notice, and a compliance obligation that is only
+                 visible if somebody happens to open the record is not much of
+                 a reminder. Asked here so it is on the list. */
+              (a.status = 'declined'
+               AND EXISTS (SELECT 1 FROM screening_request r
+                            WHERE r.application_id = a.id AND r.status = 'received')
+               AND NOT EXISTS (SELECT 1 FROM adverse_action n
+                                WHERE n.application_id = a.id)) AS notice_due
          FROM application a
          LEFT JOIN unit u ON u.id = a.unit_id
          LEFT JOIN property p ON p.id = u.property_id
@@ -298,7 +307,9 @@ export function registerApplications(router) {
                 <td>${human(a.received_at.slice(0, 10))}</td>
                 <td class="shrink">${a.docs}</td>
                 <td class="shrink">${a.pending ? html`<span class="chip" data-tone="warn">${a.pending}</span>` : html`<span class="chip" data-tone="ok">0</span>`}</td>
-                <td class="shrink"><span class="chip"${attr("data-tone", STATUS_TONE[a.status])}>${a.status}</span></td>
+                <td class="shrink"><span class="chip"${attr("data-tone", STATUS_TONE[a.status])}>${a.status}</span>
+                  ${a.notice_due ? html`<span class="cellsub" style="color:var(--danger)">adverse
+                    action notice due</span>` : ""}</td>
                 <td class="shrink"><a class="pill outline sm" href="/app/applications/${a.id}">Open</a></td>
               </tr>`)}</tbody>
           </table></div>` : empty("No applications", "The public form is at /apply.")}
