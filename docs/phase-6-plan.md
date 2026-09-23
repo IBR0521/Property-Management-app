@@ -112,12 +112,36 @@ correctly.
 Rent is charged on a schedule, per lease per period, and the charge is a real
 journal.
 
+**Corrected after you asked about the balance sheets.** My first version of this
+had the charge credit `2200 Owner funds held`. That is wrong, and wrong in a way
+that would have been permanent: `1300` is a **non-trust** asset and `2200` is a
+**trust** liability, so every unpaid charge would push trust liabilities above
+trust assets and the three-way reconciliation would fail by exactly the arrears,
+every day, by design.
+
+The real point underneath it: **you do not owe an owner money you have not
+collected.** Charging rent creates a claim on a tenant, not an obligation to an
+owner. So the charge lands on a new non-trust liability, and only receipt moves
+it into trust:
+
 ```
-  rent charged        Dr 1300 Tenant receivable   Cr 2200 Owner funds held
-  rent received       Dr 1010 Trust cash          Cr 1300 Tenant receivable
-  management fee      Dr 2200                     Cr 4200
-  owner repair        Dr 2200                     Cr 1010
+  rent charged     Dr 1300 Tenant receivable      Cr 2400 Rent due to owners
+                      (asset, non-trust)             (liability, non-trust)
+
+  rent received    Dr 1010 Trust cash             Cr 1300 Tenant receivable
+                   Dr 2400 Rent due to owners     Cr 2200 Owner funds held
+                                                     (trust liability)
+
+  management fee   Dr 2200                        Cr 4200
+  owner repair     Dr 2200                        Cr 1010
 ```
+
+Receipt is one four-split journal, balanced on both sides, so the two halves
+can never come apart. `2400` is a new account and the code is free.
+
+The effect is that the trust reconciliation covers only money that actually
+exists — trust cash and payments in transit against deposits, owner funds and
+prepaid rent — and arrears live outside it, which is where they belong.
 
 **Gains:** tenants have a real running balance, late fees attach to a charge
 rather than to a computed expectation, and AR aging is a balance-sheet number
@@ -128,24 +152,56 @@ accountant reviewing your books will expect.
 proration, mid-period move-ins and move-outs, and write-offs. More moving
 parts, and the parts are the ones that generate support tickets.
 
-### Two balance sheets either way
+### One balance sheet, with client funds restricted inside it
 
-Your chart already flags `is_trust` on five accounts. Whichever option you
-pick, I would report **two** balance sheets rather than one:
+An earlier draft of this plan proposed two balance sheets, a trust one and a
+company one. That was wrong and you were right to question it.
 
-- **Trust** — client funds. Must reconcile three ways against the bank.
-- **Company** — your own business: fee income, your costs, your cash.
+A balance sheet covers one reporting entity. You are the account holder at the
+bank, so trust cash is genuinely your asset with an exactly offsetting
+liability to your clients — it belongs **on** your balance sheet, not beside
+it. Splitting it in two would mean publishing a statement of a legal entity
+that does not exist.
 
-Mixing them is how a manager ends up believing money in the trust account is
-theirs, and it is the single most common way a PM firm gets into regulatory
-trouble.
+What regulators actually require separately is not a second balance sheet; it
+is the **trust reconciliation**, which is already its own report in your
+roadmap and is a different kind of statement altogether — it proves that three
+independent records agree, rather than that assets equal liabilities.
 
-**My recommendation: Option B, plus the two balance sheets.** Your roadmap
-lists AR aging as a first-class report and lists "the P&L and balance sheet
-must tie out to the trial balance" as the phase's test. Under Option A that
-test passes while AR aging sits outside the books entirely, which is a worse
-place to end up than a slightly larger job now. But it is your call, and A is
-defensible.
+So: one balance sheet, with a clearly marked restricted section.
+
+```
+  ASSETS
+    Unrestricted
+      1000  Operating cash                     your money
+    Restricted — client funds
+      1010  Trust cash
+      1020  Payments in transit
+    Receivable
+      1300  Tenant receivable                  owed by tenants
+
+  LIABILITIES
+    Restricted — owed to clients
+      2100  Tenant deposits held
+      2200  Owner funds held
+      2300  Prepaid rent
+    Company
+      2000  Accounts payable
+      2400  Rent due to owners (uncollected)
+
+  EQUITY
+      3000  Retained earnings
+```
+
+The restricted lines net to the fee float — money that is yours but still
+sitting in the trust account waiting to be swept. On your seeded data that is
+**$759.15**, and being able to name that number is the whole point of
+segregating rather than splitting.
+
+**My recommendation: Option B, one balance sheet, and the correcting journal.**
+Your roadmap lists AR aging as a first-class report and makes "the P&L and
+balance sheet must tie out to the trial balance" the phase's test. Under
+Option A that test passes while AR aging sits outside the books entirely.
 
 ### And what to do about the data already there
 
@@ -174,7 +230,7 @@ that makes every report from day one usable.
 | Rent roll, as of a date | subledger |
 | Delinquency / AR aging | Option B: yes. Option A: no, and it says so |
 | P&L — company, and by property / owner / portfolio / period | yes |
-| Balance sheet — trust and company | yes |
+| Balance sheet — one, with client funds restricted inside it | yes |
 | Cash flow | yes |
 | General ledger detail | yes, it *is* the book |
 | **Three-way trust reconciliation** — bank, book, tenant/owner ledgers | the point of it |
@@ -248,10 +304,10 @@ plus a one-off correcting journal.
 
 ## Migrations
 
-    034_reports.sql   saved_report, report_schedule, and an index on
-                      journal_split (property_id) — there is one on owner_id
-                      and none on property, and a P&L by property scans
-                      without it
+    034_reports.sql   saved_report, report_schedule, the 2400 account, and
+                      an index on journal_split (property_id) — there is one
+                      on owner_id and none on property, and a P&L by
+                      property scans without it
 
 ---
 
