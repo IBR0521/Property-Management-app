@@ -30,6 +30,11 @@ export const ACCT = {
   DEPOSITS_HELD: "2100",
   OWNER_FUNDS: "2200",
   PREPAID_RENT: "2300",
+  /* Rent charged and not yet collected. Non-trust on purpose: you do not
+     owe an owner money you have not received, and crediting a trust
+     liability here would make the trust reconciliation fail by the
+     arrears, for ever. */
+  RENT_DUE_OWNERS: "2400",
   RETAINED: "3000",
   OPENING_CONVERSION: "3100",
   RENT_INCOME: "4000",
@@ -60,6 +65,7 @@ const DEFAULT_CHART = [
   [ACCT.DEPOSITS_HELD, "Tenant deposits held", "liability", "credit", 1],
   [ACCT.OWNER_FUNDS, "Owner funds held", "liability", "credit", 1],
   [ACCT.PREPAID_RENT, "Prepaid rent", "liability", "credit", 1],
+  [ACCT.RENT_DUE_OWNERS, "Rent due to owners — uncollected", "liability", "credit", 0],
   [ACCT.RETAINED, "Retained earnings", "equity", "credit", 0],
   [ACCT.OPENING_CONVERSION, "Opening balance conversion", "equity", "credit", 0],
   [ACCT.RENT_INCOME, "Rent income", "income", "credit", 0],

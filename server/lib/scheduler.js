@@ -23,6 +23,7 @@ import { log } from "./logger.js";
 import { runAutopay, paidForPeriod } from "./payments.js";
 import { prunePortalSessions } from "./magiclink.js";
 import { pruneDeadSubscriptions } from "./push/index.js";
+import { runRentCharges } from "./rentcharge.js";
 import { todayIn } from "./timezone.js";
 
 const EVERY_MS = 10 * 60 * 1000;
@@ -83,9 +84,18 @@ export async function tick(reason = "manual") {
     autopayCharged: 0,
     autopaySkipped: 0,
     autopayFailed: 0,
+    rentCharged: 0,
+    rentChargesSkipped: 0,
+    rentChargesClosed: 0,
     delivered: 0,
     sessionsPruned: 0,
   };
+
+  /* Rent is charged before anything reads a balance. Autopay, the delinquency
+     pass and the late-fee sweep all ask what a tenant owes; running the charge
+     after them would have every one of them judging a month that had not been
+     billed yet. */
+  Object.assign(out, await runRentCharges());
 
   for (const company of await all("SELECT * FROM company")) {
     Object.assign(out, sumInto(out, await generateObligations(company)));

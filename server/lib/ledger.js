@@ -27,11 +27,21 @@ import { stamp } from "./dates.js";
    Every pair is (debit, credit) and both sides name an account code from
    features/accounting.js. */
 const POSTINGS = {
-  /* Rent charged to a tenant. The owner is owed it before it arrives, so the
-     receivable rises and income is recognised. */
+  /* Rent charged to a tenant.
+
+     Charges are posted per lease per period by `rentcharge.js`, from the
+     lease, not typed against an owner — so nothing in the application reaches
+     this any more. The rule stays, and stays correct, because `postMoney`
+     writes a ledger entry with no journal behind it when a kind has no
+     posting, and a silent parity break is a far worse outcome than a rule
+     nobody calls.
+
+     It credits 2400 and not 2200. 2200 is a trust liability, and saying you
+     owe an owner money you have not collected makes the trust reconciliation
+     fail by exactly the arrears, for ever. */
   rent_charge: (amount) => [
     { code: "1300", debit: amount, memo: "rent charged" },
-    { code: "4000", credit: amount, memo: "rent income" },
+    { code: "2400", credit: amount, memo: "owed to owner when collected" },
   ],
 
   /* Rent received. Client money, so it lands in trust cash and becomes owed

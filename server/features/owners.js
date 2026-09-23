@@ -237,7 +237,6 @@ export function registerOwners(router) {
                   <label for="kind">Kind</label>
                   <select id="kind" name="kind" required>
                     <option value="rent_payment">Rent received</option>
-                    <option value="rent_charge">Rent charged</option>
                     <option value="expense">Expense</option>
                     <option value="management_fee">Management fee</option>
                     <option value="other">Other</option>
@@ -330,7 +329,11 @@ export function registerOwners(router) {
     const cid = ctx.staff.company_id;
     const owner = await one("SELECT * FROM owner WHERE id = ? AND company_id = ?", ctx.params.id, cid);
     const kind = String(ctx.fields.kind || "");
-    const allowed = ["rent_payment", "rent_charge", "expense", "management_fee", "other"];
+    /* No "rent_charge" here. Charges are posted per lease per period from
+       the lease itself, with the proration and the period recorded; one typed
+       against an owner has neither, and would double with the scheduled
+       one. */
+    const allowed = ["rent_payment", "expense", "management_fee", "other"];
     if (!allowed.includes(kind)) throw new BadRequest("Pick a kind of entry.");
     const magnitude = parseMoney(ctx.fields.amount);
     if (magnitude == null) throw new BadRequest("That amount is not a number.");

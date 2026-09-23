@@ -133,12 +133,10 @@ describe("a book posted the way the plan proposes", () => {
      receipt. The four-split receipt is the shape that keeps the two halves
      from coming apart. */
   async function soundBook() {
-    await insert("account", {
-      id: id(), company_id: world.companyId, code: "2400",
-      name: "Rent due to owners", type: "liability", normal_balance: "credit",
-      is_trust: 0, active: 1, created_at: stamp(),
-    });
-
+    /* 2400 comes from the chart now rather than being made here. It was
+       hand-inserted when this test was written, before the account existed —
+       which is exactly the drift the chart test guards against, caught the
+       other way round. */
     await post("rent charged", [
       { code: "1300", debit: RENT, ownerId: world.ownerId, propertyId: world.propertyId },
       { code: "2400", credit: RENT, ownerId: world.ownerId, propertyId: world.propertyId },
