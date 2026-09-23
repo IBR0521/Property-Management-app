@@ -524,6 +524,13 @@ export function registerOwners(router) {
     await tx(async () => {
       await update("owner_approval", a.id, { status: decision, decided_at: stamp(), decided_note: note });
       await update("work_order", a.work_order_id, { status: decision === "approved" ? "assigned" : "triaged" });
+
+      const [{ emit }, { approvalPayload }] = await Promise.all([
+        import("../lib/webhooks/events.js"), import("../lib/webhooks/payloads.js")]);
+      await emit({
+        companyId: a.company_id, event: "owner_approval.decided",
+        data: await approvalPayload(a.id),
+      });
       await event(a.work_order_id, owner.name,
         decision === "approved" ? "owner_approved" : "owner_declined",
         `${usd(a.amount_cents)}${note ? ` — ${note}` : ""}`, 0);

@@ -142,6 +142,13 @@ export const TABLES = {
   saved_report: { by: "company" },
   report_schedule: { by: "company" },
   audit_log: { by: "company" },
+  /* Where a company's data is sent, and every attempt to send it. Theirs:
+     "did you send it" is a question they should be able to settle from their
+     own export. The signing secret is not — it is a credential, and it is one
+     we hold rather than one they chose. */
+  webhook_endpoint: { by: "company", redact: ["secret"] },
+  webhook_delivery: { by: "company" },
+
   api_key: {
     by: "company",
     /* The record that a key exists — what it is called, what it may do, when

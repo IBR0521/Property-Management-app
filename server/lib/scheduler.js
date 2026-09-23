@@ -15,6 +15,8 @@ import { usd } from "./money.js";
 import { pruneSessions } from "./auth.js";
 import { prune as pruneRateHits } from "./ratelimit.js";
 import { pruneImportFiles } from "./import/commit.js";
+import { pruneApiRate, pruneApiLog } from "./api/keys.js";
+import { sendDue } from "./webhooks/send.js";
 import { DELIVERY_MODE, APP_BASE_URL } from "./config.js";
 import { drains, reachesRecipients } from "./delivery/mode.js";
 import { deliver } from "./delivery/index.js";
@@ -93,6 +95,8 @@ export async function tick(reason = "manual") {
     delivered: 0,
     sessionsPruned: 0,
     importFilesPruned: 0,
+    webhooksAttempted: 0,
+    webhooksDelivered: 0,
   };
 
   /* Rent is charged before anything reads a balance. Autopay, the delinquency
@@ -130,6 +134,15 @@ export async function tick(reason = "manual") {
   /* An abandoned import still holds a customer's whole portfolio in plain
      text, waiting for somebody who is not coming back. */
   out.importFilesPruned = await pruneImportFiles();
+  out.apiRatePruned = await pruneApiRate();
+  out.apiLogPruned = await pruneApiLog();
+
+  /* Last of the things that reach outwards, for the same reason the report
+     schedules are: everything a webhook describes has already happened this
+     tick. Nothing sends inside the request that caused it — a slow endpoint
+     must not make raising a work order slow, and a broken one must not make
+     it fail. */
+  Object.assign(out, await sendDue());
 
   /* Scheduled reports, last among the jobs that send. Everything they read
      has already run this tick, so a report that goes out at six in the

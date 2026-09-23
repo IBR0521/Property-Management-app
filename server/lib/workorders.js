@@ -113,6 +113,18 @@ export async function raiseWorkOrder({
       const result = await autoRoute({ company, woId, cat });
       routed = result.routed;
     }
+
+    /* Queued inside the same transaction as the job it describes, so either
+       the work order exists and the webhook is queued or neither happened.
+       Sending after the commit loses events whenever the process dies in
+       between, and loses them silently. */
+    const [{ emit }, { workOrderPayload }] = await Promise.all([
+      import("./webhooks/events.js"), import("./webhooks/payloads.js")]);
+    await emit({
+      companyId, event: "work_order.raised",
+      data: await workOrderPayload(woId, level === "emergency"
+        ? { emergency: { routed_to_a_contractor: false } } : {}),
+    });
   });
 
   let emergency = null;

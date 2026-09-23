@@ -26,7 +26,7 @@
 
    The type, the message, and the request id — nothing about which half of
    the credential was right. Everything more specific is in the log. */
-import { all, get, run, insert } from "../lib/db.js";
+import { all, get, insert } from "../lib/db.js";
 import { id } from "../lib/ids.js";
 import { stamp } from "../lib/dates.js";
 import { sendJson, securityHeaders } from "../lib/http.js";
@@ -432,11 +432,4 @@ async function logRequest(ctx, row) {
   } catch (err) {
     ctx.log.warn("api request not logged", { reason: String(err.message).slice(0, 200) });
   }
-}
-
-/* Windows and request rows nobody will read again. */
-export async function pruneApiLog({ days = 30 } = {}) {
-  const cutoff = new Date(Date.now() - days * 86400_000).toISOString();
-  const r = await run("DELETE FROM api_request WHERE at < ?", cutoff);
-  return r.changes || 0;
 }

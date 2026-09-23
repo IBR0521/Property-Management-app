@@ -241,6 +241,22 @@ export async function postMoney({
       created_at: stamp(),
     });
 
+    /* Inside the transaction, so a payment either reached both books and is
+       queued for anybody listening, or none of the three happened.
+
+       Here rather than at the call sites because this is the one writer of
+       owner-visible money: a screen, the API, a bank import and the autopay
+       run all come through it, and an event emitted per call site would be
+       four chances to forget. */
+    if (kind === "rent_payment") {
+      const [{ emit }, { paymentPayload }] = await Promise.all([
+        import("./webhooks/events.js"), import("./webhooks/payloads.js")]);
+      await emit({
+        companyId, event: "payment.recorded",
+        data: await paymentPayload({ entryId, journalId }),
+      });
+    }
+
     return { entryId, journalId };
   });
 }

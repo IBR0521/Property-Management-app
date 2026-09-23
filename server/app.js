@@ -59,6 +59,7 @@ import { registerImport } from "./features/import.js";
 import { registerExport } from "./features/export.js";
 import { registerApi } from "./features/api.js";
 import { registerApiKeys } from "./features/apikeys.js";
+import { registerWebhooks } from "./features/hooks.js";
 
 const router = createRouter();
 
@@ -101,6 +102,7 @@ registerImport(router);
 registerExport(router);
 registerApi(router);
 registerApiKeys(router);
+registerWebhooks(router);
 
 /* Routes that need a signed-in staff member. Everything under /app except the
    sign-in pages, which register themselves as public. */

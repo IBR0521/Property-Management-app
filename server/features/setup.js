@@ -52,6 +52,7 @@ export function registerSetup(router) {
               <a class="pill outline sm" href="/app/setup/import">Import a portfolio</a>
               <a class="pill outline sm" href="/app/setup/export">Export everything</a>
               <a class="pill outline sm" href="/app/setup/api">API keys</a>
+              <a class="pill outline sm" href="/app/setup/webhooks">Webhooks</a>
             </div>
             <span class="field__help">The export is one archive with every table and every
               uploaded file in it, available whenever you want it.</span>

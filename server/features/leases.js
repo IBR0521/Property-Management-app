@@ -256,6 +256,14 @@ export function registerLeases(router) {
         const state = await signatureState(doc);
         if (state.complete) {
           await update("lease_document", doc.id, { status: "signed", completed_at: signedAt });
+          /* Only when the last party has signed. A webhook per signature would
+             fire three times for one lease and mean nothing on any of them. */
+          const [{ emit }, { leaseSignedPayload }] = await Promise.all([
+            import("../lib/webhooks/events.js"), import("../lib/webhooks/payloads.js")]);
+          await emit({
+            companyId: doc.company_id, event: "lease.signed",
+            data: await leaseSignedPayload(doc.id),
+          });
         }
       });
     } catch (err) {

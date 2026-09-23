@@ -218,3 +218,11 @@ function bearer(header) {
   const m = /^Bearer\s+(.+)$/i.exec(value.trim());
   return m ? m[1].trim() : null;
 }
+
+/* Request rows nobody will read again. Here rather than beside the routes
+   so the scheduler can reach it without a lib importing a feature. */
+export async function pruneApiLog({ days = 30 } = {}) {
+  const cutoff = new Date(Date.now() - days * 86400_000).toISOString();
+  const r = await run("DELETE FROM api_request WHERE at < ?", cutoff);
+  return r.changes || 0;
+}

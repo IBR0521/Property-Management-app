@@ -777,6 +777,13 @@ export async function closeOut({ companyId, wo, staff, actualCents, files = [], 
         sourceType: "work_order", sourceId: wo.id, postedBy: staff.id,
       });
     }
+
+    const [{ emit }, { workOrderPayload }] = await Promise.all([
+      import("../lib/webhooks/events.js"), import("../lib/webhooks/payloads.js")]);
+    await emit({
+      companyId, event: "work_order.completed",
+      data: await workOrderPayload(wo.id),
+    });
   });
 
   return {
