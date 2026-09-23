@@ -13,17 +13,16 @@
 
    They got a token URL when they applied, for adding documents. Consent goes
    there: no new login, no new email, and the same link they already have. */
-import { all, get, one, update, insert, run, tx } from "../lib/db.js";
+import { get, one, insert } from "../lib/db.js";
 import { id } from "../lib/ids.js";
 import { stamp, human, humanStamp } from "../lib/dates.js";
-import { sendHtml, redirect, BadRequest } from "../lib/http.js";
-import { html, attr } from "../lib/render.js";
-import { appPage, publicPage, notice, empty } from "../views/layout.js";
-import { navCounts } from "../lib/counts.js";
+import { sendHtml, redirect } from "../lib/http.js";
+import { html } from "../lib/render.js";
+import { publicPage, notice } from "../views/layout.js";
 import { storeMany, DOC_TYPES, fileUrl } from "../lib/files.js";
 import { clientIp } from "../lib/ratelimit.js";
 import { screeningSettings } from "../lib/screening/settings.js";
-import { provider, agencyFor, PROVIDERS } from "../lib/screening/providers.js";
+import { provider, agencyFor } from "../lib/screening/providers.js";
 import {
   consentWording, recordConsent, activeConsent, consentHistory, withdrawConsent,
   intact, ConsentRefused,
@@ -32,7 +31,7 @@ import {
   orderScreening, recordReport, cancelScreening, screeningFor, ScreeningRefused,
 } from "../lib/screening/requests.js";
 import {
-  recordAdverseAction, adverseActionsFor, renderNotice, noticeOutstanding,
+  recordAdverseAction, adverseActionsFor, noticeOutstanding,
   AdverseActionRefused, TEMPLATE_KEY,
 } from "../lib/screening/adverse.js";
 import { deleteReport } from "../lib/screening/retain.js";
@@ -390,23 +389,34 @@ export async function screeningPanel(ctx, app) {
               <tbody>${notices.map((n) => html`
                 <tr>
                   <td>${humanStamp(n.created_at)} by ${n.created_by}
-                    <span class="cellsub">naming ${n.agency_name}${n.score
-                      ? ` · score ${n.score} recorded on the notice` : ""}</span></td>
+                    <span class="cellsub">naming ${n.agency_name}</span></td>
                   <td class="shrink">${n.outbox_id
                     ? html`<a class="pill outline sm" href="/app/messages/sent">In the outbox</a>`
                     : html`<span class="cellsub">no email on file</span>`}</td>
                 </tr>`)}</tbody>
             </table></div>` : ""}
 
-          ${received.length && decided && app.status === "declined" && !notices.length ? html`
+          <!-- The notice is required for a decline *and* for an approval on
+               different terms — a higher deposit or a guarantor asked for
+               because of what the report said is "less favourable terms", and
+               the law does not distinguish. There is no status for that here,
+               so the system insists where it can be sure (a decline) and
+               makes it possible where it cannot. -->
+          ${received.length && decided && app.status !== "withdrawn" && !notices.length ? html`
             <div style="margin-top:1.25rem">
               ${template?.approved_at ? "" : notice("warn", "The template is not approved yet",
                 html`An unapproved notice template is never sent. Have it looked at and approve
                   it in <a href="/app/setup">Setup</a>.`)}
               <form method="post" action="/app/applications/${app.id}/adverse" class="formgrid">
                 <input type="hidden" name="_csrf" value="${ctx.csrf}" />
-                ${notice("info", "This is required even if the report was a minor factor",
-                  html`The notice will name <b>${agency.name}</b>, say that they did not make
+                ${notice("info", app.status === "declined"
+                  ? "This is required even if the report was a minor factor"
+                  : "Only if this approval was on different terms because of the report",
+                  html`${app.status === "declined" ? "" : html`A higher deposit, a guarantor,
+                    a shorter term — anything less favourable than you would otherwise have
+                    offered, decided partly on what the report said, needs this notice too.
+                    If the report changed nothing, skip it.<br /><br />`}
+                    The notice will name <b>${agency.name}</b>, say that they did not make
                     the decision, and tell the applicant how to dispute the report and get a
                     free copy within 60 days. Those parts are written for you.`)}
 

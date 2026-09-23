@@ -17,7 +17,7 @@
    figure. A `score` column would be a field something could sort on, and the
    day it can be sorted on it can be thresholded on, and then the decision is
    not being made by a person any more. */
-import { all, get, one, insert, run, tx } from "../db.js";
+import { all, one, insert, run, tx } from "../db.js";
 import { id } from "../ids.js";
 import { stamp } from "../dates.js";
 import { activeConsent, intact, ConsentRefused } from "./consent.js";

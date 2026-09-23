@@ -320,13 +320,14 @@ describe("the panel on the application", () => {
 
     const notice = await get("SELECT * FROM adverse_action WHERE application_id = ?", a.id);
     assert.ok(notice);
-    assert.equal(notice.score, "612");
+    assert.match(notice.rendered_body, /Score: 612/, "the score is in the notice");
     assert.match(notice.rendered_body, /Serious delinquency/);
+    assert.equal("score" in notice, false, "and in no column");
     assert.ok(notice.outbox_id);
 
     const { body } = await agent.text(`/app/applications/${a.id}`);
     assert.doesNotMatch(body, /needs an adverse action notice/);
-    assert.match(body, /score 612 recorded on the notice/);
+    assert.match(body, /naming Example Screening Services/);
   });
 
   test("an outstanding notice is on the list, not only inside the record", async () => {
@@ -354,6 +355,33 @@ describe("the panel on the application", () => {
     list = await agent.text("/app/applications");
     assert.match(list.body, /adverse\s+action notice due/);
   });
+
+  test("an approval on different terms can have a notice too, and is not nagged about it",
+    async () => {
+      /* "Less favourable terms" needs a notice as much as a decline does — a
+         higher deposit or a guarantor asked for because of the report. There
+         is no status for that here, so the system insists where it can be
+         sure and makes it possible where it cannot. */
+      await setUpAgency();
+      const a = await application();
+      await applicant.post(`/a/${a.token}/consent`,
+        { typed_name: "Ravi Bhatt" }, { csrfFrom: `/a/${a.token}/consent` });
+      await agent.post(`/app/applications/${a.id}/screening/order`, {},
+        { csrfFrom: `/app/applications/${a.id}` });
+      const request = await get("SELECT * FROM screening_request WHERE application_id = ?", a.id);
+      await agent.post(`/app/applications/${a.id}/screening/${request.id}/report`,
+        { summary: "Thin file, one late payment, otherwise clear." },
+        { csrfFrom: `/app/applications/${a.id}` });
+      await agent.post(`/app/applications/${a.id}/decide`,
+        { status: "approved", reason: "Approved with a larger deposit." },
+        { csrfFrom: `/app/applications/${a.id}` });
+
+      const { body } = await agent.text(`/app/applications/${a.id}`);
+      assert.doesNotMatch(body, /needs an adverse action notice/,
+        "an approval is not nagged about — we cannot know whether the terms changed");
+      assert.match(body, /Only if this approval was on different terms/);
+      assert.match(body, /anything less favourable/);
+    });
 
   test("saying a score was used without giving it is refused", async () => {
     await setUpAgency();

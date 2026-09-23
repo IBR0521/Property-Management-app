@@ -69,6 +69,9 @@ export const TABLES = {
      `files/`: see FILE_COLUMNS, which deliberately does not list it. */
   screening_consent: { by: "company" },
   screening_request: { by: "company" },
+  /* No redaction needed and none possible: the notice is `rendered_body`, and
+     any credit score that was part of the decision is in that prose rather
+     than in a column. See 043. */
   adverse_action: { by: "company" },
 
   /* --- money -------------------------------------------------------------- */

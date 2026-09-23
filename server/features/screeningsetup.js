@@ -18,7 +18,6 @@
                        away; this is what goes around them, and it needs a
                        solicitor before the first one is sent. */
 import { get, one, run } from "../lib/db.js";
-import { stamp } from "../lib/dates.js";
 import { sendHtml, redirect } from "../lib/http.js";
 import { html, attr } from "../lib/render.js";
 import { appPage, notice } from "../views/layout.js";

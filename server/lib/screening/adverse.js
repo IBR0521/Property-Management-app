@@ -26,8 +26,21 @@
    Numbers 1 to 3 are built in and cannot be edited away: they are produced
    here, from the record, and a template that omits them still gets them.
    Number 4 is only present when a score was used, and it is typed by the
-   person who read the report — which is also the only place in this system a
-   score is ever written down.
+   person who read the report.
+
+   ## The score is in the notice and nowhere else
+
+   Not in a column. The first version of this table had five — score, source,
+   date, range, factors — on the reasoning that the law requires them, and
+   `invariants.test.js` failed within the hour: it has asserted since Phase 1
+   that no score column may exist anywhere, and it does not make exceptions
+   for good reasons, because good reasons are how a rule like that dies.
+
+   It did not need them. `rendered_body` **is** the notice, frozen at the
+   moment it was written and identical to what went into the outbox, and the
+   score is in it, in prose, where the law wants it. Storing it again as a
+   field bought only the ability to query by it — the one thing this feature
+   must never make possible. Migration 043 took them off.
 
    ## Why the template still has to be approved
 
@@ -36,7 +49,7 @@
    counsel's. So this renders through the same `notice_template` machinery as
    every other notice, and an unapproved template cannot be sent — the same
    rule that stops an improvised eviction notice going out. */
-import { all, get, one, insert, run } from "../db.js";
+import { all, get, one, insert } from "../db.js";
 import { id } from "../ids.js";
 import { stamp, humanStamp } from "../dates.js";
 import { compile } from "../template.js";
@@ -189,9 +202,7 @@ export async function recordAdverseAction({
     id: noticeId, company_id: companyId, application_id: application.id,
     agency_name: agency.name, agency_address: agency.address || null,
     agency_phone: agency.phone || null,
-    score: score?.score || null, score_source: score?.source || null,
-    score_date: score?.date || null, score_range: score?.range || null,
-    score_factors: score?.factors || null,
+    /* No score fields. It is in `rendered_body`, which is the notice. */
     contributed: contributed ? 1 : 0,
     rendered_body: text, template_key: TEMPLATE_KEY,
     channel, to_contact: to, outbox_id: outboxId,

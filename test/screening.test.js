@@ -100,12 +100,19 @@ describe("no automated scoring, and no way to build one by accident", () => {
                OR column_name LIKE '%rank%')
         ORDER BY table_name, column_name`);
 
+    /* Two `rank` columns that are orderings of our own things rather than
+       judgements about a person: which contractor is tried first for a
+       category, and which photograph shows first on a listing. Nothing else.
+
+       There is deliberately no exception for the adverse action notice. The
+       first version of that table had five score columns, on the reasoning
+       that the law requires the score to appear on the notice — and
+       `invariants.test.js` failed, because it has asserted since Phase 1 that
+       no score column may exist anywhere and makes no exceptions for good
+       reasons. It was right: the notice is its frozen `rendered_body`, the
+       score is in that prose, and a column bought only the ability to query
+       by it. */
     const allowed = new Set([
-      "adverse_action.score", "adverse_action.score_source", "adverse_action.score_date",
-      "adverse_action.score_range", "adverse_action.score_factors",
-      /* Two `rank` columns that are orderings of our own things rather than
-         judgements about a person: which contractor is tried first for a
-         category, and which photograph shows first on a listing. */
       "routing_rule.rank",
       "listing_photo.rank",
     ]);
@@ -118,18 +125,31 @@ describe("no automated scoring, and no way to build one by accident", () => {
     }
   });
 
-  test("and the ones on the notice are text, not numbers", async () => {
+  test("not even the adverse action notice has one", async () => {
     const columns = await all(
-      `SELECT column_name, data_type FROM information_schema.columns
+      `SELECT column_name FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = 'adverse_action'
-          AND column_name LIKE 'score%'`);
-    assert.ok(columns.length >= 5);
-    for (const c of columns) {
-      assert.equal(c.data_type, "text",
-        `adverse_action.${c.column_name} is ${c.data_type} — a numeric score is a sortable `
-        + "score, and this is the one place a score is allowed to exist at all");
-    }
+          AND column_name LIKE '%score%'`);
+    assert.deepEqual(columns, [],
+      "the notice is its rendered body; a score column beside it would be the one "
+      + "sortable score in the system");
   });
+
+  test("and the score still reaches the notice, which is where the law wants it",
+    async () => {
+      const app = await application({ status: "declined" });
+      await approvedTemplate();
+      const written = await recordAdverseAction({
+        companyId: world.companyId, application: app, company, agency: AGENCY,
+        score: { score: "640", source: AGENCY.name, date: "1 Mar 2026",
+          range: "350 to 850", factors: "Serious delinquency" },
+        by: "Dana",
+      });
+      assert.match(written.rendered_body, /Score: 640/);
+      assert.match(written.rendered_body, /Possible range: 350 to 850/);
+      assert.match(written.rendered_body, /- Serious delinquency/);
+      assert.equal("score" in written, false, "and nowhere else");
+    });
 
   test("the application table still has no decision field a machine could set", async () => {
     const app = await application();
@@ -386,7 +406,6 @@ describe("the adverse action notice", () => {
       });
 
       assert.equal(written.agency_name, AGENCY.name);
-      assert.equal(written.score, "640");
       assert.equal(Number(written.contributed), 1);
       assert.match(written.rendered_body, /Ravi Bhatt/);
       assert.match(written.rendered_body, /Score: 640/);
