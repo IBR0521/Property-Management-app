@@ -29,10 +29,24 @@ let output = "";
 before(async () => {
   await freshDatabase();
   await truncateAll();
-  const res = await run(
-    process.execPath, ["--env-file=.env.test", "server/seed.js"],
-    { cwd: ROOT, timeout: 120_000 });
-  output = res.stdout;
+  try {
+    const res = await run(
+      process.execPath, ["--env-file=.env.test", "server/seed.js"],
+      /* Generous, because this runs last in a suite that has had the database
+         busy for an hour and a half. It took twenty seconds on its own and
+         failed on a two-minute limit inside the full run, which reported as
+         a suite that did not pass and said nothing about why. */
+      { cwd: ROOT, timeout: 300_000 });
+    output = res.stdout;
+  } catch (err) {
+    /* The reason, not just the failure. A `before` that throws marks the
+       whole file as not passing, and the useful part — what the child said
+       before it died — is on the error rather than in the report. */
+    throw new Error(
+      `the seed did not run: ${err.message}\n`
+      + `--- its output ---\n${err.stdout || "(none)"}\n`
+      + `--- its errors ---\n${err.stderr || "(none)"}`);
+  }
 });
 after(async () => { await truncateAll(); await closeDb(); });
 
