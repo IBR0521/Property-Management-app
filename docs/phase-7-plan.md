@@ -1,6 +1,15 @@
 # Phase 7 — Migration, integrations and API
 
-Plan. Per the roadmap's process rule, nothing is written until you approve it.
+Plan. **Approved, split in two, with QuickBooks dropped.**
+
+    7a   the import wizard and the full data export
+    7b   the public API and outbound webhooks
+
+QuickBooks is not built. It needs an Intuit developer account, an OAuth client
+and a sandbox company — credentials that do not exist here — and building an
+integration that cannot be exercised against the thing it integrates with
+produces confidence rather than evidence. Recorded in OPEN-ITEMS as work, not
+as a gap that was overlooked.
 
 ---
 
@@ -130,19 +139,12 @@ which is a worse answer to "no lock-in".
 photos is gigabytes, and building that in memory on a serverless host is how
 the export works in development and fails on the first real customer.
 
-### QuickBooks Online
+### QuickBooks Online — not built
 
-**This one will not be verifiable here**, and I would rather say so now than in
-the report. It needs an Intuit developer account, an OAuth client, and a
-sandbox company — credentials I do not have and cannot create.
-
-What I will build: the OAuth flow, the journal mapping, a summarised push (one
-entry per account per period rather than every split), and a sync log that
-makes the push idempotent. What I will test: the mapping and the idempotency,
-against a fake. What goes in OPEN-ITEMS: whether Intuit accepts it.
-
-If you would rather I did not build something I cannot test, say so — it is a
-defensible call and the phase is complete without it.
+Dropped when the phase was approved. It cannot be exercised against Intuit
+from here, and an OAuth integration tested only against a fake of itself is
+confidence rather than evidence. The journal already exports as CSV, which is
+what an accountant actually asks for.
 
 ### Public REST API
 
@@ -186,7 +188,6 @@ question every integration asks.
     server/lib/api/openapi.js         generated from the declarations
     server/lib/webhooks/sign.js       HMAC, and the address check
     server/lib/webhooks/send.js       delivery and retry
-    server/lib/quickbooks/*.js        OAuth, mapping, sync log
     server/features/import.js         the wizard
     server/features/apikeys.js        the screens
     test/import*.test.js
@@ -199,18 +200,12 @@ question every integration asks.
     037_import.sql     import_batch, and source ids on the imported tables
     038_api.sql        api_key, api_key_scope, api_request_log
     039_webhooks.sql   webhook_endpoint, webhook_delivery
-    040_quickbooks.sql qbo_connection, qbo_sync_log
 
 ---
 
 ## New environment variables
 
-    QBO_CLIENT_ID          Intuit OAuth client
-    QBO_CLIENT_SECRET
-    QBO_ENVIRONMENT        sandbox or production
-
-Unset means QuickBooks is off and the screen says so, the same as Plaid and
-Stripe.
+None. Both halves are built from what is already here.
 
 ---
 
@@ -224,9 +219,8 @@ import it into an empty one, and the trial balances match; that an API key
 cannot do what its holder's role could not; that a webhook refuses a private
 address at send time; that the OpenAPI spec matches the routes.
 
-**Not verified:** whether Intuit accepts our journals. Whether a real
-AppFolio export matches the mapping — I have their documented column names and
-no actual file.
+**Not verified:** whether a real AppFolio export matches the mapping. I have
+their documented column names and no actual file.
 
 ---
 
@@ -243,6 +237,6 @@ silent skip — so the failure is loud on day one rather than quiet in March.
 changed. A published endpoint with customers on it cannot, and `/api/v1` is a
 promise. I would rather ship four resources I am sure of than twelve I am not.
 
-**This phase is the largest so far.** If you would rather split it — the import
-and export first, the API and webhooks second — that is a better shape than a
-long single push, and the split falls naturally between the two.
+**This phase is the largest so far**, which is why it is split. 7a is the half
+that touches customer data; 7b is the half that opens a surface which cannot
+later be closed.
