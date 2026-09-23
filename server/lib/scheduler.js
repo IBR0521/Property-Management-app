@@ -17,6 +17,7 @@ import { prune as pruneRateHits } from "./ratelimit.js";
 import { pruneImportFiles } from "./import/commit.js";
 import { pruneApiRate, pruneApiLog } from "./api/keys.js";
 import { sendDue } from "./webhooks/send.js";
+import { sweepScreeningReports } from "./screening/retain.js";
 import { DELIVERY_MODE, APP_BASE_URL } from "./config.js";
 import { drains, reachesRecipients } from "./delivery/mode.js";
 import { deliver } from "./delivery/index.js";
@@ -95,6 +96,7 @@ export async function tick(reason = "manual") {
     delivered: 0,
     sessionsPruned: 0,
     importFilesPruned: 0,
+    screeningReportsDeleted: 0,
     webhooksAttempted: 0,
     webhooksDelivered: 0,
   };
@@ -136,6 +138,11 @@ export async function tick(reason = "manual") {
   out.importFilesPruned = await pruneImportFiles();
   out.apiRatePruned = await pruneApiRate();
   out.apiLogPruned = await pruneApiLog();
+
+  /* A tenant screening report is the most sensitive thing this database
+     holds. Deleting it on time is worth more than any amount of care
+     elsewhere: the report that is not there cannot leak. */
+  Object.assign(out, await sweepScreeningReports());
 
   /* Last of the things that reach outwards, for the same reason the report
      schedules are: everything a webhook describes has already happened this

@@ -1,7 +1,11 @@
 # Phase 8 — Tenant screening
 
-Plan. **Not started. This needs your approval, and one decision inside it is
-yours rather than mine.**
+Plan. **Approved, with the manual provider only.**
+
+The decision below was put to you and answered: the platform does not become a
+reseller, no unexercised provider client is written, and the seam is left for
+a real one the day credentials exist. Everything else in this plan stands as
+written.
 
 ---
 

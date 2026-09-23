@@ -322,6 +322,12 @@ export function registerApplications(router) {
     const items = criteria ? safeItems(criteria.items) : [];
     const decided = ["approved", "declined", "withdrawn"].includes(app.status);
 
+    /* Screening sits on this screen rather than one of its own: a person
+       deciding an application should see the report, the criteria and the
+       decision together. The code for it lives with the rest of screening. */
+    const { screeningPanel } = await import("./screening.js");
+    const screening = await screeningPanel(ctx, app);
+
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "people", counts: await navCounts(cid),
       title: app.applicant_name,
@@ -385,6 +391,8 @@ export function registerApplications(router) {
             </div>
           </div>
         </div>
+
+        ${screening}
 
         ${decided
           ? notice(app.status === "approved" ? "ok" : null, `Decided: ${app.status}`,

@@ -61,6 +61,16 @@ export const TABLES = {
   lease_signature: { by: "parent", parent: "lease_document", on: "document_id" },
   renters_insurance: { by: "company" },
 
+  /* Screening. All three are the company's own compliance trail and all three
+     are here — what somebody consented to, what was read, and what notice was
+     sent. `screening_request.report_path` points at a file that is deleted on
+     the company's own retention schedule, and after that it is null, which is
+     the honest state rather than a gap. The report itself is never in
+     `files/`: see FILE_COLUMNS, which deliberately does not list it. */
+  screening_consent: { by: "company" },
+  screening_request: { by: "company" },
+  adverse_action: { by: "company" },
+
   /* --- money -------------------------------------------------------------- */
   account: { by: "company" },
   journal: { by: "company" },
@@ -191,6 +201,13 @@ export const TABLES = {
 
 /* Where a file lives, so the archive can carry the bytes and not only a
    filename that means nothing outside this database. */
+/* Uploads carried into the archive.
+
+   `screening_request.report_path` is deliberately not here. A tenant
+   screening report is somebody's credit file; the company has a retention
+   rule that deletes it, and copying it into an archive that leaves the
+   platform would quietly outlive that rule. The record that screening
+   happened, what it said and what notice went out are all in `data/`. */
 export const FILE_COLUMNS = [
   { table: "work_order_photo", column: "path", folder: "files/work-orders" },
   { table: "turn_photo", column: "path", folder: "files/turns" },
