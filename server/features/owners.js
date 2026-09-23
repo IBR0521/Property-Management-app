@@ -186,7 +186,10 @@ export function registerOwners(router) {
                       <td>${human(s.period_start)} – ${human(s.period_end)}
                         <span class="cellsub">${s.sent_at ? `sent ${humanStamp(s.sent_at)}` : "not sent"}</span></td>
                       <td class="num">${usd(t.net)}</td>
-                      <td class="shrink"><a class="pill outline sm" href="/o/s/${s.token}" target="_blank">View</a></td>
+                      <td class="shrink">
+                        <a class="pill outline sm" href="/o/s/${s.token}" target="_blank">View</a>
+                        <a class="pill outline sm" href="/app/owners/${owner.id}/statements/${s.id}/pdf">PDF</a>
+                      </td>
                     </tr>`;
                   })}</tbody>
                 </table></div>` : ""}
@@ -355,6 +358,32 @@ export function registerOwners(router) {
     redirect(ctx.res, `/app/owners/${owner.id}?m=${encodeURIComponent(msg)}`);
   });
 
+  /* --- the statement as a PDF ---------------------------------------------
+   *
+   * Rendered from `owner_statement.totals` — the snapshot taken when the
+   * statement was generated — and never from a fresh query. An owner sent a
+   * link in April must see April's figures in April's statement whatever has
+   * been posted since, and a paper copy disagreeing with the link it came
+   * from is worse than either being stale: only one of them can be checked.
+   *
+   * Two routes to the same bytes, because there are two people who want it.
+   * The owner has a token; a member of staff has a session. Neither is given
+   * the other's way in. */
+  router.get("/o/s/:tok/pdf", async (ctx) => {
+    const s = await get("SELECT * FROM owner_statement WHERE token = ?", ctx.params.tok);
+    if (!s) return sendHtml(ctx.res, "Not found", 404);
+    await sendStatementPdf(ctx, s);
+  });
+
+  router.get("/app/owners/:id/statements/:sid/pdf", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    /* Scoped to the company in the query that finds it, not checked after. */
+    const s = await one(
+      "SELECT * FROM owner_statement WHERE id = ? AND owner_id = ? AND company_id = ?",
+      ctx.params.sid, ctx.params.id, cid);
+    await sendStatementPdf(ctx, s);
+  });
+
   /* --- public: statement -------------------------------------------------- */
   router.get("/o/s/:tok", async (ctx) => {
     const s = await get("SELECT * FROM owner_statement WHERE token = ?", ctx.params.tok);
@@ -417,7 +446,13 @@ export function registerOwners(router) {
               </ul>
             </div>
           </div>` : ""}`,
-      foot: html`Questions on any line? Call <a href="tel:${company.phone}">${company.phone}</a>. This statement is a report, not a trust-account ledger.`,
+      /* One `foot`, not two. An earlier draft added the download link as a
+         second `foot:` key in this same object and JavaScript quietly kept
+         the last one, so the button rendered nowhere and nothing complained. */
+      foot: html`<a class="pill outline sm" href="/o/s/${s.token}/pdf">Download as a PDF</a>
+        <span style="display:block;margin-top:.75rem">Questions on any line? Call
+        <a href="tel:${company.phone}">${company.phone}</a>. This statement is a report,
+        not a trust-account ledger.</span>`,
     }));
   });
 
@@ -504,6 +539,38 @@ export function registerOwners(router) {
     });
     redirect(ctx.res, `/o/a/${a.token}`);
   });
+}
+
+async function sendStatementPdf(ctx, statement) {
+  const owner = await one("SELECT * FROM owner WHERE id = ?", statement.owner_id);
+  const company = await one("SELECT * FROM company WHERE id = ?", statement.company_id);
+
+  /* A snapshot that will not parse is a statement nobody can produce, and
+     failing with a stack trace in front of an owner is the wrong way to say
+     so. */
+  let totals;
+  try {
+    totals = JSON.parse(statement.totals);
+  } catch {
+    throw new BadRequest("That statement's figures could not be read. Generate it again.");
+  }
+
+  const { buildStatementPdf, statementFileName } = await import("../lib/pdf/statement.js");
+  const bytes = await buildStatementPdf({ company, owner, statement, totals });
+  const name = statementFileName({
+    companyName: company.name, ownerName: owner.name,
+    from: statement.period_start, to: statement.period_end,
+  });
+
+  ctx.res.writeHead(200, {
+    "content-type": "application/pdf",
+    "content-disposition": `attachment; filename="${name.replace(/"/g, "")}"`,
+    "content-length": bytes.length,
+    "x-content-type-options": "nosniff",
+    /* Somebody's finances. Not in a shared cache, not in the browser's. */
+    "cache-control": "no-store, private",
+  });
+  ctx.res.end(Buffer.from(bytes));
 }
 
 /* Snapshotted into owner_statement.totals so a statement an owner already has
