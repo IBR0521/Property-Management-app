@@ -205,19 +205,84 @@ Option A that test passes while AR aging sits outside the books entirely.
 
 ### And what to do about the data already there
 
-Your live database has real journals, including the Phase 3 opening
-conversion. Whatever we pick, existing rows need a decision:
+**The correcting journal's date is not one decision. It is one decision per
+tenant, and the platform cannot currently tell them apart.**
 
-- **Correct forward only** — new postings use the new rules, old ones stay. The
-  books stay wrong for the period already recorded, and every report needs a
-  "from" date before which it should not be trusted.
-- **Post a correcting journal** — one dated adjustment per company that moves
-  the misposted amounts, with a memo saying what it is. The journal is
-  append-only so nothing is erased, and the correction is visible forever,
-  which is what an auditor wants.
+Backdating to the original postings makes history correct — and silently
+rewrites a month that a manager may have already closed, filed a trust
+reconciliation for, sent owner statements against, or issued 1099s from. In
+most US states a property manager holding client funds must reconcile the trust
+account monthly and retain it for years. Backdating into a retained
+reconciliation does not fix it; it makes a document that was signed as true
+retroactively false.
 
-I would post the correcting journal. It is the honest version and it is the one
-that makes every report from day one usable.
+Dating everything today never corrupts a closed period — and leaves every
+historical report wrong for a company that has closed nothing and would much
+rather have correct history.
+
+Both answers are right for some tenants and wrong for others. On a platform
+serving property managers across fifty states, picking one is picking wrong for
+most of them.
+
+#### What the platform is missing
+
+**A close date.** Every accounting system has one — QuickBooks calls it a
+closing date, Xero calls it a lock date, NetSuite closes periods. It is the
+line before which the books are finished, and nothing may post behind it
+without deliberate authority.
+
+This application has no such concept. Any journal can be posted with any date,
+forever. That is a gap worth closing regardless of this correction, and it is
+far cheaper now than once tenants have years of data.
+
+    company.books_closed_through   a date, nullable — null means never closed
+
+Enforced in `postJournal()`, which is already the only writer. A post dated on
+or before that line is refused with a message naming the date, and reopening a
+period is an explicit, audited act rather than a field somebody edits.
+
+#### Then the correction answers itself
+
+    correction date = the later of:
+      the date of the posting being corrected
+      the day after books_closed_through
+
+Which gives, per tenant, without anybody guessing:
+
+| The tenant's state | What happens |
+|---|---|
+| Never closed a period | Corrections land on the original dates. History becomes correct. |
+| Closed through last quarter | Corrections land in the current open period, with a memo naming the period they belong to. |
+| Closed through last year | Same, and the prior year is left exactly as it was filed. |
+
+**This is your situation too:** your live company has never closed a period,
+because the concept does not exist yet. So your correction backdates and your
+history comes out right. The machinery is for the tenants who come after.
+
+#### How the correction is applied
+
+Following `convert.js`, which did exactly this once in Phase 3 and is the right
+precedent: **it reports unless told to commit.**
+
+- **A dry run per company**, showing the trial balance before and after and
+  every journal that would be written. Nothing is committed from a migration.
+- **An open period is corrected properly** — the wrong journal is reversed and
+  the right one posted. `reverseJournal` already exists, the original stays
+  visible, and the pair nets to nothing, which is what an auditor expects.
+- **A closed period gets one adjusting journal** in the earliest open period,
+  carrying a memo that names the period the error belongs to.
+- **A record per company** of what was done, so "why does this journal exist"
+  has an answer in the product rather than in a commit message.
+
+#### And one thing the reconciliation needs because of this
+
+If a period can be closed, the trust reconciliation for that period has to be
+**snapshottable** — stored as it read on the day it was signed, the same way
+`owner_statement.totals` is snapshotted so a sent statement never changes. That
+is what a regulator asks to see, and recomputing it later from current data
+answers a different question than the one being asked.
+
+That is a small table and it reuses a pattern already in the codebase.
 
 ---
 
@@ -304,7 +369,9 @@ plus a one-off correcting journal.
 
 ## Migrations
 
-    034_reports.sql   saved_report, report_schedule, the 2400 account, and
+    034_close.sql     books_closed_through, the audited reopen, and the
+                      trust reconciliation snapshot
+    035_reports.sql   saved_report, report_schedule, the 2400 account, and
                       an index on journal_split (property_id) — there is one
                       on owner_id and none on property, and a P&L by
                       property scans without it
