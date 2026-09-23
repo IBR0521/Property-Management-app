@@ -337,3 +337,46 @@ describe("the trial balance's date filter", () => {
     }
   });
 });
+
+/* --- the placeholder converter ------------------------------------------- */
+
+describe("turning ? into $n", () => {
+  /* Every query in this application is written with `?` and converted. The
+     converter tracked string literals and not comments, so an apostrophe
+     inside a comment — "the contractor's invoice" — opened a string that
+     never closed, and every placeholder after it stopped being converted.
+     The query then failed with "syntax error at or near ::", which points at
+     entirely the wrong place.
+
+     Found by writing a commented query, which is a thing anybody would do. */
+  test("a comment cannot swallow the placeholders after it", async () => {
+    const { toPg } = await import("../server/lib/db.js");
+
+    const block = toPg("SELECT ? /* the contractor's invoice */, ?");
+    assert.match(block, /\$1/);
+    assert.match(block, /\$2/, "the apostrophe must not open a string");
+
+    const line = toPg("SELECT ? -- it's fine\nWHERE x = ?");
+    assert.match(line, /\$2/);
+  });
+
+  test("a ? inside a comment is not a placeholder", async () => {
+    const { toPg } = await import("../server/lib/db.js");
+    const out = toPg("SELECT ? /* not ? this one */, ?");
+    assert.equal((out.match(/\$\d+/g) || []).length, 2);
+    assert.match(out, /not \? this one/, "and it is left alone in the text");
+  });
+
+  test("a real string literal is still respected", async () => {
+    /* The behaviour the comment handling must not break. */
+    const { toPg } = await import("../server/lib/db.js");
+    const out = toPg("SELECT 'literal ?' , ?");
+    assert.equal((out.match(/\$\d+/g) || []).length, 1);
+    assert.match(out, /'literal \?'/);
+  });
+
+  test("casts and placeholders together", async () => {
+    const { toPg } = await import("../server/lib/db.js");
+    assert.equal(toPg("SELECT ?::text, ?"), "SELECT $1::text, $2");
+  });
+});

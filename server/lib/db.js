@@ -100,13 +100,36 @@ export function toPg(sql) {
   let out = "";
   let n = 0;
   let quote = null;
+  let comment = null;   // "line" or "block"
+
   for (let i = 0; i < sql.length; i++) {
-    const c = sql[i];
+    const c = sql[i], next = sql[i + 1];
+
+    /* Comments are skipped over rather than parsed, and that matters more
+       than it looks. Without this, an apostrophe inside a comment — "the
+       contractor's invoice" — opened a string literal that never closed, and
+       every `?` after it stopped being converted. The query then failed with
+       "syntax error at or near ::", which points at the wrong place
+       entirely. Found by writing a commented query. */
+    if (comment === "line") {
+      out += c;
+      if (c === "\n") comment = null;
+      continue;
+    }
+    if (comment === "block") {
+      out += c;
+      if (c === "*" && next === "/") { out += next; i++; comment = null; }
+      continue;
+    }
+
     if (quote) {
       out += c;
       if (c === quote) quote = null;
       continue;
     }
+
+    if (c === "-" && next === "-") { comment = "line"; out += c; continue; }
+    if (c === "/" && next === "*") { comment = "block"; out += c; continue; }
     if (c === "'" || c === '"') { quote = c; out += c; continue; }
     if (c === "?") { out += "$" + (++n); continue; }
     out += c;
