@@ -112,7 +112,7 @@ export async function chargeRent(companyId, { period = monthKey(today()), posted
      November must not move three months of income into November. */
   const date = end;
 
-  let charged = 0, skipped = 0, closed = 0, cents = 0;
+  let charged = 0, skipped = 0, closed = 0, cents = 0, applied = 0;
 
   for (const row of plan.rows) {
     if (row.already) { skipped += 1; continue; }
@@ -137,6 +137,14 @@ export async function chargeRent(companyId, { period = monthKey(today()), posted
       });
       charged += 1;
       cents += row.cents;
+
+      /* A tenant who paid ahead has already settled this. Without drawing it
+         down, the charge sits outstanding against somebody holding a receipt,
+         AR aging shows arrears that do not exist, and the delinquency ladder
+         starts writing to a tenant who is paid up. */
+      applied += await applyPrepayment({
+        companyId, lease: row, period, date, postedBy,
+      });
     } catch (err) {
       /* A company that has closed the period is not a fault. It is a
          deliberate choice, and the run reports it rather than failing. */
@@ -153,13 +161,50 @@ export async function chargeRent(companyId, { period = monthKey(today()), posted
     }
   }
 
-  return { period, date, charged, skipped, closed, cents, basis: plan.basis };
+  return { period, date, charged, skipped, closed, cents, applied, basis: plan.basis };
+}
+
+/* Settling a fresh charge out of money the tenant already paid.
+
+       Dr 2300 Prepaid rent      the held money is now earned
+       Cr 1300 Tenant receivable the charge is settled
+       Dr 2400 Rent due          it is no longer uncollected
+       Cr 2200 Owner funds held  and it is the owner's
+
+   Capped at the smaller of the prepayment and the charge, so a tenant three
+   months ahead settles one month at a time and the rest stays held. */
+async function applyPrepayment({ companyId, lease, period, date, postedBy }) {
+  const { postJournal, ACCT } = await import("../features/accounting.js");
+  const { prepaidBalance } = await import("./ledger.js");
+
+  const held = await prepaidBalance(companyId, lease.leaseId);
+  const settle = Math.min(held, lease.cents);
+  if (settle <= 0) return 0;
+
+  const dims = {
+    ownerId: lease.ownerId, propertyId: lease.propertyId,
+    unitId: lease.unitId, leaseId: lease.leaseId,
+  };
+
+  await postJournal({
+    companyId, date,
+    memo: `Rent ${period} settled from rent paid in advance — ${lease.where}`,
+    source: "rent", sourceType: "rent_prepaid_applied", sourceId: `${lease.leaseId}:${period}`,
+    postedBy,
+    splits: [
+      { code: ACCT.PREPAID_RENT, debit: settle, ...dims, memo: "prepayment earned" },
+      { code: ACCT.TENANT_RECEIVABLE, credit: settle, ...dims, memo: "settled from advance" },
+      { code: ACCT.RENT_DUE_OWNERS, debit: settle, ...dims, memo: "no longer uncollected" },
+      { code: ACCT.OWNER_FUNDS, credit: settle, ...dims, memo: "held for the owner" },
+    ],
+  });
+  return settle;
 }
 
 /* Every company, for one period. Called by the scheduler. */
 export async function runRentCharges({ period = null, postedBy = "system" } = {}) {
   const companies = await all("SELECT id, timezone FROM company ORDER BY id");
-  let charged = 0, skipped = 0, closed = 0, cents = 0;
+  let charged = 0, skipped = 0, closed = 0, cents = 0, applied = 0;
 
   for (const company of companies) {
     /* The period is the company's, not the server's. A company in Honolulu is
@@ -170,7 +215,7 @@ export async function runRentCharges({ period = null, postedBy = "system" } = {}
     try {
       const res = await chargeRent(company.id, { period: forPeriod, postedBy });
       charged += res.charged; skipped += res.skipped;
-      closed += res.closed; cents += res.cents;
+      closed += res.closed; cents += res.cents; applied += res.applied;
     } catch (err) {
       /* One company's broken data must not stop every other company being
          charged. */
@@ -181,5 +226,6 @@ export async function runRentCharges({ period = null, postedBy = "system" } = {}
   }
 
   return { rentCharged: charged, rentChargesSkipped: skipped,
-           rentChargesClosed: closed, rentChargedCents: cents };
+           rentChargesClosed: closed, rentChargedCents: cents,
+           rentPrepaymentsApplied: applied };
 }

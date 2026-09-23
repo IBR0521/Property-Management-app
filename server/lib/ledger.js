@@ -44,17 +44,25 @@ const POSTINGS = {
     { code: "2400", credit: amount, memo: "owed to owner when collected" },
   ],
 
-  /* Rent received. Client money, so it lands in trust cash and becomes owed
-     to the owner rather than becoming the company's. This is the posting that
-     was missing entirely. */
+  /* Rent received. The part that is always true: the money arrived and it is
+     the owner's. Whether it also clears a charge depends on whether there is
+     one, which a table cannot ask — `rentPaymentSplits` adds that second pair
+     when there is something to clear. */
   rent_payment: (amount) => [
     { code: "1010", debit: amount, memo: "rent received into trust" },
-    { code: "1300", credit: amount, memo: "tenant receivable cleared" },
+    { code: "2200", credit: amount, memo: "held for the owner" },
   ],
 
-  /* A cost paid on the owner's behalf. Reduces what is owed to them. */
+  /* A cost paid on the owner's behalf, out of the owner's money.
+
+     It used to debit 5000 Repairs — the manager's own expense account — which
+     recorded the owner's cost as a cost of running the management business.
+     The manager's P&L carried repairs it never bore, and 2200 was never
+     reduced by money that had genuinely left the owner's funds. An agent
+     spending a client's money reduces what is owed to that client; it does
+     not incur an expense. */
   expense: (amount) => [
-    { code: "5000", debit: amount, memo: "property expense" },
+    { code: "2200", debit: amount, memo: "reduces what is owed to the owner" },
     { code: "1010", credit: amount, memo: "paid from trust" },
   ],
 
@@ -84,6 +92,92 @@ const POSTINGS = {
   ],
 };
 
+/* Rent received, which is two things happening at once.
+
+   **The money arrives and it is the owner's.** Always true, whatever was
+   charged:
+
+       Dr 1010 Trust cash          Cr 2200 Owner funds held
+
+   **And a claim on the tenant turns into money in hand** — but only as far as
+   there was a claim:
+
+       Dr 2400 Rent due to owners  Cr 1300 Tenant receivable
+
+   The second pair is capped at what is actually outstanding, and that cap is
+   the whole reason this cannot be a line in a table. A tenant paying next
+   month early has no charge to clear: releasing 2400 anyway would take an
+   obligation off the books that was never put on it, and drive a liability
+   account negative on a tenancy where nobody has done anything wrong.
+
+   Capped, the overpayment simply stays in 2200 — held for the owner, which is
+   exactly what it is. */
+async function rentPaymentSplits({ companyId, leaseId, amount }) {
+  const outstanding = await outstandingReceivable(companyId, leaseId);
+  const clearing = Math.min(amount, Math.max(0, outstanding));
+  const early = amount - clearing;
+
+  /* The money is in the trust account either way. */
+  const splits = [
+    { code: "1010", debit: amount, memo: "rent received into trust" },
+  ];
+
+  if (clearing > 0) {
+    /* A charge existed, so the claim on the tenant becomes money in hand and
+       the obligation moves from uncollected to genuinely owed. */
+    splits.push(
+      { code: "1300", credit: clearing, memo: "tenant receivable cleared" },
+      { code: "2400", debit: clearing, memo: "uncollected rent now collected" },
+      { code: "2200", credit: clearing, memo: "held for the owner" },
+    );
+  }
+
+  if (early > 0) {
+    /* Paid ahead of a charge. It is not the owner's yet — nothing has been
+       billed for it — so it is held as prepaid rent, which is a trust
+       liability like any other client money. 2300 already exists for exactly
+       this and had never been posted to.
+
+       The tempting shortcut is to credit 2200 and be done. That would say the
+       owner is owed rent for a month nobody has charged, and the month the
+       charge finally lands the owner would be credited twice. */
+    splits.push(
+      { code: "2300", credit: early, memo: "paid ahead of a charge" },
+    );
+  }
+
+  return splits;
+}
+
+/* What this lease has paid ahead, held and not yet earned. */
+export async function prepaidBalance(companyId, leaseId) {
+  if (!leaseId) return 0;
+  const { get: getOne } = await import("./db.js");
+  const row = await getOne(
+    `SELECT COALESCE(SUM(s.credit_cents - s.debit_cents), 0)::bigint AS cents
+       FROM journal_split s
+       JOIN account a ON a.id = s.account_id
+      WHERE a.company_id = ? AND a.code = '2300' AND s.lease_id = ?`,
+    companyId, leaseId);
+  return Number(row?.cents || 0);
+}
+
+/* What this lease has been charged and not yet paid, from the book rather
+   than from an expectation. Null lease — a payment recorded against an owner
+   with no tenancy named — clears nothing, which is the safe answer. */
+export async function outstandingReceivable(companyId, leaseId) {
+  if (!leaseId) return 0;
+  const { get: getOne } = await import("./db.js");
+  const row = await getOne(
+    `SELECT COALESCE(SUM(s.debit_cents - s.credit_cents), 0)::bigint AS cents
+       FROM journal_split s
+       JOIN account a ON a.id = s.account_id
+       JOIN journal j ON j.id = s.journal_id
+      WHERE a.company_id = ? AND a.code = '1300' AND s.lease_id = ?`,
+    companyId, leaseId);
+  return Number(row?.cents || 0);
+}
+
 export function postingFor(kind, amountCents) {
   const build = POSTINGS[kind];
   if (!build) return null;
@@ -105,7 +199,10 @@ export async function postMoney({
   sourceType = null, sourceId = null, postedBy = "system",
   journalSource = null, journalId: existingJournalId = null,
 }) {
-  const splits = postingFor(kind, amountCents);
+  const amount = Math.abs(Math.round(Number(amountCents) || 0));
+  const splits = kind === "rent_payment" && amount > 0
+    ? await rentPaymentSplits({ companyId, leaseId, amount })
+    : postingFor(kind, amountCents);
   const { postJournal } = await import("../features/accounting.js");
 
   return await tx(async () => {

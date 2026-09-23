@@ -22,6 +22,7 @@ import { today, addDays, monthKey } from "../server/lib/dates.js";
 import { prorate, occupancyIn, PRORATION_BASES } from "../server/lib/proration.js";
 import { planCharges, chargeRent, runRentCharges } from "../server/lib/rentcharge.js";
 import { ensureChart } from "../server/features/accounting.js";
+import { postMoney, parity } from "../server/lib/ledger.js";
 import { closePeriod } from "../server/lib/reports/close.js";
 import { trustReconciliation } from "../server/lib/reports/trust.js";
 
@@ -342,5 +343,107 @@ describe("what charging does to the trust reconciliation", () => {
 
     const shortfall = r.findings.find((x) => x.title.includes("less than is owed"));
     assert.equal(shortfall, undefined, "an arrear is not a trust shortfall");
+  });
+});
+
+/* --- paying before being charged -------------------------------------------- */
+
+describe("a tenant who pays ahead", () => {
+  async function pay(cents, date = today()) {
+    return await postMoney({
+      companyId: world.companyId, ownerId: world.ownerId,
+      propertyId: world.propertyId, unitId: world.unitId, leaseId: world.leaseId,
+      date, kind: "rent_payment", amountCents: cents, memo: "rent",
+      source: "manual", postedBy: "test",
+    });
+  }
+
+  test("money paid before any charge is held, not credited to the owner", async () => {
+    /* The tempting shortcut is to credit owner funds and be done. That says
+       the owner is owed rent for a month nobody has billed, and when the
+       charge finally lands they would be credited twice. */
+    await pay(90000);
+
+    assert.equal(await balanceOf(world.companyId, "2300"), 90000, "held as prepaid rent");
+    assert.equal(await balanceOf(world.companyId, "2200"), 0, "not the owner's yet");
+    assert.equal(await balanceOf(world.companyId, "1300"), 0, "and no receivable was invented");
+  });
+
+  test("the trust account still reconciles while it is held", async () => {
+    /* Prepaid rent is client money like any other. If it were not a trust
+       liability, holding it would read as a surplus. */
+    await pay(90000);
+    const r = await trustReconciliation(world.companyId);
+    assert.equal(r.legs.book.cents, 90000);
+    assert.equal(r.legs.clients.cents, 90000);
+    assert.equal(r.variances.find((v) => v.key === "book_vs_clients").cents, 0);
+  });
+
+  test("the next charge is settled out of it", async () => {
+    /* Without this the charge sits outstanding against somebody holding a
+       receipt: AR aging shows arrears that do not exist and the delinquency
+       ladder starts writing to a tenant who is paid up. */
+    await run("UPDATE lease SET rent_cents = ? WHERE id = ?", 90000, world.leaseId);
+    await pay(90000);
+
+    const res = await chargeRent(world.companyId, { period: monthKey(today()) });
+    assert.equal(res.charged, 1);
+    assert.equal(res.applied, 90000, "the prepayment settled it");
+
+    assert.equal(await balanceOf(world.companyId, "1300"), 0, "nothing is owed");
+    assert.equal(await balanceOf(world.companyId, "2300"), 0, "and nothing is still held");
+    assert.equal(await balanceOf(world.companyId, "2200"), 90000, "it is the owner's now");
+  });
+
+  test("paying three months ahead settles one month at a time", async () => {
+    await run("UPDATE lease SET rent_cents = ?, start_date = ? WHERE id = ?",
+      90000, "2026-01-01", world.leaseId);
+    await pay(270000, "2026-06-01");
+
+    const june = await chargeRent(world.companyId, { period: "2026-06" });
+    assert.equal(june.applied, 90000);
+    assert.equal(await balanceOf(world.companyId, "2300"), 180000, "two months still held");
+
+    const july = await chargeRent(world.companyId, { period: "2026-07" });
+    assert.equal(july.applied, 90000);
+    assert.equal(await balanceOf(world.companyId, "2300"), 90000);
+    assert.equal(await balanceOf(world.companyId, "2200"), 180000, "two months earned");
+    assert.equal(await balanceOf(world.companyId, "1300"), 0);
+  });
+
+  test("a part payment against a charge leaves the rest outstanding", async () => {
+    await run("UPDATE lease SET rent_cents = ? WHERE id = ?", 90000, world.leaseId);
+    await chargeRent(world.companyId, { period: monthKey(today()) });
+    await pay(40000);
+
+    assert.equal(await balanceOf(world.companyId, "1300"), 50000, "still owed");
+    assert.equal(await balanceOf(world.companyId, "2200"), 40000, "the owner has what arrived");
+    assert.equal(await balanceOf(world.companyId, "2300"), 0, "nothing was paid ahead");
+  });
+
+  test("overpaying a charge clears it and holds the rest", async () => {
+    await run("UPDATE lease SET rent_cents = ? WHERE id = ?", 90000, world.leaseId);
+    await chargeRent(world.companyId, { period: monthKey(today()) });
+    await pay(100000);
+
+    assert.equal(await balanceOf(world.companyId, "1300"), 0);
+    assert.equal(await balanceOf(world.companyId, "2200"), 90000, "the charged month is earned");
+    assert.equal(await balanceOf(world.companyId, "2300"), 10000, "the extra is held");
+  });
+
+  test("through all of it, the two books agree", async () => {
+    /* The invariant that matters more than any individual balance. */
+    await run("UPDATE lease SET rent_cents = ? WHERE id = ?", 90000, world.leaseId);
+    await pay(100000);
+    await chargeRent(world.companyId, { period: monthKey(today()) });
+    await pay(90000);
+
+    assert.equal((await parity(world.companyId)).inParity, true);
+
+    const r = await trustReconciliation(world.companyId);
+    assert.equal(r.variances.find((v) => v.key === "book_vs_clients").cents, 0,
+      "every pound held is somebody's");
+    assert.equal(r.variances.find((v) => v.key === "clients_vs_subledger").cents, 0,
+      "and the control account agrees with the owner's own ledger");
   });
 });
