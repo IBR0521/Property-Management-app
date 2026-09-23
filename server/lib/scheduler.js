@@ -14,7 +14,7 @@ import { today, addDays, stamp, monthKey, dueDateFor, human, daysBetween } from 
 import { usd } from "./money.js";
 import { pruneSessions } from "./auth.js";
 import { prune as pruneRateHits } from "./ratelimit.js";
-import { DELIVERY_MODE } from "./config.js";
+import { DELIVERY_MODE, APP_BASE_URL } from "./config.js";
 import { drains, reachesRecipients } from "./delivery/mode.js";
 import { deliver } from "./delivery/index.js";
 import { outcomeFor, MAX_ATTEMPTS } from "./delivery/retry.js";
@@ -24,6 +24,7 @@ import { runAutopay, paidForPeriod } from "./payments.js";
 import { prunePortalSessions } from "./magiclink.js";
 import { pruneDeadSubscriptions } from "./push/index.js";
 import { runRentCharges } from "./rentcharge.js";
+import { runReportSchedules } from "./reports/saved.js";
 import { todayIn } from "./timezone.js";
 
 const EVERY_MS = 10 * 60 * 1000;
@@ -87,6 +88,7 @@ export async function tick(reason = "manual") {
     rentCharged: 0,
     rentChargesSkipped: 0,
     rentChargesClosed: 0,
+    reportsScheduled: 0,
     delivered: 0,
     sessionsPruned: 0,
   };
@@ -123,6 +125,11 @@ export async function tick(reason = "manual") {
      fortnight is not coming back. */
   Object.assign(out, await pruneDeadSubscriptions());
   out.rateHitsPruned = await pruneRateHits();
+
+  /* Scheduled reports, last among the jobs that send. Everything they read
+     has already run this tick, so a report that goes out at six in the
+     morning describes the day rather than the moment before it started. */
+  Object.assign(out, await runReportSchedules({ on: null, baseUrl: APP_BASE_URL }));
 
   /* Recorded last, and only on success, so "last run" means "last run that
      completed" rather than "last run that started and may have died". */
