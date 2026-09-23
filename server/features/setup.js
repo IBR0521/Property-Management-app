@@ -39,6 +39,21 @@ export function registerSetup(router) {
       body: html`
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
 
+        <!-- Import -->
+        <div class="panel">
+          <div class="panel__head"><h2>Import a portfolio</h2>
+            <p>From AppFolio, Buildium, DoorLoop, Rent Manager or a spreadsheet</p>
+          </div>
+          <div class="panel__body">
+            <p class="lede">Owners, properties, units, tenants, leases and vendors, from CSV.
+              You see everything it found — including the columns it did not read — before
+              anything is written.</p>
+            <div class="btnrow" style="margin-top:1rem">
+              <a class="pill outline sm" href="/app/setup/import">Import a portfolio</a>
+            </div>
+          </div>
+        </div>
+
         <!-- Delivery -->
         <div class="panel">
           <div class="panel__head"><h2>Delivery</h2>

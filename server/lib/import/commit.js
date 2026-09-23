@@ -334,3 +334,16 @@ async function postOpeningJournal({
       : null,
   };
 }
+
+/* --- keeping the uploads no longer than they are needed ---------------------
+
+   An abandoned draft still holds the whole portfolio in plain text. A week is
+   long enough for somebody to come back to a migration on Monday and short
+   enough that it is not a store of other people's data. The batch row stays;
+   only the file goes. */
+export async function pruneImportFiles({ days = 7 } = {}) {
+  const cutoff = new Date(Date.now() - days * 86400_000).toISOString();
+  const res = await run(
+    "UPDATE import_batch SET files = NULL WHERE files IS NOT NULL AND created_at < ?", cutoff);
+  return res.changes || 0;
+}

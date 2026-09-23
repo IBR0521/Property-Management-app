@@ -14,6 +14,7 @@ import { today, addDays, stamp, monthKey, dueDateFor, human, daysBetween } from 
 import { usd } from "./money.js";
 import { pruneSessions } from "./auth.js";
 import { prune as pruneRateHits } from "./ratelimit.js";
+import { pruneImportFiles } from "./import/commit.js";
 import { DELIVERY_MODE, APP_BASE_URL } from "./config.js";
 import { drains, reachesRecipients } from "./delivery/mode.js";
 import { deliver } from "./delivery/index.js";
@@ -91,6 +92,7 @@ export async function tick(reason = "manual") {
     reportsScheduled: 0,
     delivered: 0,
     sessionsPruned: 0,
+    importFilesPruned: 0,
   };
 
   /* Rent is charged before anything reads a balance. Autopay, the delinquency
@@ -125,6 +127,9 @@ export async function tick(reason = "manual") {
      fortnight is not coming back. */
   Object.assign(out, await pruneDeadSubscriptions());
   out.rateHitsPruned = await pruneRateHits();
+  /* An abandoned import still holds a customer's whole portfolio in plain
+     text, waiting for somebody who is not coming back. */
+  out.importFilesPruned = await pruneImportFiles();
 
   /* Scheduled reports, last among the jobs that send. Everything they read
      has already run this tick, so a report that goes out at six in the
