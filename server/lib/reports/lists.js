@@ -199,3 +199,199 @@ export async function vendorList(companyId, { asOf = today() } = {}) {
     blockedFromPayment: mapped.filter((v) => v.active && !v.canBePaid).length,
   };
 }
+
+/* --- the three that were missing an export ---------------------------------
+ *
+ * Payout runs, bank reconciliation and lease documents were the three screens
+ * carrying records with no way to get them out. They are here rather than as
+ * export buttons for the same reason as the four above: one export path, one
+ * escaping function, one set of tests, and a PDF and a schedule for nothing. */
+
+/* Money that left, or is about to.
+
+   One row per payment rather than per run, because "what did we pay this
+   contractor in March" is the question people actually have, and a run is an
+   implementation detail of how it left the bank. A voided item is kept and
+   marked: it was in the run, somebody took it out, and that is worth seeing. */
+export async function payoutList(companyId, { from = null, to = today() } = {}) {
+  const rows = await all(
+    `SELECT i.id, i.payee_name, i.amount_cents, i.check_number, i.account_last4,
+            i.memo, i.voided_at, i.void_reason,
+            b.id AS batch_id, b.kind, b.method, b.status, b.effective_date,
+            b.reference, b.issued_at,
+            o.name AS owner_name, v.name AS vendor_name
+       FROM payout_item i
+       JOIN payout_batch b ON b.id = i.batch_id
+       LEFT JOIN owner o ON o.id = i.owner_id
+       LEFT JOIN vendor v ON v.id = i.vendor_id
+      WHERE i.company_id = ?
+        AND (?::text IS NULL OR b.effective_date >= ?)
+        AND (?::text IS NULL OR b.effective_date <= ?)
+      ORDER BY b.effective_date DESC, i.payee_name`,
+    companyId, from, from, to, to);
+
+  const mapped = rows.map((r) => ({
+    itemId: r.id, batchId: r.batch_id,
+    effectiveDate: r.effective_date,
+    payee: r.payee_name || r.owner_name || r.vendor_name || "—",
+    paidTo: r.owner_name ? "Owner" : r.vendor_name ? "Contractor" : "—",
+    method: r.method,
+    /* The cheque number or the last four of the account, never the account
+       itself. A payments export lives in a downloads folder. */
+    identifier: r.method === "check"
+      ? (r.check_number ? `#${r.check_number}` : "no number")
+      : (r.account_last4 ? `•••${r.account_last4}` : "—"),
+    reference: r.reference || null,
+    runStatus: r.status,
+    issued: r.issued_at ? String(r.issued_at).slice(0, 10) : null,
+    memo: r.memo || null,
+    amountCents: Number(r.amount_cents),
+    voided: Boolean(r.voided_at),
+    voidReason: r.void_reason || null,
+  }));
+
+  const live = mapped.filter((r) => !r.voided && r.runStatus !== "cancelled");
+  return {
+    kind: "payout_list", from, to,
+    rows: mapped,
+    payments: mapped.length,
+    /* Voided and cancelled money never left, so it is not in the total. It
+       stays in the rows because somebody removing a payment from a run is a
+       thing worth being able to see. */
+    amountCents: live.reduce((n, r) => n + r.amountCents, 0),
+    voided: mapped.filter((r) => r.voided).length,
+  };
+}
+
+/* The bank, line by line, and what each line was matched to.
+
+   The report somebody opens when the reconciliation does not balance, so an
+   unmatched line is the point rather than an omission. */
+export async function bankLineList(companyId, { from = null, to = today(), state = null } = {}) {
+  const rows = await all(
+    `SELECT t.id, t.posted_date, t.amount_cents, t.name_raw, t.merchant, t.category,
+            t.pending, t.state,
+            a.name AS account_name, a.mask, a.is_trust,
+            m.target_type, m.amount_cents AS matched_cents, m.matched_at, m.note
+       FROM bank_txn t
+       JOIN bank_account a ON a.id = t.bank_account_id
+       LEFT JOIN bank_match m ON m.bank_txn_id = t.id
+      WHERE t.company_id = ?
+        AND (?::text IS NULL OR t.posted_date >= ?)
+        AND (?::text IS NULL OR t.posted_date <= ?)
+        AND (?::text IS NULL OR t.state = ?)
+      ORDER BY t.posted_date DESC, t.created_at DESC`,
+    companyId, from, from, to, to, state, state);
+
+  const mapped = rows.map((r) => ({
+    txnId: r.id,
+    date: r.posted_date,
+    account: `${r.account_name}${r.mask ? ` ••${r.mask}` : ""}`,
+    isTrust: Boolean(r.is_trust),
+    description: r.merchant || r.name_raw,
+    category: r.category || null,
+    amountCents: Number(r.amount_cents),
+    state: r.pending ? "pending" : r.state,
+    matchedTo: r.target_type
+      ? MATCH_LABELS[r.target_type] || r.target_type
+      : null,
+    matchedOn: r.matched_at ? String(r.matched_at).slice(0, 10) : null,
+    note: r.note || null,
+  }));
+
+  const unmatched = mapped.filter((r) => r.state === "unmatched");
+  return {
+    kind: "bank_line_list", from, to, state,
+    rows: mapped,
+    lines: mapped.length,
+    unmatched: unmatched.length,
+    /* What has not been accounted for, which is the number the report is
+       usually opened to find. */
+    unmatchedCents: unmatched.reduce((n, r) => n + r.amountCents, 0),
+  };
+}
+
+/* The six things a bank line can be matched to, in words. Taken from the
+   CHECK constraint rather than invented, so a value the database allows is
+   never rendered as a raw column name. */
+const MATCH_LABELS = {
+  ledger_entry: "An owner ledger entry",
+  vendor_invoice: "A contractor's invoice",
+  journal: "A journal",
+  delinquency: "A rent arrear",
+  stripe_payout: "A card or ACH payout",
+  payout_batch: "A payment run",
+};
+
+/* Lease documents and where each one has got to.
+
+   Signatures are counted, never rendered: a signature block carries a typed
+   name, an IP address and a user agent, and none of that belongs in a
+   spreadsheet somebody emails around. What the report answers is "what is
+   outstanding", which needs a count and a date. */
+export async function leaseDocumentList(companyId, { status = null } = {}) {
+  const rows = await all(
+    `SELECT d.id, d.title, d.status, d.required, d.created_at, d.sent_at,
+            d.completed_at, d.void_reason,
+            t.name AS template_name,
+            u.label, p.line1, p.city,
+            (SELECT COUNT(*) FROM lease_signature s WHERE s.document_id = d.id)::int AS signatures,
+            (SELECT MAX(s.signed_at) FROM lease_signature s WHERE s.document_id = d.id) AS last_signed,
+            (SELECT string_agg(te.name, ', ' ORDER BY te.name)
+               FROM lease_tenant lt JOIN tenant te ON te.id = lt.tenant_id
+              WHERE lt.lease_id = d.lease_id) AS tenants
+       FROM lease_document d
+       LEFT JOIN lease_template t ON t.id = d.template_id
+       LEFT JOIN unit u ON u.id = d.unit_id
+       LEFT JOIN property p ON p.id = u.property_id
+      WHERE d.company_id = ?
+        AND (?::text IS NULL OR d.status = ?)
+      ORDER BY d.created_at DESC`,
+    companyId, status, status);
+
+  const mapped = rows.map((r) => {
+    /* `required` is not a flag. It is a JSON array of the party types that
+       still have to sign — "who", not "whether" — and reading it as a
+       boolean makes every document required, which is how this report first
+       counted three outstanding out of three. */
+    let parties;
+    try { parties = JSON.parse(r.required); } catch { parties = []; }
+    if (!Array.isArray(parties)) parties = [];
+
+    const signatures = Number(r.signatures);
+    return {
+      documentId: r.id,
+      title: r.title,
+      template: r.template_name || null,
+      where: r.line1 ? `${r.line1}${r.label ? `, unit ${r.label}` : ""}` : "—",
+      tenants: r.tenants || null,
+      status: r.status,
+      mustSign: parties.join(", ") || "—",
+      partiesRequired: parties.length,
+      created: String(r.created_at).slice(0, 10),
+      sent: r.sent_at ? String(r.sent_at).slice(0, 10) : null,
+      completed: r.completed_at ? String(r.completed_at).slice(0, 10) : null,
+      /* Counted, never listed. */
+      signatures,
+      stillToSign: Math.max(0, parties.length - signatures),
+      lastSigned: r.last_signed ? String(r.last_signed).slice(0, 10) : null,
+      voidReason: r.void_reason || null,
+    };
+  });
+
+  /* Live means not finished and not withdrawn. A void document was pulled;
+     chasing it would be chasing nothing. */
+  const live = mapped.filter((r) => r.status !== "signed" && r.status !== "void");
+
+  return {
+    kind: "lease_document_list", status,
+    rows: mapped,
+    documents: mapped.length,
+    outForSignature: mapped.filter((r) => r.status === "out_for_signature").length,
+    signed: mapped.filter((r) => r.status === "signed").length,
+    /* The only figure on this report anybody is chasing: signatures still
+       owed on documents that are still live. */
+    signaturesOutstanding: live.reduce((n, r) => n + r.stillToSign, 0),
+    documentsOutstanding: live.filter((r) => r.stillToSign > 0).length,
+  };
+}

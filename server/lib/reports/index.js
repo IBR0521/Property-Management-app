@@ -28,7 +28,10 @@ import { trustReconciliation } from "./trust.js";
 import {
   rentRoll, vacancy, leaseExpirations, depositsHeld, repairSpend,
 } from "./operational.js";
-import { ownerList, unitList, workOrderList, vendorList } from "./lists.js";
+import {
+  ownerList, unitList, workOrderList, vendorList,
+  payoutList, bankLineList, leaseDocumentList,
+} from "./lists.js";
 import { today, monthKey, human, humanStamp } from "../dates.js";
 import { usd } from "../money.js";
 import { can } from "../auth.js";
@@ -446,6 +449,76 @@ export const REPORTS = {
     note: (r) => r.blockedFromDispatch || r.blockedFromPayment
       ? `${r.blockedFromDispatch} cannot be dispatched and ${r.blockedFromPayment} cannot be paid.`
       : "Every active contractor may be dispatched and paid.",
+  },
+
+  payout_list: {
+    title: "Payments out",
+    group: "Lists",
+    description: "Every payment to an owner or a contractor, and which run it left in.",
+    need: "money.view",
+    params: ["from", "to"],
+    landscape: true,
+    run: (companyId, p) => payoutList(companyId, { from: p.from || null, to: p.to || today() }),
+    table: (r) => ({
+      columns: [text("effectiveDate", "Date", 1), text("payee", "Paid to", 3),
+                text("paidTo", "Kind", 1), text("method", "How", 1),
+                text("identifier", "Reference", 1), text("runStatus", "Run", 1),
+                text("memo", "Memo", 3), money("amountCents", "Amount")],
+      rows: r.rows.map((x) => ({ ...x, memo: x.voided ? `VOIDED — ${x.voidReason || "no reason given"}` : x.memo })),
+      totals: { effectiveDate: "", payee: `${r.payments} payment${r.payments === 1 ? "" : "s"}`,
+                paidTo: "", method: "", identifier: "", runStatus: "", memo: "",
+                amountCents: r.amountCents },
+    }),
+    note: (r) => r.voided
+      ? `${r.voided} payment(s) were voided and are not in the total. They are listed so it is visible that somebody removed them.`
+      : "Cheque numbers and the last four digits only — never an account number.",
+  },
+
+  bank_line_list: {
+    title: "Bank lines",
+    group: "Lists",
+    description: "Every line from the bank, and what each one was matched to.",
+    need: "bank.link",
+    params: ["from", "to"],
+    landscape: true,
+    run: (companyId, p) => bankLineList(companyId, { from: p.from || null, to: p.to || today() }),
+    table: (r) => ({
+      columns: [text("date", "Date", 1), text("account", "Account", 2),
+                text("description", "Description", 4), text("state", "State", 1),
+                text("matchedTo", "Matched to", 3), money("amountCents", "Amount")],
+      rows: r.rows,
+      totals: { date: "", account: "", description: `${r.lines} line${r.lines === 1 ? "" : "s"}`,
+                state: "", matchedTo: "", amountCents: null },
+    }),
+    /* The number this report is usually opened to find. */
+    note: (r) => r.unmatched
+      ? `${r.unmatched} line(s) are unmatched, ${usd(r.unmatchedCents)} in total.`
+      : "Every line is matched.",
+  },
+
+  lease_document_list: {
+    title: "Lease documents",
+    group: "Lists",
+    description: "Every document, where it has got to, and what is still outstanding.",
+    need: "leasing.work",
+    params: [],
+    landscape: true,
+    run: (companyId) => leaseDocumentList(companyId),
+    table: (r) => ({
+      columns: [text("title", "Document", 3), text("where", "Unit", 3),
+                text("tenants", "Tenant", 2), text("status", "Status", 1),
+                text("mustSign", "Must sign", 2), text("sent", "Sent", 1),
+                text("completed", "Completed", 1),
+                text("signatures", "Signed", 1), text("stillToSign", "Still to sign", 1)],
+      rows: r.rows,
+      totals: { title: `${r.documents} document${r.documents === 1 ? "" : "s"}`,
+                where: "", tenants: "", status: "", mustSign: "", sent: "",
+                completed: "", signatures: "", stillToSign: r.signaturesOutstanding },
+    }),
+    note: (r) => r.signaturesOutstanding
+      ? `${r.signaturesOutstanding} signature(s) are still owed across ${r.documentsOutstanding} document(s). `
+        + "Signatures are counted here and never listed — a signature block carries a typed name, an address and a browser, and none of that belongs in a spreadsheet."
+      : "Nothing is waiting on a signature. Signatures are counted here and never listed.",
   },
 
   tax_1099: {

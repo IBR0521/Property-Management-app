@@ -13,12 +13,17 @@ import { test, describe, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { freshDatabase, truncateAll, closeDb, all, get, run } from "./helpers/db.js";
 import * as f from "./helpers/factories.js";
-import { today, addDays } from "../server/lib/dates.js";
+import { today, addDays, stamp } from "../server/lib/dates.js";
+import { insert } from "../server/lib/db.js";
+import { id } from "../server/lib/ids.js";
 import { ensureChart } from "../server/features/accounting.js";
 import { closeOut } from "../server/features/maintenance.js";
 import { recordInvoice } from "../server/features/vendors.js";
 import { postMoney } from "../server/lib/ledger.js";
-import { ownerList, unitList, workOrderList, vendorList } from "../server/lib/reports/lists.js";
+import {
+  ownerList, unitList, workOrderList, vendorList,
+  payoutList, bankLineList, leaseDocumentList,
+} from "../server/lib/reports/lists.js";
 import { reportsFor, reportDefinition } from "../server/lib/reports/index.js";
 
 let world, staff;
@@ -283,5 +288,253 @@ describe("who can run them", () => {
     assert.ok(offered.includes("unit_list"));
     assert.ok(!offered.includes("owner_list"));
     assert.ok(!offered.includes("vendor_list"));
+  });
+});
+
+/* --- the three that had no export at all ---------------------------------- */
+
+describe("payments out", () => {
+  let cheque = 0;
+
+  async function run_(status, items) {
+    const batchId = id();
+    await insert("payout_batch", {
+      id: batchId, company_id: world.companyId, kind: "owner", method: "check",
+      effective_date: today(), status, reference: "RUN-1",
+      total_cents: items.reduce((n, i) => n + i.amount_cents, 0),
+      item_count: items.length, created_by: "test", created_at: stamp(),
+    });
+    for (const item of items) {
+      /* A unique index on (company_id, check_number): two cheques cannot
+         share a number, which is the bank's rule as much as this one's. */
+      cheque += 1;
+      await insert("payout_item", {
+        id: id(), company_id: world.companyId, batch_id: batchId,
+        owner_id: world.ownerId, payee_name: "Test Owner",
+        check_number: String(1000 + cheque), created_at: stamp(), ...item,
+      });
+    }
+    return batchId;
+  }
+
+  test("a voided payment is listed and not counted", async () => {
+    /* It never left, so it is not in the total. It stays in the rows because
+       somebody removing a payment from a run is worth being able to see. */
+    await run_("issued", [
+      { amount_cents: 50000 },
+      { amount_cents: 30000, voided_at: stamp(), void_reason: "reissued" },
+    ]);
+
+    const r = await payoutList(world.companyId, { from: null, to: today() });
+    assert.equal(r.payments, 2, "both are listed");
+    assert.equal(r.amountCents, 50000, "only one left");
+    assert.equal(r.voided, 1);
+  });
+
+  test("a cancelled run is not counted either", async () => {
+    await run_("cancelled", [{ amount_cents: 40000 }]);
+    const r = await payoutList(world.companyId, { from: null, to: today() });
+    assert.equal(r.amountCents, 0);
+  });
+
+  test("it carries a cheque number and never an account number", async () => {
+    /* A payments export lives in a downloads folder. */
+    await run_("issued", [{ amount_cents: 50000, routing_number: "021000021", account_last4: "6789" }]);
+    const r = await payoutList(world.companyId, { from: null, to: today() });
+
+    assert.match(r.rows[0].identifier, /^#\d+$/);
+    const serialised = JSON.stringify(r);
+    assert.ok(!serialised.includes("021000021"), "no routing number leaves this function");
+  });
+
+  test("an ACH payment shows the last four and nothing more", async () => {
+    const batchId = id();
+    await insert("payout_batch", {
+      id: batchId, company_id: world.companyId, kind: "vendor", method: "ach",
+      effective_date: today(), status: "issued", total_cents: 20000, item_count: 1,
+      created_by: "test", created_at: stamp(),
+    });
+    await insert("payout_item", {
+      id: id(), company_id: world.companyId, batch_id: batchId,
+      vendor_id: world.vendorId, payee_name: "A Contractor",
+      routing_number: "021000021", account_last4: "6789",
+      amount_cents: 20000, created_at: stamp(),
+    });
+
+    const r = await payoutList(world.companyId, { from: null, to: today() });
+    assert.equal(r.rows[0].identifier, "•••6789");
+    assert.ok(!JSON.stringify(r).includes("021000021"));
+  });
+});
+
+describe("bank lines", () => {
+  async function account() {
+    const itemId = id();
+    await insert("bank_item", {
+      id: itemId, company_id: world.companyId, provider: "manual",
+      institution_name: "Test Bank", status: "active", created_at: stamp(),
+    });
+    const accountId = id();
+    await insert("bank_account", {
+      id: accountId, company_id: world.companyId, item_id: itemId,
+      external_id: `ext-${accountId}`, name: "Trust checking", mask: "4417",
+      type: "depository", balance_cents: 0, is_trust: 1, active: 1, created_at: stamp(),
+    });
+    return accountId;
+  }
+
+  async function line(accountId, { amount, state = "unmatched", name = "DEPOSIT" }) {
+    const txnId = id();
+    await insert("bank_txn", {
+      id: txnId, company_id: world.companyId, bank_account_id: accountId,
+      external_id: `x-${txnId}`, posted_date: today(), amount_cents: amount,
+      name_raw: name, pending: 0, state, created_at: stamp(),
+    });
+    return txnId;
+  }
+
+  test("an unmatched line is the point, not an omission", async () => {
+    /* This report is opened when the reconciliation does not balance. */
+    const a = await account();
+    await line(a, { amount: 50000 });
+    await line(a, { amount: -12000, name: "FEE" });
+
+    const r = await bankLineList(world.companyId, { from: null, to: today() });
+    assert.equal(r.unmatched, 2);
+    assert.equal(r.unmatchedCents, 50000 - 12000);
+  });
+
+  test("a match is described in words, not as a column name", async () => {
+    const a = await account();
+    const txnId = await line(a, { amount: 50000, state: "matched" });
+    await insert("bank_match", {
+      id: id(), company_id: world.companyId, bank_txn_id: txnId,
+      target_type: "payout_batch", target_id: "whatever",
+      amount_cents: 50000, matched_by: "test", matched_at: stamp(),
+    });
+
+    const r = await bankLineList(world.companyId, { from: null, to: today() });
+    assert.equal(r.rows[0].matchedTo, "A payment run");
+    assert.equal(r.unmatched, 0);
+  });
+
+  test("every target the database allows has a label", async () => {
+    /* A value the CHECK constraint permits must never render as a raw
+       column name in front of a customer. */
+    const a = await account();
+    const targets = ["ledger_entry", "vendor_invoice", "journal", "delinquency",
+                     "stripe_payout", "payout_batch"];
+    for (const target of targets) {
+      const txnId = await line(a, { amount: 1000, state: "matched" });
+      await insert("bank_match", {
+        id: id(), company_id: world.companyId, bank_txn_id: txnId,
+        target_type: target, target_id: "x", amount_cents: 1000,
+        matched_by: "test", matched_at: stamp(),
+      });
+    }
+
+    const r = await bankLineList(world.companyId, { from: null, to: today() });
+    for (const row of r.rows) {
+      assert.ok(row.matchedTo, "every matched line has a label");
+      assert.ok(!row.matchedTo.includes("_"), `${row.matchedTo} is a column name`);
+    }
+  });
+
+  test("a pending line says pending rather than unmatched", async () => {
+    const a = await account();
+    const txnId = id();
+    await insert("bank_txn", {
+      id: txnId, company_id: world.companyId, bank_account_id: a,
+      external_id: `p-${txnId}`, posted_date: today(), amount_cents: 5000,
+      name_raw: "PENDING CARD", pending: 1, state: "unmatched", created_at: stamp(),
+    });
+
+    const r = await bankLineList(world.companyId, { from: null, to: today() });
+    assert.equal(r.rows[0].state, "pending");
+  });
+});
+
+describe("lease documents", () => {
+  /* `required` is a JSON array of the party types who still have to sign —
+     "who", not "whether". Reading it as a boolean makes every document
+     required, which is how this report first counted three outstanding out
+     of three. */
+  async function document({ status = "draft", mustSign = ["tenant", "manager"], title = "Lease" } = {}) {
+    const docId = id();
+    await insert("lease_document", {
+      id: docId, company_id: world.companyId, lease_id: world.leaseId,
+      unit_id: world.unitId, title, body_md: "# Lease", body_hash: "h",
+      status, token: `tok-${docId}`, required: JSON.stringify(mustSign),
+      created_by: "test", created_at: stamp(),
+    });
+    return docId;
+  }
+
+  test("what is still owed is counted in signatures, not in documents", async () => {
+    /* Two parties on a document is two signatures outstanding, and a report
+       that counted documents would say one. */
+    await document({ status: "out_for_signature", mustSign: ["tenant", "manager"] });
+    await document({ status: "signed", mustSign: ["tenant"], title: "Addendum" });
+
+    const r = await leaseDocumentList(world.companyId);
+    assert.equal(r.documents, 2);
+    assert.equal(r.signaturesOutstanding, 2, "both parties on the live one");
+    assert.equal(r.documentsOutstanding, 1);
+    assert.equal(r.signed, 1);
+  });
+
+  test("who must sign is named", async () => {
+    await document({ mustSign: ["tenant", "guarantor"] });
+    const r = await leaseDocumentList(world.companyId);
+    assert.equal(r.rows[0].mustSign, "tenant, guarantor");
+  });
+
+  test("a void document is not outstanding", async () => {
+    /* It was withdrawn. Chasing it would be chasing nothing. */
+    await document({ status: "void" });
+    assert.equal((await leaseDocumentList(world.companyId)).signaturesOutstanding, 0);
+  });
+
+  test("a document nobody has to sign is not outstanding either", async () => {
+    await document({ status: "draft", mustSign: [] });
+    const r = await leaseDocumentList(world.companyId);
+    assert.equal(r.signaturesOutstanding, 0);
+    assert.equal(r.rows[0].mustSign, "—");
+  });
+
+  test("signatures are counted and never listed", async () => {
+    /* A signature block carries a typed name, an address and a browser, and
+       none of that belongs in a spreadsheet somebody emails around. */
+    const docId = await document({ status: "signed", mustSign: ["tenant"] });
+    await insert("lease_signature", {
+      id: id(), document_id: docId, party_type: "tenant",
+      party_name: "Priya Anand", party_email: "priya@example.test",
+      typed_name: "Priya Anand", signature_hash: "sig", document_hash: "doc",
+      signed_at: stamp(), ip: "203.0.113.9",
+      user_agent: "Mozilla/5.0 (iPhone)", consent_esign: 1, created_at: stamp(),
+    });
+
+    const r = await leaseDocumentList(world.companyId);
+    assert.equal(r.rows[0].signatures, 1);
+
+    const serialised = JSON.stringify(r);
+    assert.ok(!serialised.includes("203.0.113.9"), "no address");
+    assert.ok(!serialised.includes("Mozilla"), "no browser");
+    assert.ok(!serialised.includes("priya@example.test"), "no signatory email");
+  });
+});
+
+describe("the three ask for the right capability", () => {
+  test("each matches the screen it lists", async () => {
+    assert.equal(reportDefinition("payout_list").need, "money.view");
+    assert.equal(reportDefinition("bank_line_list").need, "bank.link");
+    assert.equal(reportDefinition("lease_document_list").need, "leasing.work");
+  });
+
+  test("a leasing agent gets the documents and neither of the money ones", async () => {
+    const offered = reportsFor({ role: "leasing", active: 1 }).map((r) => r.key);
+    assert.ok(offered.includes("lease_document_list"));
+    assert.ok(!offered.includes("payout_list"));
+    assert.ok(!offered.includes("bank_line_list"));
   });
 });

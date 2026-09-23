@@ -115,15 +115,15 @@ every month for ever and nobody would notice the numbers had stopped changing.
 
 ## What was built
 
-**Eighteen reports**, all of which run, export to CSV and PDF, and can be saved
-and scheduled:
+**Twenty-one reports**, all of which run, export to CSV and PDF, and can be
+saved and scheduled:
 
 | Group | |
 |---|---|
 | Financial (7) | trial balance, P&L, P&L by property, balance sheet, cash movement, general ledger detail, trust reconciliation |
 | Rent (1) | aged receivables |
 | Portfolio (5) | rent roll, vacancy, lease expirations, deposits held, repair spend |
-| Lists (4) | owners, properties and units, work orders, contractors |
+| Lists (7) | owners, properties and units, work orders, contractors, payments out, bank lines, lease documents |
 | Tax (1) | 1099 summary |
 
 Plus: the correction runner, the close/reopen machinery, saved views,
@@ -187,15 +187,16 @@ What is true is narrower than that sentence, so here is the actual state.
 receivables, trial balance, general ledger, trust position, deposits, 1099,
 repair spend, owners, properties and units, work orders, contractors.
 
+Payout runs, bank reconciliation and lease documents were added after the
+first draft of this report named them as the gap.
+
 **Has no export**: the queue, the inbox and its templates, messages (sent and
-dead letters), banking and reconciliation, payouts and their runs, lease
-documents and templates, listings, staff, company settings, billing, and
+dead letters), lease templates, listings, staff, company settings, billing, and
 platform administration.
 
-Some of those are not tables of records and never will be — the queue is a list
-of things to do, the inbox is a conversation. Others reasonably should have one
-and do not: payout runs, bank reconciliation and lease documents are the three
-I would add first.
+Those are not tables of records and mostly never will be — the queue is a list
+of things to do, the inbox is a conversation, and staff and settings are a
+handful of rows on a screen somebody is already looking at.
 
 ---
 
@@ -212,10 +213,6 @@ I would add first.
 ---
 
 ## What I would do next
-
-The three missing exports — payout runs, bank reconciliation, lease documents —
-are each an afternoon and would close the "every table" gap honestly rather
-than by redefining it.
 
 A1's sibling is now settled. A job with a contractor assigned says, before
 anybody types a figure, that the bill will replace it; a job already billed
