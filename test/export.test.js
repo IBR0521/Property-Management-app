@@ -258,6 +258,17 @@ describe("the files themselves", () => {
     assert.match(entry.data.toString(), /not a path this application wrote/);
   });
 
+  test("an address that is not the file store is not fetched", async () => {
+    /* This column can only hold what storeUpload wrote, today. The check
+       exists because the function turns a database column into an outbound
+       request, and that is worth being narrow about before something else
+       ever writes to it. */
+    const photoId = await attachPhoto("https://example.invalid/whatever.png", null);
+    const entry = (await archive()).get(`files/work-orders/${photoId}.png`);
+    assert.ok(entry);
+    assert.match(entry.data.toString(), /not an address this application stores files at/);
+  });
+
   test("with everything readable the README says that instead", async () => {
     await attachPhoto("exporttest/two.png");
     const readme = text(await archive(), "README.txt");
@@ -352,6 +363,32 @@ describe("the route", () => {
     const entries = readZip(Buffer.from(await res.arrayBuffer()));
     assert.ok(entries.has("README.txt"));
     assert.match(entries.get("data/owner.csv").data.toString(), /Leaving Co Owner/);
+  });
+
+  test("a cancelled download does not leave the handler waiting", async () => {
+    /* `once("drain")` on its own is a promise that never settles when the
+       person closes the tab: the socket will not drain because there is
+       nothing at the other end. The symptom is not an error — it is a
+       handler that never returns, which is why it needs a test rather than a
+       stack trace. */
+    const controller = new AbortController();
+    const token = await agent.csrf("/app/setup/export");
+    const body = new URLSearchParams({ _csrf: token }).toString();
+
+    await assert.rejects(async () => {
+      const res = await agent.raw("/app/setup/export", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body,
+        signal: controller.signal,
+      });
+      controller.abort();
+      await res.arrayBuffer();
+    });
+
+    /* The process is still answering, which is the whole assertion. */
+    const after = await agent.get("/app/setup/export");
+    assert.equal(after.status, 200);
   });
 
   test("it is recorded, because somebody read the whole portfolio", async () => {

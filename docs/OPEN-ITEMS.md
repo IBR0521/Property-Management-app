@@ -129,6 +129,15 @@ run the push services accept what we send them.
 | 3 | **Turn on "Enforce SSL on incoming connections"** in Supabase → Database Settings | The pooler currently accepts unencrypted connections. |
 | 4 | **Download the CA certificate** into `DATABASE_CA_CERT` | TLS is encrypted but unverified today, so it defends against eavesdropping but not interception. `/health` reports which mode is live. |
 
+**Fixed in Phase 7a, no action needed — recorded because it was live.**
+`/app/company`, `/app/company/access` and `/app/billing` declared
+`settings.manage` in the sidebar and had no entry in the routing gate, so any
+signed-in account could open them and POST to them: rename the company, change
+the emergency phone number, change the address email is sent from, and change
+the public handle every printed QR sticker points at. `/app/messages` had
+neither, and exposed every message to every tenant and owner. All four are now
+gated, and a test holds the sidebar against the gate for every role.
+
 ---
 
 ## Deployment
@@ -207,3 +216,5 @@ test run cannot charge a real card.
 | A | **Sentry DSN**, or another error tracker, or neither | Any time. Unset is a genuine no-op with no outbound calls. |
 | B | **Stripe Connect** settings, and Standard vs Express | Phase 3. Compared in that phase's plan. This is the *tenant rent* path, separate from the subscription billing above — funds go to the PM company's own account and never through the platform. |
 | C | **The product name and domain** | Phase 9, when `index.html` stops being a Columbus estate agent's site. Also settles whether companies get subdomains rather than `/c/slug` paths. |
+| D | **Recurring charges beyond rent** — pet rent, parking, storage, utility billing | The first migration from AppFolio, Buildium or Rent Manager. A lease here has one rent and one due day; those systems bill several lines per lease, and an import loses the difference. The import preview now says so in its own words rather than burying it in the list of unread columns, but the feature does not exist and the roadmap still carries it. Deciding it needs a schema for the charge, a place for it in the monthly charge run, and a line on the owner statement. |
+| E | **A background data export for a very large portfolio** | When a customer has millions of journal rows. The export reads every table inside one transaction so the archive is a single consistent moment, which means it holds the table data in memory until the archive is written. Tens of megabytes for a few thousand units; not viable for a portfolio an order of magnitude larger, and it would exceed a serverless function's timeout before it exceeded its memory. The fix is a job that builds into blob storage and emails a link, not a bigger buffer. |

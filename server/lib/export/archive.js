@@ -19,10 +19,20 @@
    could not be read. A customer who finds out six months later that their
    receipts were not in it has been misled by an export that looked complete.
 
-   ## Memory
+   ## Memory, and where this stops working
 
-   One table at a time and one file at a time. The zip writer yields as it
-   goes, so an archive larger than this process could hold still streams. */
+   The uploaded files are read one at a time and the zip writer yields as it
+   goes, so a thousand photographs cost one photograph.
+
+   The **table data is not** streamed, and that is a deliberate trade against
+   the snapshot below: all of it is read inside one transaction, which means
+   all of it is held until the archive is written. For a portfolio of a few
+   thousand units that is tens of megabytes and fine. For one with millions of
+   journal splits it is not, and the answer there is a background job that
+   builds the archive into blob storage and emails a link — not a bigger
+   buffer. Written down rather than discovered, because the shape of the fix
+   is different from the shape of this code and pretending otherwise is how a
+   feature quietly stops working at the size where it matters most. */
 import { all, get, tx } from "../db.js";
 import { BOM, csvRow } from "../csv.js";
 import { zipStream } from "../zip.js";
@@ -31,9 +41,22 @@ import { stamp } from "../dates.js";
 
 /* A stored path is either a key under the upload directory or an absolute
    URL at the blob store, depending on where this instance keeps them. */
+/* The blob store, and only the blob store.
+
+   Every value this reads was written by `storeUpload`, so today it can only
+   be a URL at the blob host or a key under the upload directory. The check is
+   here anyway: this function turns a database column into an outbound request,
+   and the day something else writes that column is not the day to find out
+   what it fetches. */
+const BLOB_HOST = /^[a-z0-9-]+\.public\.blob\.vercel-storage\.com$/i;
+
 async function readStored(stored) {
   if (/^https?:\/\//.test(stored)) {
-    const res = await fetch(stored);
+    const url = new URL(stored);
+    if (url.protocol !== "https:" || !BLOB_HOST.test(url.hostname)) {
+      throw new Error("that is not an address this application stores files at");
+    }
+    const res = await fetch(url);
     if (!res.ok) throw new Error(`the file store answered ${res.status}`);
     return Buffer.from(await res.arrayBuffer());
   }

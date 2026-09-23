@@ -26,6 +26,27 @@ import { slug } from "../lib/csv.js";
 import { exportArchive } from "../lib/export/archive.js";
 import { exported, skipped } from "../lib/export/tables.js";
 
+/* Waits for the socket to catch up — or for it to go away.
+
+   `once("drain")` alone is a promise that never settles when the person
+   closes the tab halfway through a download: the socket will not drain
+   because there is nothing at the other end, and the handler waits for ever
+   holding an open generator. A cancelled download is the ordinary case for a
+   file this size, not an edge. */
+function drain(res) {
+  return new Promise((resolve) => {
+    const done = () => {
+      res.off("drain", done);
+      res.off("close", done);
+      res.off("error", done);
+      resolve();
+    };
+    res.once("drain", done);
+    res.once("close", done);
+    res.once("error", done);
+  });
+}
+
 export function registerExport(router) {
   router.get("/app/setup/export", async (ctx) => {
     const cid = ctx.staff.company_id;
@@ -109,13 +130,12 @@ export function registerExport(router) {
 
     try {
       for await (const chunk of exportArchive({ companyId: cid, requestedBy: ctx.staff.name })) {
+        if (ctx.res.writableEnded || ctx.res.destroyed) break;
         /* Backpressure: a fast database and a slow connection would otherwise
            queue the whole archive in this process's memory. */
-        if (!ctx.res.write(chunk)) {
-          await new Promise((resolve) => ctx.res.once("drain", resolve));
-        }
+        if (!ctx.res.write(chunk)) await drain(ctx.res);
       }
-      ctx.res.end();
+      if (!ctx.res.writableEnded) ctx.res.end();
     } catch (err) {
       /* The headers went out with the first chunk, so there is no status left
          to change. Destroying the socket is what tells the browser the
