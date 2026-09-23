@@ -142,6 +142,18 @@ export const TABLES = {
   saved_report: { by: "company" },
   report_schedule: { by: "company" },
   audit_log: { by: "company" },
+  api_key: {
+    by: "company",
+    /* The record that a key exists — what it is called, what it may do, when
+       it was last used — is the company's and is here. The hash of the secret
+       is not useful to anybody and is one step from a credential. */
+    redact: ["secret_hash"],
+  },
+  api_request: { by: "company" },
+  api_rate: {
+    skip: "API rate-limiting counters. Platform machinery, scoped through the key, "
+      + "and nothing happened in them.",
+  },
   import_batch: {
     by: "company",
     /* The uploaded file itself, which is a copy of a spreadsheet they already

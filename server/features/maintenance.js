@@ -28,6 +28,7 @@ import { sendNow } from "../lib/delivery/now.js";
 import { resolvePublicCompany, companyForUnitToken, publicPath } from "../lib/tenancy.js";
 import { postMoney } from "../lib/ledger.js";
 import { complianceState } from "./vendors.js";
+import { raiseWorkOrder, autoRoute, event } from "../lib/workorders.js";
 
 const STATUS_TONE = {
   new: "warn", triaged: "warn", awaiting_owner: "warn",
@@ -464,34 +465,29 @@ export function registerMaintenance(router) {
   });
 
   router.post("/app/maintenance/new", async (ctx) => {
-    const cid = ctx.staff.company_id;
     const f = ctx.fields;
-    const unit = await one(
-      `SELECT u.*, p.line1, p.owner_id FROM unit u JOIN property p ON p.id = u.property_id
-        WHERE u.id = ? AND u.company_id = ?`, String(f.unit_id || ""), cid);
-    const cat = category(String(f.category || "")) || category("other");
-    const severity = ["normal", "urgent", "emergency"].includes(f.severity) ? f.severity : "normal";
-    const lease = await get("SELECT * FROM lease WHERE unit_id = ? AND status = 'active' LIMIT 1", unit.id);
-    const woId = id();
-    const reference = ref("WO");
-    const company = await one("SELECT * FROM company WHERE id = ?", cid);
-
-    await tx(async () => {
-      await insert("work_order", {
-        id: woId, company_id: cid, unit_id: unit.id, lease_id: lease ? lease.id : null,
-        reference, category: cat.key, severity,
-        summary: String(f.summary || "").trim() || "Reported by staff",
-        detail: String(f.detail || "").trim() || null,
-        reported_by_name: String(f.name || "").trim() || ctx.staff.name,
-        reported_by_phone: String(f.phone || "").trim() || null,
-        reported_channel: "staff", status: "new",
-        public_token: token(), created_at: stamp(),
-      });
-      await event(woId, ctx.staff.name, "reported", `Logged by staff · ${cat.label} · ${severity}`);
-      if (severity !== "emergency") await autoRoute({ company, woId, cat, unit, severity });
+    /* Through the same function the API calls. It used to be written out
+       here, which was fine while this screen was the only way a job could be
+       raised; with a second way in, two copies of "what happens when a job is
+       raised" is how the routing rules get applied on one path and not the
+       other. */
+    const { workOrderId } = await raiseWorkOrder({
+      companyId: ctx.staff.company_id,
+      unitId: String(f.unit_id || ""),
+      category: String(f.category || ""),
+      severity: String(f.severity || "normal"),
+      summary: String(f.summary || "").trim() || "Reported by staff",
+      detail: f.detail,
+      reportedByName: String(f.name || "").trim() || ctx.staff.name,
+      reportedByPhone: f.phone,
+      channel: "staff", actor: ctx.staff.name,
+      /* A member of staff is looking at the screen they just submitted, and
+         the emergency card is in front of them. The alert belongs to the
+         paths where nobody is watching. */
+      alertOnCall: false,
     });
 
-    redirect(ctx.res, `/app/maintenance/${woId}`);
+    redirect(ctx.res, `/app/maintenance/${workOrderId}`);
   });
 
   /* --- detail ------------------------------------------------------------ */
@@ -803,30 +799,10 @@ async function loadForWrite(woId, cid) {
       WHERE w.id = ? AND w.company_id = ?`, woId, cid);
 }
 
-export async function event(woId, actor, kind, note, tenantVisible = 1) {
-  await insert("work_order_event", {
-    id: id(), work_order_id: woId, at: stamp(), actor, kind,
-    note: note || null, tenant_visible: tenantVisible,
-  });
-}
-
-/* Routes by the company's rules, lowest rank first. Recording that no rule
-   matched is more useful than silently leaving the field null. */
-async function autoRoute({ company, woId, cat, unit, severity }) {
-  const rule = await get(
-    `SELECT r.*, v.name, v.trade, v.after_hours FROM routing_rule r
-       JOIN vendor v ON v.id = r.vendor_id
-      WHERE r.company_id = ? AND r.category = ? AND v.active = 1
-      ORDER BY r.rank LIMIT 1`, company.id, cat.key);
-
-  if (!rule) {
-    await event(woId, "system", "triaged", `No routing rule for ${cat.label} — needs a vendor picked by hand.`, 0);
-    await update("work_order", woId, { status: "triaged" });
-    return;
-  }
-  await update("work_order", woId, { status: "triaged", vendor_id: rule.vendor_id });
-  await event(woId, "system", "triaged", `Routed to ${rule.name} (${rule.trade}) by category rule.`, 0);
-}
+/* Both moved to lib/workorders.js when the API became a second way to raise
+   a job. `event` is re-exported because other features import it from here
+   and a rename across four files buys nothing. */
+export { event };
 
 /* Shown when a public page cannot tell which company it belongs to. It names
    no company: listing every company on the platform so a visitor can pick is

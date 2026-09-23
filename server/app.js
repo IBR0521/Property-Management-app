@@ -57,6 +57,8 @@ import { registerTech } from "./features/tech.js";
 import { registerReports } from "./features/reports.js";
 import { registerImport } from "./features/import.js";
 import { registerExport } from "./features/export.js";
+import { registerApi } from "./features/api.js";
+import { registerApiKeys } from "./features/apikeys.js";
 
 const router = createRouter();
 
@@ -97,6 +99,8 @@ registerTech(router);
 registerReports(router);
 registerImport(router);
 registerExport(router);
+registerApi(router);
+registerApiKeys(router);
 
 /* Routes that need a signed-in staff member. Everything under /app except the
    sign-in pages, which register themselves as public. */
@@ -222,6 +226,11 @@ export async function handle(req, res) {
        cannot confuse them is the gate that never has to remember not to. */
     const isPortalRoute = path === "/portal" || path.startsWith("/portal/");
 
+    /* The public API. Neither of the two branches below applies to it: a
+       caller is a key rather than a session, and every route it has
+       authenticates through the one door in features/api.js. */
+    const isApiRoute = path === "/api" || path.startsWith("/api/");
+
     if (isAppRoute && !PUBLIC_APP_PATHS.has(path)) {
       ctx.staff = await currentStaff(req);
       if (!ctx.staff) {
@@ -321,8 +330,16 @@ export async function handle(req, res) {
       ctx.fields = parsed.fields || {};
       ctx.files = parsed.files || [];
       /* Every state-changing request is checked, including the public tenant
-         form: without it, any site could post work orders into the queue. */
-      if (!checkCsrf(req, ctx.fields)) {
+         form: without it, any site could post work orders into the queue.
+
+         Except the API, and the reason is the whole reason CSRF exists. A
+         cookie is ambient — a browser attaches it to a request the person did
+         not mean to make, which is what a forged POST exploits. An
+         `Authorization` header is not ambient: nothing attaches it for you,
+         so there is nothing to forge. A token here would be a ritual, and a
+         ritual is how the reason gets forgotten and then applied somewhere it
+         does not hold. */
+      if (!isApiRoute && !checkCsrf(req, ctx.fields)) {
         throw new Forbidden("This form expired. Go back, reload the page and try again.");
       }
     }

@@ -207,6 +207,7 @@ describe("company A cannot reach company B's records", () => {
       "journal_split",           // -> journal
       "bank_webhook_event",      // provider delivery ids, no company until resolved
       "obligation_reminder",     // -> obligation
+      "api_rate",                // -> api_key
 
       /* Identity, and the one deliberate exception to the rule.
 
