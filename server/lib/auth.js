@@ -229,6 +229,16 @@ const ROUTE_CAPABILITY = [
   ["/app/maintenance", "maintenance.work"],
   ["/app/turns", "maintenance.work"],
   ["/app/compliance", "property.view"],
+  /* Signed in is enough to reach the section; which reports appear, and
+     which may be opened, is decided per report.
+
+     This application enforces authorisation once at this gate, and that is
+     right almost everywhere. It cannot be right here: the capability depends
+     on which report, so a single entry would have to be either the loosest of
+     them — handing a leasing agent the balance sheet — or the strictest,
+     hiding the rent roll from the person whose job it is. Same shape as the
+     portal and the technician's view: the authority belongs to the record. */
+  ["/app/reports", null],
   ["/app/portfolio", "property.view"],
   ["/app/setup", "settings.manage"],
   ["/app/staff", "staff.manage"],

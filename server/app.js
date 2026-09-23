@@ -54,6 +54,7 @@ import { registerInbox } from "./features/inbox.js";
 import { registerPwa } from "./features/pwa.js";
 import { registerPush } from "./features/push.js";
 import { registerTech } from "./features/tech.js";
+import { registerReports } from "./features/reports.js";
 
 const router = createRouter();
 
@@ -91,6 +92,7 @@ registerInbox(router);
 registerPwa(router);
 registerPush(router);
 registerTech(router);
+registerReports(router);
 
 /* Routes that need a signed-in staff member. Everything under /app except the
    sign-in pages, which register themselves as public. */

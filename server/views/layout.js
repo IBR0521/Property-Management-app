@@ -6,6 +6,11 @@
 import { html, doc, raw, attr } from "../lib/render.js";
 import { icons } from "./icons.js";
 import { can, roleLabel, requiredCapability } from "../lib/auth.js";
+import { reportsFor } from "../lib/reports/index.js";
+
+/* Imported lazily through a function rather than at the top of the file:
+   the registry imports the features, and the features import this. */
+const hasAnyReport = (staff) => reportsFor(staff).length > 0;
 
 const APP_MANIFEST = "/app-assets/manifest.webmanifest";
 export const PORTAL_MANIFEST = "/app-assets/portal.webmanifest";
@@ -55,6 +60,7 @@ const NAV = [
     { href: "/app/leases", key: "leases", icon: "doc", label: "Lease documents", need: "leasing.work" },
   ] },
   { group: null, items: [
+    { href: "/app/reports", key: "reports", icon: "doc", label: "Reports", when: hasAnyReport },
     { href: "/app/jobs", key: "jobs", icon: "wrench", label: "Your jobs", need: "maintenance.own" },
     { href: "/app/messages", key: "messages", icon: "send", label: "Messages" },
     { href: "/app/staff", key: "staff", icon: "users", label: "People", need: "staff.manage" },
@@ -123,6 +129,10 @@ ${impersonation ? html`
          links that answer 403. `item.need` is still honoured where it is
          stricter than the route's own requirement. */
       const items = group.items.filter((item) => {
+        /* For the one destination whose access is not a single capability.
+           Reports are gated per report, so "may this person reach the
+           section" is "is there anything in it for them". */
+        if (item.when && !item.when(staff)) return false;
         if (item.need && !can(staff, item.need)) return false;
         const gate = requiredCapability(item.href);
         return !gate || can(staff, gate);
