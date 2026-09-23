@@ -142,9 +142,26 @@ export function toPg(sql) {
 const txStore = new AsyncLocalStorage();
 const conn = () => txStore.getStore() || db;
 
-export async function tx(fn) {
-  if (txStore.getStore()) return fn();            // join the outer transaction
-  return db.begin((scoped) => txStore.run(scoped, fn));
+/* `isolation` is passed through to BEGIN when one is asked for. Everything in
+   the application runs at the default — read committed — because everything
+   in the application is a short write. The exception is the data export,
+   which reads sixty-odd tables in sequence and would otherwise see a
+   different snapshot for each one: a lease in one file referring to a journal
+   that is not in another, in an archive whose whole purpose is to load
+   somewhere else.
+
+   A nested call joins the outer transaction and cannot change its isolation,
+   which is a property of the transaction rather than of the call — so asking
+   for one from inside another is refused rather than silently ignored. */
+export async function tx(fn, { isolation = null } = {}) {
+  if (txStore.getStore()) {
+    if (isolation) {
+      throw new Error("A transaction's isolation cannot be changed from inside it.");
+    }
+    return fn();                                  // join the outer transaction
+  }
+  const run = (scoped) => txStore.run(scoped, fn);
+  return isolation ? db.begin(isolation, run) : db.begin(run);
 }
 
 /* --- query helpers -------------------------------------------------------- */

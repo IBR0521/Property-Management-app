@@ -41,8 +41,8 @@ export function registerSetup(router) {
 
         <!-- Import -->
         <div class="panel">
-          <div class="panel__head"><h2>Import a portfolio</h2>
-            <p>From AppFolio, Buildium, DoorLoop, Rent Manager or a spreadsheet</p>
+          <div class="panel__head"><h2>Your data</h2>
+            <p>Bring a portfolio in, or take all of it out</p>
           </div>
           <div class="panel__body">
             <p class="lede">Owners, properties, units, tenants, leases and vendors, from CSV.
@@ -50,7 +50,10 @@ export function registerSetup(router) {
               anything is written.</p>
             <div class="btnrow" style="margin-top:1rem">
               <a class="pill outline sm" href="/app/setup/import">Import a portfolio</a>
+              <a class="pill outline sm" href="/app/setup/export">Export everything</a>
             </div>
+            <span class="field__help">The export is one archive with every table and every
+              uploaded file in it, available whenever you want it.</span>
           </div>
         </div>
 
