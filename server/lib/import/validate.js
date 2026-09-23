@@ -31,7 +31,7 @@
    because picking one is picking at random. */
 import { all } from "../db.js";
 import { readTable } from "./csv.js";
-import { ENTITIES, entityOrder, mapHeaders, applyMapping } from "./mappings.js";
+import { ENTITIES, entityOrder, mapHeaders, applyMapping, unplaceableMoney } from "./mappings.js";
 import { readDate, readMoney, readInt, readDecimal, readOneOf, readList } from "./read.js";
 
 /* The CHECK constraints, mirrored. A value that does not map is refused here
@@ -147,6 +147,18 @@ export async function validateImport({ companyId, sourceSystem = "generic", file
      anybody agrees to post a journal. */
   const opening = openingTotals(entities);
 
+  /* Not a problem — nothing here is wrong and the import should go ahead —
+     but not an ordinary ignored column either. A lease in this application
+     has one rent, so a column called "pet rent" is money a tenant is
+     contractually paying every month that will not exist here afterwards.
+     Buried in a list of thirty unread column names it reads as something
+     that did not matter. */
+  const notes = [];
+  for (const [entity, state] of Object.entries(entities)) {
+    const money = unplaceableMoney(entity, state.ignored);
+    if (money.length) notes.push({ entity, kind: "recurring_money", columns: money });
+  }
+
   const summary = {};
   for (const [entity, state] of Object.entries(entities)) {
     summary[entity] = {
@@ -161,7 +173,7 @@ export async function validateImport({ companyId, sourceSystem = "generic", file
   }
 
   return {
-    sourceSystem, entities, summary, problems, opening,
+    sourceSystem, entities, summary, problems, opening, notes,
     /* Nothing is written unless every row is good. A partially-correct
        import is worse than a failed one: it leaves a portfolio somebody
        cannot tell the state of. */

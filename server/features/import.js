@@ -41,7 +41,8 @@ import { all, insert, update, one, run as sqlRun } from "../lib/db.js";
 import { id } from "../lib/ids.js";
 import { stamp, human, today } from "../lib/dates.js";
 import { usd, parseMoney } from "../lib/money.js";
-import { sendHtml, redirect, BadRequest } from "../lib/http.js";
+import { sendHtml, redirect, securityHeaders, BadRequest } from "../lib/http.js";
+import { BOM, CSV_TYPE, csvRow } from "../lib/csv.js";
 import { html, attr } from "../lib/render.js";
 import { appPage, notice, empty } from "../views/layout.js";
 import { navCounts } from "../lib/counts.js";
@@ -113,7 +114,8 @@ export function registerImport(router) {
                       <input id="file-${entity}" name="${entity}" type="file" accept=".csv,text/csv" />
                       <span class="field__help">${required.length
                         ? html`Must have a column for: ${required.join(", ")}.`
-                        : "Every column is optional."}</span>
+                        : "Every column is optional."}
+                        <a href="/app/setup/import/template/${entity}.csv">Blank template</a></span>
                     </div>`;
                 })}
               </div>
@@ -167,6 +169,33 @@ export function registerImport(router) {
           </div>
         </div>`,
     }));
+  });
+
+  /* --- a blank file to start from ----------------------------------------- */
+
+  /* A file to start from, for the company whose old system has no export.
+
+     Headings only, and the first spelling of each alias rather than all of
+     them. No example row: an example row is a row, and somebody will import
+     it and then wonder who "Jane Example" is.
+
+     It does not collide with `/app/setup/import/:id` — that pattern is four
+     segments and this is five. */
+  router.get("/app/setup/import/template/:entity", async (ctx) => {
+    const entity = String(ctx.params.entity).replace(/\.csv$/i, "");
+    const spec = ENTITIES[entity];
+    if (!spec) throw new BadRequest("There is no file of that kind.");
+
+    const headers = Object.entries(spec.fields).map(([, def]) => def.aliases[0]);
+    const body = BOM + csvRow(headers) + "\r\n";
+
+    ctx.res.writeHead(200, {
+      "Content-Type": CSV_TYPE,
+      "Content-Length": Buffer.byteLength(body),
+      "Content-Disposition": `attachment; filename="${entity}-template.csv"`,
+      ...securityHeaders(ctx.req),
+    });
+    ctx.res.end(body);
   });
 
   /* --- reading the files -------------------------------------------------- */
@@ -229,6 +258,7 @@ export function registerImport(router) {
       preview: JSON.stringify({
         at: stamp(), ok: validated.ok,
         summary: validated.summary, opening: validated.opening,
+        notes: validated.notes,
         problems: validated.problems.slice(0, 500),
       }),
     });
@@ -321,6 +351,8 @@ export function registerImport(router) {
             </div>
           </div>` : ""}
 
+        ${moneyNotes(validated.notes)}
+
         ${openingPanel(validated.opening)}
 
         ${validated.ok ? commitPanel(ctx, batch, validated, held) : html`
@@ -379,7 +411,8 @@ export function registerImport(router) {
         error: `${validated.problems.length} problem(s) found when committing`,
         preview: JSON.stringify({
           at: stamp(), ok: false, summary: validated.summary,
-          opening: validated.opening, problems: validated.problems.slice(0, 500),
+          opening: validated.opening, notes: validated.notes,
+          problems: validated.problems.slice(0, 500),
         }),
       });
       return redirect(ctx.res, `${back}?m=${encodeURIComponent(
@@ -423,6 +456,34 @@ export function registerImport(router) {
 }
 
 /* --- pieces of the preview -------------------------------------------------- */
+
+/* Money a tenant pays every month that this application has nowhere to hold.
+
+   It would already appear under "columns that were not read", and that is not
+   enough — in a list of thirty unread headings it reads as something that did
+   not matter, and $50 of pet rent on every lease is not that. */
+function moneyNotes(notes) {
+  const money = (notes || []).filter((n) => n.kind === "recurring_money");
+  if (!money.length) return "";
+  const columns = money.flatMap((n) => n.columns);
+
+  return html`
+    <div class="panel">
+      <div class="panel__body">
+        ${notice("warn", "Charges this application cannot hold yet",
+          html`Your lease file has ${columns.map((c) => html`<span class="chip" data-tone="warn">${c}</span> `)}
+            in it. A lease here has one rent and one due day — there is no second
+            recurring charge, so these columns are not read and that money will not be
+            billed after the import.
+            <br /><br />
+            Nothing is wrong with the file and the import will work. What you have to
+            decide is what to do about the difference: fold it into the rent figure
+            before uploading, or keep billing it outside this system. Said here rather
+            than left in the list of unread columns, because it is money somebody is
+            contractually paying.`)}
+      </div>
+    </div>`;
+}
 
 function openingPanel(opening) {
   const anything = opening.arrearsCents || opening.creditCents || opening.depositsCents;

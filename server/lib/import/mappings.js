@@ -225,5 +225,43 @@ export function applyMapping(row, { mapping }) {
   return out;
 }
 
+/* Columns that mean money somebody pays every month, which this application
+   has nowhere to put.
+
+   A lease here has one rent and one due day. It has no pet rent, no parking,
+   no monthly utility billing — the feature does not exist, and the roadmap
+   still has "recurring charges" on it. So an AppFolio export where a tenant
+   pays $1,450 rent, $50 for the dog and $75 for a space imports as $1,450 and
+   loses $125 a month, on every lease, silently.
+
+   The ordinary "columns that were not read" list would show these, and that
+   is not enough: it reads as a list of things that did not matter. Money that
+   a tenant is contractually paying is not a column that did not matter, so it
+   gets said in its own words, on its own row, before anybody commits.
+
+   Not an error. The import is still the right thing to do; the person just has
+   to decide what to do about the difference — fold it into the rent, or carry
+   it outside this system until the feature exists. */
+const RECURRING_MONEY = [
+  "pet rent", "pet fee", "parking", "parking rent", "garage", "storage",
+  "storage rent", "utility", "utilities", "water", "sewer", "trash",
+  "rubbish", "valet trash", "internet", "cable", "renters insurance fee",
+  "insurance fee", "amenity", "amenity fee", "admin fee", "monthly fee",
+  "recurring charge", "recurring charges", "other charge", "other charges",
+  "additional rent", "addl rent", "surcharge", "ratio utility billing", "rubs",
+  "pest control", "lawn care", "hoa", "hoa fee",
+];
+
+/* The ignored headers on a lease file that name money somebody pays monthly.
+   Returns the headers as the file spells them, because that is what the
+   person will look for in their spreadsheet. */
+export function unplaceableMoney(entity, ignored) {
+  if (entity !== "lease") return [];
+  return (ignored || []).filter((header) => {
+    const key = normaliseHeader(header);
+    return RECURRING_MONEY.includes(key);
+  });
+}
+
 export const entityOrder = () =>
   Object.entries(ENTITIES).sort((a, b) => a[1].order - b[1].order).map(([key]) => key);

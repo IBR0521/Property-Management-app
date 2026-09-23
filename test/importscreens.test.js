@@ -82,6 +82,23 @@ async function preview(files = FILES) {
 /* --- the first screen -------------------------------------------------------- */
 
 describe("before anything is uploaded", () => {
+  test("a blank template to start from, for whoever has no export", async () => {
+    const res = await agent.get("/app/setup/import/template/lease.csv");
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-disposition"), /lease-template\.csv/);
+    const body = (await res.text()).replace(/^\ufeff/, "");
+    const [header, ...rest] = body.trim().split("\r\n");
+    assert.match(header, /^id,unit id,unit,/);
+    assert.match(header, /rent/);
+    assert.equal(rest.length, 0,
+      "headings only — an example row is a row, and somebody will import it");
+  });
+
+  test("a template for a kind of file that does not exist is refused", async () => {
+    const res = await agent.get("/app/setup/import/template/spaceships.csv");
+    assert.equal(res.status, 400);
+  });
+
   test("it says what each file may contain", async () => {
     const { body } = await agent.text("/app/setup/import");
     assert.match(body, /Import a portfolio/);
@@ -128,6 +145,26 @@ describe("the preview", () => {
     assert.match(body, /Owed by tenants at conversion<\/td><td class="num">\$450\.00/);
     assert.match(body, /Deposits held<\/td><td class="num">\$1,200\.00/);
     assert.match(body, /Paid ahead by tenants at conversion<\/td><td class="num">\$0\.00/);
+  });
+
+  test("money the application cannot hold is said in its own words", async () => {
+    const { body } = await preview({
+      ...FILES,
+      lease: "id,unit id,tenant ids,start date,rent,pet rent,parking,deposit,balance\n"
+        + "L-1,U-1,T-1,2026-01-01,1200,50,75,1200,450\n",
+    });
+    assert.match(body, /Charges this application cannot hold yet/);
+    assert.match(body, /pet rent/);
+    assert.match(body, /parking/);
+    assert.match(body, /will not be\s+billed after the import/,
+      "the consequence, not just the fact");
+    assert.match(body, /Nothing is wrong with these files/,
+      "it is a warning about the product, not a problem with the file");
+  });
+
+  test("a file with no such column says nothing about it", async () => {
+    const { body } = await preview();
+    assert.doesNotMatch(body, /Charges this application cannot hold yet/);
   });
 
   test("a problem stops it, with the row number", async () => {
