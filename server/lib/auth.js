@@ -148,9 +148,16 @@ const ROLE_CAPABILITIES = {
   /* The person in the van, not the coordinator at the desk. They see the jobs
      assigned to them and the addresses those jobs are at, and nothing else —
      not the rest of the queue, not the portfolio, not a tenant they are not
-     visiting. Phase 5 builds the phone view this role exists for. */
+     visiting.
+
+     `property.view` used to be in here and contradicted every word of that:
+     it gates /app/portfolio and /app/compliance, which is the whole portfolio
+     and every deadline in it. Nothing the technician's own screen does needs
+     it — /app/jobs is gated on maintenance.own, and the job's address comes
+     from the job. Removed when Phase 5 built the view this role exists for,
+     which is the first time anybody looked. */
   technician: new Set([
-    "maintenance.own", "property.view",
+    "maintenance.own",
   ]),
 };
 
@@ -163,6 +170,27 @@ export function capabilitiesFor(role) {
 export function can(staff, capability) {
   if (!staff || !staff.active) return false;
   return capabilitiesFor(staff.role).has(capability);
+}
+
+/* Where somebody lands when nothing else has said where to go.
+
+   "/app" is the company's queue and needs `queue.view`. A technician does not
+   have it, and never should — so signing in on a phone showed them a 403 as
+   the very first screen of the product. Found by signing in as one.
+
+   Ordered most useful first, and the last entry needs no capability at all,
+   so this always answers with somewhere they can actually open. */
+const LANDINGS = [
+  ["/app", "queue.view"],
+  ["/app/jobs", "maintenance.own"],
+  ["/app/account", null],
+];
+
+export function landingFor(staff) {
+  for (const [path, capability] of LANDINGS) {
+    if (!capability || can(staff, capability)) return path;
+  }
+  return "/app/account";
 }
 
 export function roleLabel(role) {

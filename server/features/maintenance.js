@@ -692,40 +692,12 @@ export function registerMaintenance(router) {
   router.post("/app/maintenance/:id/complete", async (ctx) => {
     const cid = ctx.staff.company_id;
     const wo = await loadForWrite(ctx.params.id, cid);
-    const actual = parseMoney(ctx.fields.actual);
-    const { stored, problems } = await storeMany(ctx.files, "photos");
-    const owner = await one(
-      `SELECT o.*, p.id AS property_id FROM owner o JOIN property p ON p.owner_id = o.id
-         JOIN unit u ON u.property_id = p.id WHERE u.id = ?`, wo.unit_id);
-
-    await tx(async () => {
-      await update("work_order", wo.id, { status: "complete", actual_cents: actual, closed_at: stamp() });
-      for (const s of stored) {
-        await insert("work_order_photo", {
-          id: id(), work_order_id: wo.id, path: s.path, phase: "completion",
-          mime: s.mime, bytes: s.bytes, created_at: stamp(),
-        });
-      }
-      await event(wo.id, ctx.staff.name, "completed",
-        `${actual != null ? usd(actual) : "no cost recorded"}${stored.length ? ` · ${stored.length} photo(s)` : ""}`
-        + `${ctx.fields.note ? ` · ${String(ctx.fields.note).trim()}` : ""}`);
-
-      /* The cost becomes a line on the owner's statement, with the work order
-         attached. This is the link that makes the monthly statement cheap to
-         produce and hard to argue with. */
-      if (actual != null && actual > 0) {
-        await postMoney({
-          companyId: cid, ownerId: owner.id, propertyId: owner.property_id,
-          unitId: wo.unit_id, leaseId: wo.lease_id, date: today(),
-          kind: "expense", amountCents: -Math.abs(actual),
-          memo: `${wo.reference} ${wo.summary}`,
-          source: "work_order", workOrderId: wo.id,
-          sourceType: "work_order", sourceId: wo.id, postedBy: ctx.staff.id,
-        });
-      }
+    const { message } = await closeOut({
+      companyId: cid, wo, staff: ctx.staff,
+      actualCents: parseMoney(ctx.fields.actual),
+      files: ctx.files, note: ctx.fields.note,
     });
-    const msg = problems.length ? problems.join(" ") : "Marked complete and posted to the owner's ledger.";
-    redirect(ctx.res, `/app/maintenance/${wo.id}?m=${encodeURIComponent(msg)}`);
+    redirect(ctx.res, `/app/maintenance/${wo.id}?m=${encodeURIComponent(message)}`);
   });
 
   router.post("/app/maintenance/:id/note", async (ctx) => {
@@ -752,6 +724,61 @@ export function registerMaintenance(router) {
 /* ==========================================================================
    Helpers
    ========================================================================== */
+
+/* Closing a job out.
+
+   Extracted because a technician finishing a job on a phone and a manager
+   finishing one at a desk must do the same thing — and the thing they do
+   includes posting an expense to an owner's ledger. A second copy of that
+   would drift, and the way it would drift is one of them quietly not posting.
+
+   Everything is inside one transaction: the status, the photos, the history
+   entry and the ledger posting either all happen or none do. A job marked
+   complete with no matching expense is a repair the owner is never billed
+   for and nobody notices until the year end. */
+export async function closeOut({ companyId, wo, staff, actualCents, files = [], note = null }) {
+  const { stored, problems } = await storeMany(files, "photos");
+  const owner = await one(
+    `SELECT o.*, p.id AS property_id FROM owner o JOIN property p ON p.owner_id = o.id
+       JOIN unit u ON u.property_id = p.id WHERE u.id = ?`, wo.unit_id);
+
+  await tx(async () => {
+    await update("work_order", wo.id, {
+      status: "complete", actual_cents: actualCents, closed_at: stamp(),
+    });
+    for (const s of stored) {
+      await insert("work_order_photo", {
+        id: id(), work_order_id: wo.id, path: s.path, phase: "completion",
+        mime: s.mime, bytes: s.bytes, created_at: stamp(),
+      });
+    }
+    await event(wo.id, staff.name, "completed",
+      `${actualCents != null ? usd(actualCents) : "no cost recorded"}${stored.length ? ` \u00b7 ${stored.length} photo(s)` : ""}`
+      + `${note ? ` \u00b7 ${String(note).trim()}` : ""}`);
+
+    /* The cost becomes a line on the owner's statement, with the work order
+       attached. This is the link that makes the monthly statement cheap to
+       produce and hard to argue with. */
+    if (actualCents != null && actualCents > 0) {
+      await postMoney({
+        companyId, ownerId: owner.id, propertyId: owner.property_id,
+        unitId: wo.unit_id, leaseId: wo.lease_id, date: today(),
+        kind: "expense", amountCents: -Math.abs(actualCents),
+        memo: `${wo.reference} ${wo.summary}`,
+        source: "work_order", workOrderId: wo.id,
+        sourceType: "work_order", sourceId: wo.id, postedBy: staff.id,
+      });
+    }
+  });
+
+  return {
+    stored,
+    problems,
+    message: problems.length
+      ? problems.join(" ")
+      : "Marked complete and posted to the owner's ledger.",
+  };
+}
 
 async function loadForWrite(woId, cid) {
   return await one(
@@ -878,7 +905,7 @@ async function unitOptions(companyId) {
       WHERE u.company_id = ? ORDER BY p.line1, u.label`, companyId);
 }
 
-function entryLabel(v) {
+export function entryLabel(v) {
   return v === "yes" ? "May enter when nobody is home"
     : v === "no" ? "Tenant must be present"
     : v === "call_first" ? "Call before entering"
@@ -891,6 +918,8 @@ function labelEvent(kind) {
     owner_asked: "Sent to the owner for approval", owner_approved: "Owner approved",
     owner_declined: "Owner declined", assigned: "Vendor assigned", scheduled: "Visit booked",
     completed: "Work completed", cancelled: "Cancelled", note: "Note",
+    /* From the technician's view. A time, and deliberately not a place. */
+    arrived: "Arrived on site", left: "Left site",
   }[kind] || kind;
 }
 

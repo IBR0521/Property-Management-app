@@ -19,7 +19,7 @@ import { html, raw, attr } from "../lib/render.js";
 import { appPage, publicPage, notice } from "../views/layout.js";
 import { navCounts } from "../lib/counts.js";
 import { seal, tryOpen, sealingAvailable, sha256 } from "../lib/crypto.js";
-import { hashPassword, verifyPassword, markSessionElevated, hasSecondFactor } from "../lib/auth.js";
+import { hashPassword, verifyPassword, markSessionElevated, hasSecondFactor, landingFor } from "../lib/auth.js";
 import { check, clear, clientIp } from "../lib/ratelimit.js";
 import {
   generateSecret, verify as verifyTotp, provisioningUri,
@@ -31,15 +31,15 @@ export function registerTwoFactor(router) {
   /* --- the challenge, for a session that has a password but no second factor */
 
   router.get("/app/2fa", async (ctx) => {
-    if (!hasSecondFactor(ctx.staff)) return redirect(ctx.res, "/app");
-    if (ctx.staff.totp_at) return redirect(ctx.res, "/app");
+    if (!hasSecondFactor(ctx.staff)) return redirect(ctx.res, landingFor(ctx.staff));
+    if (ctx.staff.totp_at) return redirect(ctx.res, landingFor(ctx.staff));
     sendHtml(ctx.res, challengePage({
       csrf: ctx.csrf, error: ctx.query.e, next: ctx.query.next, staff: ctx.staff,
     }));
   });
 
   router.post("/app/2fa", async (ctx) => {
-    if (!hasSecondFactor(ctx.staff)) return redirect(ctx.res, "/app");
+    if (!hasSecondFactor(ctx.staff)) return redirect(ctx.res, landingFor(ctx.staff));
 
     /* The same limiter as sign-in, keyed the same way. A six-digit code is a
        million possibilities and a window of three steps — without a limit that
@@ -51,7 +51,7 @@ export function registerTwoFactor(router) {
         `Too many attempts. Wait ${gate.retryAfterMinutes} minutes.`)}`);
     }
 
-    const next = safeNext(ctx.fields.next);
+    const next = safeNext(ctx.fields.next, ctx.staff);
     const submitted = String(ctx.fields.code || "");
 
     /* A recovery code, for the person whose phone is in a taxi somewhere. */
@@ -256,9 +256,13 @@ async function countRecoveryCodes(staffId) {
   return Number(row?.n || 0);
 }
 
-function safeNext(value) {
+/* `staff` so the fallback is somewhere this person can actually open. "/app"
+   is the company's queue and a technician has no capability for it, so the
+   default used to answer a correct 2FA code with a 403. */
+function safeNext(value, staff = null) {
   const v = String(value || "");
-  return v.startsWith("/app") && !v.startsWith("//") ? v : "/app";
+  if (v.startsWith("/app") && !v.startsWith("//")) return v;
+  return staff ? landingFor(staff) : "/app";
 }
 
 /* --- views ---------------------------------------------------------------- */

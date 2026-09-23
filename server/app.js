@@ -17,7 +17,7 @@ import { DATABASE_URL, DATABASE_CA_CERT, BLOB_READ_WRITE_TOKEN, configSummary } 
 import { createRouter } from "./lib/router.js";
 import { serveFromRoot, serveUpload } from "./lib/static.js";
 import { currentPerson } from "./lib/magiclink.js";
-import { currentStaff, can, requiredCapability, roleLabel, secondFactorRedirect } from "./lib/auth.js";
+import { currentStaff, can, requiredCapability, roleLabel, secondFactorRedirect, landingFor } from "./lib/auth.js";
 import {
   parseRequestBody, sendHtml, sendText, sendJson, redirect,
   HttpError, csrfToken, checkCsrf, Forbidden, isHttps,
@@ -53,6 +53,7 @@ import { registerPortalOwner } from "./features/portal-owner.js";
 import { registerInbox } from "./features/inbox.js";
 import { registerPwa } from "./features/pwa.js";
 import { registerPush } from "./features/push.js";
+import { registerTech } from "./features/tech.js";
 
 const router = createRouter();
 
@@ -89,6 +90,7 @@ registerPortalOwner(router);
 registerInbox(router);
 registerPwa(router);
 registerPush(router);
+registerTech(router);
 
 /* Routes that need a signed-in staff member. Everything under /app except the
    sign-in pages, which register themselves as public. */
@@ -122,6 +124,9 @@ export async function handle(req, res) {
      Inside the try they would be out of scope exactly when they are wanted. */
   let routePattern = null;
   let actor = {};
+  /* Hoisted for the same reason as the two above: the catch needs it, and
+     inside the try it would be out of scope exactly when it is wanted. */
+  let ctx = null;
 
   const scheme = isHttps(req) ? "https" : "http";
   const url = new URL(req.url, `${scheme}://${req.headers.host || "localhost"}`);
@@ -186,7 +191,7 @@ export async function handle(req, res) {
 
     routePattern = hit.pattern;
 
-    const ctx = {
+    ctx = {
       req, res, url, path,
       requestId,
       log: forRequest(requestId, { method: req.method, path }),
@@ -234,8 +239,7 @@ export async function handle(req, res) {
         if (req.method !== "GET") {
           /* A POST cannot be replayed after the detour, so it is refused
              rather than silently dropped on the way to a login page. */
-          return sendHtml(res, errorPage(403,
-            "Your session needs a second factor before it can change anything. Sign in again."), 403);
+          return sendHtml(res, errorPage(403, "Your session needs a second factor before it can change anything. Sign in again.", null, ctx.staff), 403);
         }
         return redirect(res, elevate);
       }
@@ -253,9 +257,8 @@ export async function handle(req, res) {
           ctx.log.warn("impersonation refused", {
             impersonationId: ctx.impersonation.id, forbidden, path, method: req.method,
           });
-          return sendHtml(res, errorPage(403,
-            "This is a read-only support session. It cannot change anything, alter an "
-            + "account, or touch billing."), 403);
+          return sendHtml(res, errorPage(403, "This is a read-only support session. It cannot change anything, alter an "
+            + "account, or touch billing.", null, ctx.staff), 403);
         }
         /* Counted rather than recorded path by path: a support session should
            not become a second copy of the customer's data. */
@@ -269,17 +272,15 @@ export async function handle(req, res) {
          each handler must remember is one that a handler will not. */
       if (req.method === "POST" && !readOnlyExempt(path) && await companyIsReadOnly(ctx.staff.company_id)) {
         ctx.log.warn("write refused, subscription lapsed", { companyId: ctx.staff.company_id });
-        return sendHtml(res, errorPage(402,
-          "Your subscription has lapsed, so this account is read-only. Everything is still here and "
-          + "nothing has been deleted — start a plan on the billing page and you can carry on."), 402);
+        return sendHtml(res, errorPage(402, "Your subscription has lapsed, so this account is read-only. Everything is still here and "
+          + "nothing has been deleted — start a plan on the billing page and you can carry on.", null, ctx.staff), 402);
       }
 
       const needed = requiredCapability(path, req.method);
       if (needed && !can(ctx.staff, needed)) {
         console.warn(`[403] ${req.method} ${path} — ${ctx.staff.email} (${ctx.staff.role}) lacks ${needed}`);
-        return sendHtml(res, errorPage(403,
-          `Your account is a ${roleLabel(ctx.staff.role).toLowerCase()} account, which does not have access to this. ` +
-          `If you need it, an administrator can change your role.`), 403);
+        return sendHtml(res, errorPage(403, `Your account is a ${roleLabel(ctx.staff.role).toLowerCase()} account, which does not have access to this. ` +
+          `If you need it, an administrator can change your role.`, null, ctx.staff), 403);
       }
     } else if (isAppRoute) {
       ctx.staff = await currentStaff(req);
@@ -353,11 +354,14 @@ export async function handle(req, res) {
 
     const wantsJson = (req.headers.accept || "").includes("application/json");
     if (wantsJson) return sendJson(res, { error: safe, requestId }, status);
-    sendHtml(res, errorPage(status, safe, requestId), status);
+    /* The way back has to be somewhere this person can actually open. "/app"
+       is the company queue, so for a technician the "back to the app" link
+       on a 403 led to another 403. */
+    sendHtml(res, errorPage(status, safe, requestId, ctx?.staff), status);
   }
 }
 
-function errorPage(status, message, requestId) {
+function errorPage(status, message, requestId, staff = null) {
   const esc = (v) => String(v).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
   const safe = esc(message);
   /* Only on a server fault. A 404 needs no reference number, and printing one
@@ -365,5 +369,5 @@ function errorPage(status, message, requestId) {
   const ref = status >= 500 && requestId
     ? `<p style="margin-top:1rem;font-size:0.75rem;color:var(--ink-soft)">Reference <code>${esc(requestId)}</code> — quote this if you contact us.</p>`
     : "";
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${status}</title><link rel="stylesheet" href="/assets/css/styles.css"><link rel="stylesheet" href="/app-assets/app.css"></head><body><div class="pub" style="max-width:30rem"><h1>${status === 404 ? "Not found" : status === 403 ? "Expired" : "Something broke"}</h1><p class="lede">${safe}</p>${ref}<p style="margin-top:1.5rem"><a class="pill solid" href="/app">Back to the app</a></p></div></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${status}</title><link rel="stylesheet" href="/assets/css/styles.css"><link rel="stylesheet" href="/app-assets/app.css"></head><body><div class="pub" style="max-width:30rem"><h1>${status === 404 ? "Not found" : status === 403 ? "Expired" : "Something broke"}</h1><p class="lede">${safe}</p>${ref}<p style="margin-top:1.5rem"><a class="pill solid" href="${staff ? landingFor(staff) : "/app"}">Back to the app</a></p></div></body></html>`;
 }

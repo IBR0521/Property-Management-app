@@ -1,6 +1,6 @@
 /* Staff sign-in. */
 import { get } from "../lib/db.js";
-import { verifyPassword, startSession, endSession, staffByEmail, hasSecondFactor } from "../lib/auth.js";
+import { verifyPassword, startSession, endSession, staffByEmail, hasSecondFactor, landingFor } from "../lib/auth.js";
 import { sendHtml, redirect } from "../lib/http.js";
 import { check, clear, clientIp } from "../lib/ratelimit.js";
 import { signInPage, publicPage, notice } from "../views/layout.js";
@@ -8,7 +8,7 @@ import { html, attr } from "../lib/render.js";
 
 export function registerAuthRoutes(router) {
   router.get("/app/sign-in", async (ctx) => {
-    if (ctx.staff) return redirect(ctx.res, "/app");
+    if (ctx.staff) return redirect(ctx.res, landingFor(ctx.staff));
     /* Branding only. With several companies there is no way to know whose
        sign-in page this is until credentials arrive, so it shows the product
        rather than guessing a customer's name at them. */
@@ -76,7 +76,9 @@ export function registerAuthRoutes(router) {
 
     await startSession(ctx.res, staff.id, { secure: ctx.url.protocol === "https:" });
 
-    const next = typeof ctx.fields.next === "string" && ctx.fields.next.startsWith("/app") ? ctx.fields.next : "/app";
+    const next = typeof ctx.fields.next === "string" && ctx.fields.next.startsWith("/app")
+      ? ctx.fields.next
+      : landingFor(staff);
     /* The session exists but is only half authenticated. The gate in app.js
        sends them to the challenge; passing `next` through means they land
        where they were going once it is answered. */

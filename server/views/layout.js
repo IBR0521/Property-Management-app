@@ -5,7 +5,7 @@
    only adds layout on top. */
 import { html, doc, raw, attr } from "../lib/render.js";
 import { icons } from "./icons.js";
-import { can, roleLabel } from "../lib/auth.js";
+import { can, roleLabel, requiredCapability } from "../lib/auth.js";
 
 const APP_MANIFEST = "/app-assets/manifest.webmanifest";
 export const PORTAL_MANIFEST = "/app-assets/portal.webmanifest";
@@ -116,7 +116,17 @@ ${impersonation ? html`
     ${NAV.map((group) => {
       // Hidden, not disabled: the routing gate is the enforcement, this just
       // stops showing people doors that will not open for them.
-      const items = group.items.filter((item) => !item.need || can(staff, item.need));
+      /* Asked of the same function the gate asks, rather than of a `need`
+         field maintained by hand beside it. The hand-kept version had drifted:
+         Queue, Properties, Inbox and Messages carried no `need` at all, so a
+         technician — who holds none of those capabilities — was shown four
+         links that answer 403. `item.need` is still honoured where it is
+         stricter than the route's own requirement. */
+      const items = group.items.filter((item) => {
+        if (item.need && !can(staff, item.need)) return false;
+        const gate = requiredCapability(item.href);
+        return !gate || can(staff, gate);
+      });
       if (!items.length) return "";
       return html`
       <div class="navgroup">

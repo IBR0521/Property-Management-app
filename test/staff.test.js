@@ -256,7 +256,13 @@ describe("the technician sees only their own jobs", () => {
 
     assert.equal((await c.get("/app")).status, 403,
       "the dashboard is the whole company's queue");
-    for (const route of ["/app/accounting", "/app/owners", "/app/rent", "/app/maintenance", "/app/staff"]) {
+    /* /app/portfolio and /app/compliance are in this list because they were
+       not, and a technician could open both — `property.view` was in the role
+       and gates exactly those two. The role's own comment said otherwise. */
+    for (const route of [
+      "/app/accounting", "/app/owners", "/app/rent", "/app/maintenance", "/app/staff",
+      "/app/portfolio", "/app/compliance",
+    ]) {
       assert.equal((await c.get(route)).status, 403, `${route} must be refused`);
     }
   });

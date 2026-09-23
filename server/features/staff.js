@@ -332,40 +332,6 @@ export function registerStaff(router) {
      phone-shaped with check-in, photos and parts; this is the honest version
      that makes the role mean something today rather than being a set of
      refusals. */
-  router.get("/app/jobs", async (ctx) => {
-    const cid = ctx.staff.company_id;
-    const jobs = await all(
-      `SELECT w.*, u.label, p.line1, p.city
-         FROM work_order w
-         JOIN unit u ON u.id = w.unit_id
-         JOIN property p ON p.id = u.property_id
-        WHERE w.company_id = ? AND w.assigned_staff_id = ?
-          AND w.status NOT IN ('complete', 'cancelled')
-        ORDER BY
-          CASE w.severity WHEN 'emergency' THEN 0 WHEN 'urgent' THEN 1 ELSE 2 END,
-          w.created_at`, cid, ctx.staff.id);
-
-    sendHtml(ctx.res, appPage({
-      staff: ctx.staff, csrf: ctx.csrf, active: "jobs", counts: {},
-      title: "Your jobs", subtitle: jobs.length ? `${jobs.length} open` : "Nothing assigned",
-      body: html`
-        ${jobs.length ? html`<div class="qlist">
-          ${jobs.map((j) => html`
-            <div class="q">
-              <div class="q__body">
-                <div class="q__title">${j.summary}</div>
-                <div class="q__where">${j.line1}${j.label ? ` · unit ${j.label}` : ""}, ${j.city}</div>
-                <div class="q__why">${j.reference} · ${j.category}${j.severity !== "normal" ? ` · ${j.severity}` : ""}</div>
-              </div>
-              <div class="q__act">
-                <a class="pill outline sm"
-                   href="https://maps.google.com/?q=${encodeURIComponent(`${j.line1}, ${j.city}`)}"
-                   target="_blank" rel="noopener">Directions</a>
-              </div>
-            </div>`)}
-        </div>` : empty("Nothing assigned to you", "Jobs appear here when a manager assigns them.")}`,
-    }));
-  });
 }
 
 /* --- shared --------------------------------------------------------------- */
