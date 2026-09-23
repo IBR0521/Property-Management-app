@@ -98,6 +98,45 @@ export async function accountByCode(companyId, code) {
     "SELECT * FROM account WHERE company_id = ? AND code = ?", companyId, code);
 }
 
+/* --- the closed period ----------------------------------------------------
+
+   A company may draw a line and say the books before it are finished. Nothing
+   posts behind that line, and the line moves only by closing or reopening,
+   both of which are deliberate and both of which are audited.
+
+   There is no per-posting override on purpose. An override is a thing people
+   click, and a closed period that can be posted into by clicking is not a
+   closed period. Reopen, post, close again — three visible acts instead of one
+   invisible one. */
+export class PeriodClosed extends BadRequest {
+  constructor(message) {
+    super(message);
+    /* Named so a caller that posts on a schedule can count these and carry on
+       rather than treating a company's deliberate choice as a fault. */
+    this.periodClosed = true;
+  }
+}
+
+export async function closedThrough(companyId) {
+  const row = await get("SELECT books_closed_through FROM company WHERE id = ?", companyId);
+  return row?.books_closed_through || null;
+}
+
+/* Both writers call this. `reverseJournal` inserts into `journal` directly
+   rather than going through `postJournal`, so a guard in one place only would
+   have left reversals able to post into a closed month — which is the single
+   most likely way somebody would have got round it. */
+export async function assertPeriodOpen(companyId, date) {
+  const line = await closedThrough(companyId);
+  if (!line) return;
+  const on = date || today();
+  if (on <= line) {
+    throw new PeriodClosed(
+      `The books are closed through ${human(line)}, so nothing can be posted dated ${human(on)}. `
+      + `Either date it after ${human(line)}, or reopen the period first under Accounting.`);
+  }
+}
+
 /* --- the only writer ------------------------------------------------------ */
 
 /* splits: [{ code | accountId, debit | credit, memo, ownerId, propertyId,
@@ -138,6 +177,8 @@ export async function postJournal({
       `This journal does not balance: debits ${usd(debits)} against credits ${usd(credits)}.`);
   }
 
+  await assertPeriodOpen(companyId, date);
+
   return await tx(async () => {
     const jid = id();
     await insert("journal", {
@@ -168,6 +209,11 @@ export async function reverseJournal(journalId, { companyId, by = "system", memo
     throw new BadRequest("That journal has already been reversed.");
   }
   const splits = await all("SELECT * FROM journal_split WHERE journal_id = ?", journalId);
+
+  /* The reversal's own date, not the original's. Reversing a journal that sits
+     in a closed period is ordinary and allowed — the correction lands in an
+     open one. What is refused is dating the reversal itself behind the line. */
+  await assertPeriodOpen(companyId, date || today());
 
   return await tx(async () => {
     const jid = id();
