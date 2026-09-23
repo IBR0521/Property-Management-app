@@ -12,7 +12,7 @@
    is a different kind of failure and only one of them is loud. */
 import { test, describe, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { freshDatabase, truncateAll, closeDb, all, get } from "./helpers/db.js";
+import { freshDatabase, truncateAll, closeDb, all, get, run } from "./helpers/db.js";
 import { startApp, client } from "./helpers/http.js";
 import * as f from "./helpers/factories.js";
 import { insert } from "../server/lib/db.js";
@@ -300,6 +300,142 @@ describe("the README", () => {
   });
 });
 
+/* --- there and back again ---------------------------------------------------------
+
+   "No lock-in" is the kind of claim that is easy to make and rarely checked.
+   This checks it: export a company, import the archive into an empty one, and
+   compare what arrives.
+
+   It is also what the two shapes in the archive are for. `data/` is the record
+   as held — database column names, amounts in cents — which is what somebody
+   mapping into another system needs and is not importable by anything,
+   including this. `import/` is the same portfolio spelled the way this
+   application's own importer spells it, read by exactly the code that reads a
+   customer's export from somewhere else. */
+describe("an export can be imported", () => {
+  async function seedPositions() {
+    /* A tenant in arrears, a tenant in credit, and a deposit held — the three
+       figures the opening journal carries. Posted through the ledger rather
+       than written, so what the export reads is what the books say. */
+    const { chargeRent } = await import("../server/lib/rentcharge.js");
+    const { postMoney } = await import("../server/lib/ledger.js");
+
+    await postMoney({
+      companyId: world.companyId, ownerId: world.ownerId, leaseId: world.leaseId,
+      unitId: world.unitId, propertyId: world.propertyId,
+      date: "2026-05-01", kind: "deposit_held", amountCents: 90000, memo: "deposit",
+    });
+    await run("UPDATE lease SET deposit_cents = 90000 WHERE id = ?", world.leaseId);
+
+    /* Charged and unpaid: arrears. Through the charge run rather than by
+       posting a journal by hand, so the figure the export reads is the one
+       the application would really have produced. */
+    await chargeRent(world.companyId, { period: "2026-06", postedBy: "test" });
+  }
+
+  async function importInto(entries) {
+    const other = await f.makeWorld({ name: "Arriving Co" });
+    const files = {};
+    for (const entity of ["owner", "property", "unit", "tenant", "lease", "vendor"]) {
+      const entry = entries.get(`import/${entity}.csv`);
+      assert.ok(entry, `import/${entity}.csv is not in the archive`);
+      files[entity] = entry.data.toString("utf8");
+    }
+
+    const { validateImport } = await import("../server/lib/import/validate.js");
+    const { commitImport } = await import("../server/lib/import/commit.js");
+    const validated = await validateImport({
+      companyId: other.companyId, sourceSystem: "generic", files });
+
+    assert.equal(validated.ok, true,
+      `an export of this application did not validate: `
+      + JSON.stringify(validated.problems.slice(0, 5)));
+
+    const result = await commitImport({
+      companyId: other.companyId, validated, sourceSystem: "generic",
+      conversionDate: "2026-07-01", trustCashCents: null,
+    });
+    return { other, validated, result };
+  }
+
+  test("the portfolio arrives, and the positions arrive with it", async () => {
+    await seedPositions();
+    const entries = await archive();
+    const { other, result } = await importInto(entries);
+
+    /* Every owner, property, unit, tenant, lease and contractor of the source,
+       plus the ones the receiving fixture already had. */
+    const counted = async (table) => (await all(
+      `SELECT id FROM ${table} WHERE company_id = ? AND source_id IS NOT NULL`,
+      other.companyId)).length;
+
+    assert.equal(await counted("owner"), 1);
+    assert.equal(await counted("property"), 1);
+    assert.equal(await counted("unit"), 1);
+    assert.equal(await counted("tenant"), 1);
+    assert.equal(await counted("lease"), 1);
+    assert.equal(result.tenancies, 1, "the tenancy came too");
+
+    const arrived = await get(
+      `SELECT l.rent_cents, l.deposit_cents, u.label, p.line1, o.name AS owner
+         FROM lease l
+         JOIN unit u ON u.id = l.unit_id
+         JOIN property p ON p.id = u.property_id
+         JOIN owner o ON o.id = p.owner_id
+        WHERE l.company_id = ? AND l.source_id IS NOT NULL`, other.companyId);
+    const source = await get(
+      `SELECT l.rent_cents, l.deposit_cents, u.label, p.line1, o.name AS owner
+         FROM lease l
+         JOIN unit u ON u.id = l.unit_id
+         JOIN property p ON p.id = u.property_id
+         JOIN owner o ON o.id = p.owner_id
+        WHERE l.id = ?`, world.leaseId);
+
+    assert.equal(arrived.rent_cents, source.rent_cents, "the rent survived the round trip");
+    assert.equal(arrived.deposit_cents, source.deposit_cents);
+    assert.equal(arrived.label, source.label);
+    assert.equal(arrived.line1, source.line1);
+    assert.equal(arrived.owner, source.owner);
+  });
+
+  test("what the tenant owed is what the opening journal carries", async () => {
+    await seedPositions();
+    const owed = await get(
+      `SELECT COALESCE(SUM(s.debit_cents - s.credit_cents), 0)::bigint AS cents
+         FROM journal_split s JOIN account a ON a.id = s.account_id
+        WHERE a.company_id = ? AND a.code = '1300'`, world.companyId);
+    assert.ok(Number(owed.cents) > 0, "the fixture has to owe something for this to mean anything");
+
+    const { result } = await importInto(await archive());
+    assert.equal(result.opening.arrears, Number(owed.cents));
+    assert.equal(result.opening.deposits, 90000);
+    assert.equal(result.opening.credits, 0);
+  });
+
+  test("a tenant in credit arrives in credit, not in arrears", async () => {
+    /* The sign is the whole risk in carrying a position as one figure, and
+       getting it backwards would turn somebody's credit into a demand. */
+    const { postMoney } = await import("../server/lib/ledger.js");
+    await postMoney({
+      companyId: world.companyId, ownerId: world.ownerId, leaseId: world.leaseId,
+      unitId: world.unitId, propertyId: world.propertyId,
+      date: "2026-05-20", kind: "rent_payment", amountCents: 25000,
+      memo: "paid ahead",
+    });
+
+    const { result } = await importInto(await archive());
+    assert.equal(result.opening.credits, 25000);
+    assert.equal(result.opening.arrears, 0);
+  });
+
+  test("the README says what the import folder is not", async () => {
+    const readme = text(await archive(), "README.txt");
+    assert.match(readme, /import\//);
+    assert.match(readme, /It is NOT everything/);
+    assert.match(readme, /Work orders, journals, messages and/);
+  });
+});
+
 /* --- one snapshot ---------------------------------------------------------------
 
    Sixty-odd sequential reads at the default isolation see sixty-odd different
@@ -347,6 +483,9 @@ describe("the route", () => {
     const { body } = await agent.text("/app/setup/export");
     assert.match(body, /Export everything/);
     assert.match(body, /Sign-in sessions/, "what is left out is on the page, not only in the zip");
+    assert.match(body, /data\//);
+    assert.match(body, /import\//, "both shapes are described before the download, not after");
+    assert.match(body, /not everything/, "and what import\/ does not carry");
   });
 
   test("it is linked from setup", async () => {

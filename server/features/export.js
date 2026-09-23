@@ -65,17 +65,36 @@ export function registerExport(router) {
             <p>Yours to take, whenever you want it</p>
           </div>
           <div class="panel__body">
-            <p class="lede">A ZIP containing ${tables.length} CSV files — one per table, with
-              the columns named as the database names them — and every photograph, receipt and
-              certificate that has been uploaded. Amounts are in cents, as integers, because
-              that is how they are held.</p>
+            <p class="lede">A ZIP with every photograph, receipt and certificate that has been
+              uploaded, and your records twice over.</p>
 
-            ${notice("info", "It is the record, not a report",
+            <div class="tablewrap"><table class="data">
+              <tbody>
+                <tr>
+                  <td><b>data/</b><span class="cellsub">${tables.length} CSV files, one per table,
+                    columns named as the database names them and amounts in cents</span></td>
+                  <td>The record as it is held, for whoever you move to, to map.</td>
+                </tr>
+                <tr>
+                  <td><b>import/</b><span class="cellsub">owners, properties, units, tenants,
+                    leases and contractors, money in dollars</span></td>
+                  <td>The same portfolio in the shape this application's own import reads, so
+                    leaving and coming back are the same act.</td>
+                </tr>
+                <tr>
+                  <td><b>files/</b><span class="cellsub">the uploads themselves</span></td>
+                  <td>Indexed back to the record each one belongs to.</td>
+                </tr>
+              </tbody>
+            </table></div>
+
+            <div style="margin-top:1.25rem">${notice("info", "It is the record, not a report",
               html`Reports are a view with decisions baked into them, and the decisions are
-                ours. What you need in order to leave is the record in the shape it is kept,
-                so whoever you move to can map it themselves.
+                ours. What you need in order to leave is the record in the shape it is kept.
                 <br /><br />
-                A README inside the archive lists what is in it, what is not, and why.`)}
+                A README inside the archive lists what is in it, what is not, and why — and
+                says plainly that <b>import/</b> is not everything: work orders, journals and
+                messages are exported and there is nothing here that reads them back in.`)}</div>
 
             <form method="post" action="/app/setup/export" style="margin-top:1.25rem">
               <input type="hidden" name="_csrf" value="${ctx.csrf}" />

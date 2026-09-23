@@ -2,16 +2,20 @@
 
    ## What "everything" means here
 
-   Every table named in `tables.js`, as CSV, one file per table with its
-   columns as the database spells them. Plus the uploaded files themselves —
-   the photographs on a work order, the receipts, the certificates of
-   insurance — because a row saying `2026-03/a7f2.jpg` is not a copy of a
-   photograph.
+   Every table named in `tables.js`, as CSV under `data/`, one file per table
+   with its columns as the database spells them. Plus the uploaded files
+   themselves — the photographs on a work order, the receipts, the
+   certificates of insurance — because a row saying `2026-03/a7f2.jpg` is not
+   a copy of a photograph.
 
    Raw tables rather than tidied-up reports, deliberately. A report is a view
    with decisions baked into it, and the decisions are ours. What somebody
    needs when they leave is the record, in the shape it is held, so that
    whoever they move to can map it themselves.
+
+   And then the same portfolio a second time, under `import/`, in the shape
+   this application's own importer reads — see `portable.js` for why both, and
+   why neither one does the other's job.
 
    ## The README is part of the deliverable
 
@@ -37,17 +41,17 @@ import { all, get, tx } from "../db.js";
 import { BOM, csvRow } from "../csv.js";
 import { zipStream } from "../zip.js";
 import { TABLES, FILE_COLUMNS, skipped } from "./tables.js";
+import { portableFiles } from "./portable.js";
 import { stamp } from "../dates.js";
 
-/* A stored path is either a key under the upload directory or an absolute
-   URL at the blob store, depending on where this instance keeps them. */
-/* The blob store, and only the blob store.
+/* A stored path is either a key under the upload directory or an absolute URL
+   at the blob store, depending on where this instance keeps them — and only
+   ever one of those two, because `storeUpload` is the one thing that writes
+   these columns.
 
-   Every value this reads was written by `storeUpload`, so today it can only
-   be a URL at the blob host or a key under the upload directory. The check is
-   here anyway: this function turns a database column into an outbound request,
-   and the day something else writes that column is not the day to find out
-   what it fetches. */
+   The host check is here anyway. This function turns a database column into
+   an outbound request, and the day something else writes that column is not
+   the day to find out what it fetches. */
 const BLOB_HOST = /^[a-z0-9-]+\.public\.blob\.vercel-storage\.com$/i;
 
 async function readStored(stored) {
@@ -184,6 +188,7 @@ export async function* exportArchive({ companyId, requestedBy = null, now = () =
   const tableEntries = [];
   const counts = [];
   let files = [];
+  let portable = {};
 
   /* One snapshot for all of it.
 
@@ -205,10 +210,16 @@ export async function* exportArchive({ companyId, requestedBy = null, now = () =
       tableEntries.push({ name: `data/${table}.csv`, data: tableCsv(columns, rows) });
     }
     files = await fileList(companyId);
+    /* A second view of the same tables, so it belongs in the same snapshot. */
+    portable = await portableFiles(companyId);
     /* The phrase Postgres wants, in full: `BEGIN repeatable read` is a syntax
        error, and `read only` is here because an export has no business
        writing and this is free. */
   }, { isolation: "isolation level repeatable read read only" });
+
+  for (const [name, data] of Object.entries(portable)) {
+    tableEntries.push({ name, data });
+  }
   const problems = [];
 
   /* The README depends on what went wrong reading the files, and a ZIP's
@@ -246,13 +257,16 @@ export async function* exportArchive({ companyId, requestedBy = null, now = () =
   const readme = {
     name: "README.txt",
     read: () => Buffer.from(
-      readmeText({ company, counts, files, problems, requestedBy, at: now() }), "utf8"),
+      readmeText({
+        company, counts, files, problems, requestedBy, at: now(),
+        portableNames: Object.keys(portable),
+      }), "utf8"),
   };
 
   yield* zipStream([...tableEntries, indexEntry, ...fileEntries, readme], { now });
 }
 
-function readmeText({ company, counts, files, problems, requestedBy, at }) {
+function readmeText({ company, counts, files, portableNames, problems, requestedBy, at }) {
   const lines = [];
   const rule = "-".repeat(72);
 
@@ -281,6 +295,18 @@ function readmeText({ company, counts, files, problems, requestedBy, at }) {
   lines.push("  files/".padEnd(42) + String(files.length).padStart(8)
     + (files.length === 1 ? " uploaded file" : " uploaded files")
     + ", listed in files/index.csv");
+  lines.push("");
+  lines.push("  import/".padEnd(42) + String(portableNames.length).padStart(8) + " files");
+  lines.push("      The same portfolio in the shape this application's own importer");
+  lines.push("      reads: owners, properties, units, tenants, leases with their");
+  lines.push("      tenancies, and contractors, with money in dollars rather than");
+  lines.push("      cents. It is here so that leaving and coming back are the same");
+  lines.push("      act, and so the round trip can be tested rather than asserted.");
+  lines.push("");
+  lines.push("      It is NOT everything. Work orders, journals, messages and");
+  lines.push("      documents are in data/ and nothing in this application reads");
+  lines.push("      them back in. The folder looks like it means everything and");
+  lines.push("      does not, so it is said here.");
   lines.push("");
 
   lines.push("WHAT IS NOT, AND WHY");
