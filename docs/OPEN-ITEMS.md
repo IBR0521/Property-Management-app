@@ -114,7 +114,7 @@ run the push services accept what we send them.
 
 | | What | Why it matters |
 |---|---|---|
-| A1 | **A repair can be booked twice** | `vendor_invoice.work_order_id` links an invoice to a job, and closing that job records `actual_cents` independently. Both post a cost. Nothing in the application stops a manager doing both, and no seeded row does — so it has never been seen. It will surface as inflated expenses on the first P&L by property. Needs either a guard at close-out or a reconciliation between the two, and it is a decision about which one is the source of truth. |
+| ~~A1~~ | ~~**A repair can be booked twice**~~ | **Fixed.** The contractor's invoice is the truth when there is one: it is the document money is paid against and the one an owner can be shown. Closing a job that is already billed records the figure and posts nothing, saying so on screen. An invoice arriving after a close-out supersedes it — the posting is reversed, not edited, and the owner's ledger is mirrored so the two books cannot drift. Tested in both orders and with neither. |
 | A2 | **`4000 Rent income` is now unposted** | Under agency the rent is the owner's income, not the manager's, so nothing credits it any more. It remains in the chart. Either retire it or repurpose it for owner-level reporting; leaving an account nobody posts to is a trap for whoever reads the chart next. |
 | A3 | **`5000 Repairs` now means only the manager's own costs** | Owner-borne repairs reduce owner funds instead. The vendor-invoice path still debits 5000, which is right only if the invoice is the manager's to bear — see A1. |
 

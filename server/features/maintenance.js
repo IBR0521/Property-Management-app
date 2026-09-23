@@ -738,6 +738,14 @@ export function registerMaintenance(router) {
    for and nobody notices until the year end. */
 export async function closeOut({ companyId, wo, staff, actualCents, files = [], note = null }) {
   const { stored, problems } = await storeMany(files, "photos");
+
+  /* One repair, one cost. If the contractor has already billed for this job,
+     their invoice is the figure money is paid against and the one an owner can
+     be shown. What is typed here is recorded on the job and not posted a
+     second time — which is what used to happen, silently, charging the owner
+     twice for one repair. */
+  const { shouldPostCloseOutCost } = await import("../lib/repaircost.js");
+  const costing = await shouldPostCloseOutCost(companyId, wo.id);
   const owner = await one(
     `SELECT o.*, p.id AS property_id FROM owner o JOIN property p ON p.owner_id = o.id
        JOIN unit u ON u.property_id = p.id WHERE u.id = ?`, wo.unit_id);
@@ -759,7 +767,7 @@ export async function closeOut({ companyId, wo, staff, actualCents, files = [], 
     /* The cost becomes a line on the owner's statement, with the work order
        attached. This is the link that makes the monthly statement cheap to
        produce and hard to argue with. */
-    if (actualCents != null && actualCents > 0) {
+    if (actualCents != null && actualCents > 0 && costing.post) {
       await postMoney({
         companyId, ownerId: owner.id, propertyId: owner.property_id,
         unitId: wo.unit_id, leaseId: wo.lease_id, date: today(),
@@ -774,8 +782,12 @@ export async function closeOut({ companyId, wo, staff, actualCents, files = [], 
   return {
     stored,
     problems,
+    costPosted: costing.post && actualCents != null && actualCents > 0,
+    supersededBy: costing.invoice ? costing.invoice.id : null,
     message: problems.length
       ? problems.join(" ")
+      : !costing.post
+      ? `Marked complete. ${costing.reason}`
       : "Marked complete and posted to the owner's ledger.",
   };
 }

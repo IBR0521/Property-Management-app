@@ -21,6 +21,7 @@ import { appPage, notice, empty, tabs } from "../views/layout.js";
 import { navCounts } from "../lib/counts.js";
 import { seal, tryOpen, sealingAvailable } from "../lib/crypto.js";
 import { postJournal, ACCT } from "./accounting.js";
+import { supersedeCloseOutCost } from "../lib/repaircost.js";
 
 const VENDOR_TABS = [
   { key: "vendors", href: "/app/vendors", label: "Contractors" },
@@ -129,6 +130,12 @@ export async function recordInvoice({
     : null;
   const unit = wo && wo.unit_id
     ? await get("SELECT property_id FROM unit WHERE id = ?", wo.unit_id) : null;
+  /* Who bears it. A repair on somebody's property is their cost, and the
+     journal needs the owner on it for any report by owner to mean anything. */
+  const owner = unit
+    ? await get("SELECT o.id FROM owner o JOIN property p ON p.owner_id = o.id WHERE p.id = ?",
+        unit.property_id)
+    : null;
 
   const invId = id();
   return await tx(async () => {
@@ -148,6 +155,29 @@ export async function recordInvoice({
       memo: memo || null, created_at: stamp(),
     });
 
+    /* One repair, one cost. A job closed out before the bill arrived has
+       already posted a figure somebody typed; this is the figure money is
+       actually paid against, so it supersedes it. The close-out posting is
+       reversed rather than edited — the journal is append-only, and the
+       difference between what was recorded and what was billed is worth
+       being able to see. */
+    const superseded = workOrderId
+      ? await supersedeCloseOutCost({
+          companyId, workOrderId, by: createdBy, date: invoiceDate || today(),
+          reason: `Superseded by ${vendor.name}'s invoice${invoiceNo ? ` (${invoiceNo})` : ""}`,
+        })
+      : { superseded: false, cents: 0 };
+
+    /* Whose cost this is decides which account it lands in.
+
+       An invoice against a property is the owner's cost, paid out of the
+       owner's money: it reduces what is owed to them. It is not the manager's
+       expense, and booking it as one inflated the manager's P&L by every
+       repair they had ever arranged on somebody else's behalf. An invoice with
+       no property — the office printer — is genuinely theirs. */
+    const ownerBorne = Boolean(unit && unit.property_id);
+    const total = amountCents + taxCents;
+
     /* Booking the liability the moment the bill arrives, not when it is paid.
        That is the difference between accrual and a cheque stub. */
     const jid = await postJournal({
@@ -155,14 +185,35 @@ export async function recordInvoice({
       memo: `Invoice from ${vendor.name}${invoiceNo ? ` (${invoiceNo})` : ""}`,
       source: "vendor", sourceType: "vendor_invoice", sourceId: invId, postedBy: createdBy,
       splits: [
-        { code: ACCT.REPAIRS, debit: amountCents + taxCents, vendorId,
+        { code: ownerBorne ? ACCT.OWNER_FUNDS : ACCT.REPAIRS, debit: total, vendorId,
+          ownerId: owner ? owner.id : null,
           unitId: wo ? wo.unit_id : null, propertyId: unit ? unit.property_id : null,
-          memo: memo || "vendor invoice" },
-        { code: ACCT.PAYABLE, credit: amountCents + taxCents, vendorId, memo: "owed to vendor" },
+          memo: memo || (ownerBorne ? "the owner's repair" : "vendor invoice") },
+        { code: ACCT.PAYABLE, credit: total, vendorId, memo: "owed to vendor" },
       ],
     });
     await update("vendor_invoice", invId, { journal_id: jid });
-    return { invoiceId: invId, journalId: jid, blocked: !state.canBePaid, reasons: state.payoutReasons };
+
+    /* The owner sees it on their statement, the same as a repair closed out
+       in-house does. Without this the cost would be in the books and absent
+       from the ledger the owner is actually shown. */
+    if (ownerBorne && owner) {
+      const { postMoney } = await import("../lib/ledger.js");
+      await postMoney({
+        companyId, ownerId: owner.id, propertyId: unit.property_id,
+        unitId: wo ? wo.unit_id : null,
+        date: invoiceDate || today(), kind: "expense", amountCents: -total,
+        memo: `${vendor.name}${invoiceNo ? ` (${invoiceNo})` : ""}`,
+        source: workOrderId ? "work_order" : "manual",
+        workOrderId: workOrderId || null,
+        sourceType: "vendor_invoice", sourceId: invId, postedBy: createdBy,
+        journalId: jid,
+      });
+    }
+
+    return { invoiceId: invId, journalId: jid, ownerBorne,
+             superseded: superseded.superseded, supersededCents: superseded.cents,
+             blocked: !state.canBePaid, reasons: state.payoutReasons };
   });
 }
 
