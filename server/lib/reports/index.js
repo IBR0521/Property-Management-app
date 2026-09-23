@@ -28,6 +28,7 @@ import { trustReconciliation } from "./trust.js";
 import {
   rentRoll, vacancy, leaseExpirations, depositsHeld, repairSpend,
 } from "./operational.js";
+import { ownerList, unitList, workOrderList, vendorList } from "./lists.js";
 import { today, monthKey, human, humanStamp } from "../dates.js";
 import { usd } from "../money.js";
 import { can } from "../auth.js";
@@ -340,6 +341,111 @@ export const REPORTS = {
       rows: r.lines,
       totals: { date: "", where: "Total", category: "", vendor: "", summary: "", cents: r.totalCents },
     }),
+  },
+
+  /* --- the working lists ----------------------------------------------------
+   *
+   * The roadmap asks that every table in the application can be exported.
+   * Most of the ones carrying data worth exporting are already reports; these
+   * are the four working lists that were not. Registry entries rather than
+   * export buttons on four screens, so there is one export path and one set
+   * of tests — and each gains a PDF and a schedule for nothing. */
+
+  owner_list: {
+    title: "Owners",
+    group: "Lists",
+    description: "Every owner, what they hold, and what the ledger says they are owed.",
+    need: "money.view",
+    params: [],
+    run: (companyId) => ownerList(companyId),
+    table: (r) => ({
+      columns: [text("name", "Owner", 3), text("email", "Email", 3), text("phone", "Phone", 2),
+                text("properties", "Properties", 1), text("units", "Units", 1),
+                money("balanceCents", "Balance"), money("thresholdCents", "Approves to")],
+      rows: r.rows,
+      totals: { name: `${r.owners} owner${r.owners === 1 ? "" : "s"}`, email: "", phone: "",
+                properties: "", units: "", balanceCents: r.balanceCents, thresholdCents: null },
+    }),
+    note: () => "Balance is what the owner's own ledger says, positive towards them.",
+  },
+
+  unit_list: {
+    title: "Properties and units",
+    group: "Lists",
+    description: "Every unit, its owner, its state, and what it is let for.",
+    need: "property.view",
+    params: ["propertyId"],
+    landscape: true,
+    run: (companyId, p) => unitList(companyId, { propertyId: p.propertyId || null }),
+    table: (r) => ({
+      columns: [text("where", "Unit", 3), text("owner", "Owner", 2), text("status", "State", 1),
+                text("beds", "Beds", 1), text("baths", "Baths", 1), text("sqft", "Sq ft", 1),
+                text("tenants", "Tenant", 2),
+                money("rentCents", "Rent"), money("marketRentCents", "Market")],
+      rows: r.rows,
+      totals: { where: `${r.units} unit${r.units === 1 ? "" : "s"}`, owner: "", status: "",
+                beds: "", baths: "", sqft: "", tenants: "",
+                rentCents: r.rentCents, marketRentCents: r.marketRentCents },
+    }),
+  },
+
+  work_order_list: {
+    title: "Work orders",
+    group: "Lists",
+    description: "Every job raised in a period, what it cost, and what was billed.",
+    need: "maintenance.work",
+    params: ["from", "to", "propertyId"],
+    landscape: true,
+    run: (companyId, p) => workOrderList(companyId, {
+      from: p.from || null, to: p.to || today(), propertyId: p.propertyId || null,
+    }),
+    table: (r) => ({
+      columns: [text("reference", "Ref", 1), text("raised", "Raised", 1),
+                text("where", "Where", 3), text("category", "Category", 1),
+                text("severity", "Severity", 1), text("status", "Status", 1),
+                text("vendor", "Contractor", 2), text("summary", "Job", 3),
+                money("recordedCents", "Recorded"), money("invoicedCents", "Invoiced")],
+      rows: r.rows,
+      totals: { reference: "", raised: "", where: `${r.jobs} job${r.jobs === 1 ? "" : "s"}`,
+                category: "", severity: "", status: "", vendor: "", summary: "Cost",
+                recordedCents: null, invoicedCents: r.costCents },
+    }),
+    /* Two money columns and they are not the same question. Said on the
+       report, because a reader summing the wrong one gets a number that looks
+       right. */
+    note: (r) => `${r.open} still open, ${r.emergencies} flagged as an emergency. `
+      + "Recorded is what was entered on the job; invoiced is what the contractor billed. "
+      + "The cost total uses the invoice where there is one.",
+  },
+
+  vendor_list: {
+    title: "Contractors",
+    group: "Lists",
+    description: "Every contractor, and whether they may be dispatched or paid.",
+    need: "vendor.manage",
+    params: ["asOf"],
+    landscape: true,
+    run: (companyId, p) => vendorList(companyId, { asOf: p.asOf || today() }),
+    table: (r) => ({
+      columns: [text("name", "Contractor", 3), text("trade", "Trade", 2),
+                text("phone", "Phone", 2), text("jobs", "Jobs", 1),
+                text("licenceExpires", "Licence", 1), text("liabilityExpires", "Liability", 1),
+                text("workersCompExpires", "Workers comp", 1),
+                text("state", "", 3)],
+      rows: r.rows.map((v) => ({
+        ...v,
+        state: !v.active ? "inactive"
+          : v.blocked ? v.blocked
+          : v.warnings ? v.warnings
+          : "clear",
+      })),
+      totals: { name: `${r.vendors} contractor${r.vendors === 1 ? "" : "s"}`, trade: "",
+                phone: "", jobs: "", licenceExpires: "", liabilityExpires: "",
+                workersCompExpires: "", state: "" },
+    }),
+    note: (r) => r.blockedFromDispatch || r.blockedFromPayment
+      ? `${r.blockedFromDispatch} cannot be dispatched and ${r.blockedFromPayment} cannot be paid.`
+      : "Every active contractor may be dispatched and paid.",
   },
 
   tax_1099: {
