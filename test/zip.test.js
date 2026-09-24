@@ -12,6 +12,7 @@
    as 0xffffffff, so every size in a large archive was nonsense. */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { deflateRawSync } from "node:zlib";
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { writeFileSync, mkdtempSync } from "node:fs";
@@ -159,5 +160,85 @@ describe("ZIP64", () => {
     const eocd = buf.length - 22;
     assert.equal(buf.readUInt16LE(eocd + 10), 1, "one entry, said plainly");
     assert.notEqual(buf.readUInt32LE(eocd + 16), 0xffffffff);
+  });
+});
+
+/* Entries the caller has already compressed.
+
+   The export reads whole tables, and holding every table's rows and every
+   table's CSV until the zip was written cost **1,172MB of heap for a 34MB
+   archive** at 676,000 journal splits — past what a serverless function is
+   given, and eight gigabytes at five million. It deflates as it reads now and
+   hands over only the compressed bytes.
+
+   That means this writer has to take an entry it did not compress, which also
+   means taking the caller's word for two numbers it can no longer work out:
+   the CRC and the original size. Neither is recoverable from compressed data,
+   so an entry missing them is refused rather than written wrong. */
+describe("an entry that arrives already deflated", () => {
+  const deflateOf = (text) => {
+    const raw = Buffer.from(text, "utf8");
+    return { deflated: deflateRawSync(raw, { level: 6 }), crc: crc32(raw), size: raw.length };
+  };
+
+  test("reads back byte for byte", async () => {
+    const text = "id,name\r\n1,Leafridge\r\n".repeat(200);
+    const pre = deflateOf(text);
+    const entries = readZip(await zipBuffer([{ name: "data/thing.csv", ...pre }]));
+
+    assert.equal(entries.size, 1);
+    assert.equal(entries.get("data/thing.csv").data.toString("utf8"), text);
+  });
+
+  test("beside entries this writer compresses itself", async () => {
+    /* The export mixes them: tables arrive deflated, uploaded files do not. */
+    const text = "already compressed by the caller";
+    const entries = readZip(await zipBuffer([
+      { name: "a.csv", ...deflateOf(text) },
+      { name: "b.txt", data: "compressed here" },
+    ]));
+    assert.equal(entries.size, 2);
+    assert.equal(entries.get("a.csv").data.toString("utf8"), text);
+    assert.equal(entries.get("b.txt").data.toString("utf8"), "compressed here");
+  });
+
+  test("without a crc it is refused rather than written wrong", async () => {
+    const raw = Buffer.from("x");
+    await assert.rejects(
+      () => zipBuffer([{ name: "a", deflated: deflateRawSync(raw), size: 1 }]),
+      /crc/i);
+  });
+
+  test("without a size it is refused too", async () => {
+    const raw = Buffer.from("x");
+    await assert.rejects(
+      () => zipBuffer([{ name: "a", deflated: deflateRawSync(raw), crc: crc32(raw) }]),
+      /size/i);
+  });
+});
+
+/* The checksum the above depends on, accumulated over chunks the caller no
+   longer holds. A CRC that did not resume correctly would produce an archive
+   every extractor rejects — and the last time this file got a detail like
+   that wrong, it was caught by Info-ZIP rather than by a test. */
+describe("a checksum taken in pieces", () => {
+  test("matches the whole buffer", () => {
+    const whole = Buffer.from("the quick brown fox jumps over the lazy dog", "utf8");
+    let running = 0;
+    for (let i = 0; i < whole.length; i += 7) {
+      running = crc32(whole.subarray(i, i + 7), running);
+    }
+    assert.equal(running, crc32(whole));
+  });
+
+  test("one chunk is the ordinary call", () => {
+    const b = Buffer.from("anything");
+    assert.equal(crc32(b, 0), crc32(b));
+  });
+
+  test("and an empty continuation changes nothing", () => {
+    const b = Buffer.from("anything");
+    const once = crc32(b);
+    assert.equal(crc32(Buffer.alloc(0), once), once);
   });
 });

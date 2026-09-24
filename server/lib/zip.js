@@ -40,9 +40,13 @@ function table() {
   return TABLE;
 }
 
-export function crc32(buf) {
+/* Resumable, so a caller compressing a table in batches can accumulate the
+   checksum over chunks it no longer holds. Called with one argument it is the
+   ordinary whole-buffer CRC; called with the previous result it continues
+   where that left off. */
+export function crc32(buf, previous = 0) {
   const t = table();
-  let c = -1;
+  let c = ~previous;
   for (let i = 0; i < buf.length; i++) c = t[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
   return (c ^ -1) >>> 0;
 }
@@ -103,26 +107,44 @@ export async function* zipStream(entries, {
 
   for (const entry of entries) {
     const name = Buffer.from(String(entry.name), "utf8");
-    const data = entry.data != null ? toBuffer(entry.data) : toBuffer(await entry.read());
     const { time, date } = dosDateTime(entry.date || now());
 
-    /* Deflate unless it makes the entry bigger, which it does for anything
-       already compressed — a JPEG, a PNG, a PDF that was compressed on the
-       way in. Storing those is both smaller and faster. */
-    let method = DEFLATE;
-    let body = entry.store ? data : deflateRawSync(data, { level: 6 });
-    if (entry.store || body.length >= data.length) {
-      method = STORE;
-      body = data;
-    }
+    let method, body, crc, size;
 
-    const crc = crc32(data);
+    if (entry.deflated) {
+      /* Already compressed by the caller, which is how the export avoids
+         holding a table's rows, its CSV and its compressed form at the same
+         time: it deflates as it reads and hands the result over, keeping only
+         the compressed bytes. The caller owes the CRC and the original size,
+         since neither can be recovered from compressed data. */
+      method = DEFLATE;
+      body = toBuffer(entry.deflated);
+      crc = entry.crc;
+      size = entry.size;
+      if (typeof crc !== "number" || typeof size !== "number") {
+        throw new Error("A pre-deflated entry has to carry its crc and its size.");
+      }
+    } else {
+      const data = entry.data != null ? toBuffer(entry.data) : toBuffer(await entry.read());
+
+      /* Deflate unless it makes the entry bigger, which it does for anything
+         already compressed — a JPEG, a PNG, a PDF that was compressed on the
+         way in. Storing those is both smaller and faster. */
+      method = DEFLATE;
+      body = entry.store ? data : deflateRawSync(data, { level: 6 });
+      if (entry.store || body.length >= data.length) {
+        method = STORE;
+        body = data;
+      }
+      crc = crc32(data);
+      size = data.length;
+    }
 
     /* ZIP64 on this entry if any of the three numbers it carries will not fit
        in thirty-two bits. The local header then holds 0xffffffff in their
        place and the real values in an extra field. */
-    const needs64 = data.length > u32 || body.length > u32 || offset > u32;
-    const localExtra = needs64 ? zip64Extra([data.length, body.length]) : Buffer.alloc(0);
+    const needs64 = size > u32 || body.length > u32 || offset > u32;
+    const localExtra = needs64 ? zip64Extra([size, body.length]) : Buffer.alloc(0);
 
     const header = Buffer.alloc(30);
     header.writeUInt32LE(LOCAL_SIG, 0);
@@ -133,7 +155,7 @@ export async function* zipStream(entries, {
     header.writeUInt16LE(date, 12);
     header.writeUInt32LE(crc, 14);
     header.writeUInt32LE(needs64 ? U32_MASK : body.length, 18);
-    header.writeUInt32LE(needs64 ? U32_MASK : data.length, 22);
+    header.writeUInt32LE(needs64 ? U32_MASK : size, 22);
     header.writeUInt16LE(name.length, 26);
     header.writeUInt16LE(localExtra.length, 28);
 
@@ -144,7 +166,7 @@ export async function* zipStream(entries, {
 
     central.push({
       name, method, time, date, crc,
-      compressed: body.length, uncompressed: data.length,
+      compressed: body.length, uncompressed: size,
       offset, needs64,
     });
     offset += 30 + name.length + localExtra.length + body.length;

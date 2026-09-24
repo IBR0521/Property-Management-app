@@ -32,6 +32,11 @@ import { requiredCapability, CAPABILITIES, capabilitiesFor } from "../server/lib
 /* Public on purpose. The reason is the point of the table: a route here is a
    route somebody decided should answer a stranger. */
 const PUBLIC = {
+  "/m/:slug/:kind.webmanifest": "The installed app's name, per company. A manifest is "
+    + "fetched without credentials, which is exactly why the company is in the URL rather "
+    + "than in a session — and it carries no more than a name, an icon and a start URL, "
+    + "all of which are already on the public listing page at /c/:slug.",
+
   "/r/:tok": "The QR sticker on a front door, redirecting to the repair form.",
   "/report": "Tenant repair intake. No account — that is the whole design.",
   "/c/:slug/report": "The repair form on a named company's own address.",

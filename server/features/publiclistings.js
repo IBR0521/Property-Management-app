@@ -27,6 +27,7 @@ import { id } from "../lib/ids.js";
 import { stamp, human, today } from "../lib/dates.js";
 import { usd } from "../lib/money.js";
 import { sendHtml, redirect } from "../lib/http.js";
+import { buildManifest } from "../lib/manifest.js";
 import { html, attr } from "../lib/render.js";
 import { publicPage, notice, empty } from "../views/layout.js";
 import { fileUrl } from "../lib/files.js";
@@ -40,6 +41,22 @@ const PETS = {
 };
 
 export function registerPublicListings(router) {
+  /* The installed app's name, per company.
+
+     Public because a manifest is fetched without credentials — that is the
+     whole reason the company is in the URL rather than in a session. Nothing
+     here is more than a name, an icon and a start URL, and the name is
+     already on the listing page this file serves. */
+  router.get("/m/:slug/:kind.webmanifest", async (ctx) => {
+    const manifest = await buildManifest(String(ctx.params.kind), ctx.params.slug);
+    if (!manifest) return sendHtml(ctx.res, "Not found", 404);
+    ctx.res.setHeader("content-type", "application/manifest+json; charset=utf-8");
+    /* Short, because a company can be renamed and an installed icon that
+       keeps the old name for a year is the bug this was meant to fix. */
+    ctx.res.setHeader("cache-control", "public, max-age=3600");
+    ctx.res.end(JSON.stringify(manifest, null, 2));
+  });
+
   router.get("/c/:slug/listings", async (ctx) => renderIndex(ctx));
   router.get("/listings", async (ctx) => renderIndex(ctx));
 

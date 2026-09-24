@@ -7,11 +7,15 @@ import { html, doc, raw, attr } from "../lib/render.js";
 import { icons } from "./icons.js";
 import { can, roleLabel, requiredCapability } from "../lib/auth.js";
 import { reportsFor } from "../lib/reports/index.js";
+import { manifestUrl } from "../lib/manifest.js";
 
 /* Imported lazily through a function rather than at the top of the file:
    the registry imports the features, and the features import this. */
 const hasAnyReport = (staff) => reportsFor(staff).length > 0;
 
+/* The generic fallbacks. A page that knows its company passes a per-company
+   URL instead — see `lib/manifest.js` — so the installed icon carries the
+   company's own name rather than "Operations". */
 const APP_MANIFEST = "/app-assets/manifest.webmanifest";
 export const PORTAL_MANIFEST = "/app-assets/portal.webmanifest";
 
@@ -108,7 +112,8 @@ export function appPage({ staff, active, title, subtitle, actions, body, counts 
   const impersonation = staff?.impersonation || null;
   return doc(html`
 <html lang="en">
-<head>${HEAD(`${title} · ${staff.company_name}`, { install: APP_MANIFEST })}</head>
+<head>${HEAD(`${title} · ${staff.company_name}`,
+  { install: manifestUrl("app", { name: staff.company_name, slug: staff.company_slug }) })}</head>
 <body class="antialiased">
 ${impersonation ? html`
   <div class="impersonating">
@@ -195,7 +200,8 @@ ${impersonation ? html`
 export function portalPage({ title, heading, lede, body, person, company, tabs: items, active }) {
   return doc(html`
 <html lang="en">
-<head>${HEAD(`${title} · ${company?.name || "Your account"}`, { install: PORTAL_MANIFEST })}</head>
+<head>${HEAD(`${title} · ${company?.name || "Your account"}`,
+  { install: manifestUrl("portal", company) })}</head>
 <body class="antialiased">
 <div class="pub" role="main" style="max-width:52rem">
   <div class="pub__brand" style="justify-content:space-between">

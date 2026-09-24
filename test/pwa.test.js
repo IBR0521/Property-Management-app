@@ -244,10 +244,13 @@ describe("the install metadata", () => {
 
 describe("what each kind of page offers", () => {
   test("the back office offers the back-office manifest", async () => {
+    /* Per company now, so the installed icon carries their own name rather
+       than "Operations" — see test/manifest.test.js. A manifest is fetched
+       without credentials, which is why the company is in the URL. */
     const c = client(app.origin);
     await c.signIn(world.staff.admin.email, f.PASSWORD);
     const { body } = await c.text("/app");
-    assert.match(body, /rel="manifest" href="\/app-assets\/manifest\.webmanifest"/);
+    assert.match(body, /rel="manifest" href="\/m\/[^"]+\/app\.webmanifest"/);
     assert.match(body, /register-sw\.js/);
   });
 

@@ -192,6 +192,26 @@ export async function all(sql, ...params) {
   return Array.from(rows);
 }
 
+/* Rows in batches, without holding them all.
+
+   `all()` materialises every row, which is right nearly everywhere here — a
+   screen reads a page of records. The export is the exception: it reads whole
+   tables, and at 676,000 journal splits materialising them cost over a
+   gigabyte of heap for a 34MB archive.
+
+   Postgres streams through a cursor and porsager exposes it directly. The
+   callback is given a batch; nothing beyond that batch is held, and the
+   cursor lives inside whatever transaction is open, so a snapshot taken by
+   `tx()` still covers it. */
+export async function eachBatch(sql, params, { size = 2000 } = {}) {
+  return {
+    async forEach(onBatch) {
+      const cursor = conn().unsafe(toPg(sql), params.map(norm)).cursor(size);
+      for await (const batch of cursor) await onBatch(batch);
+    },
+  };
+}
+
 export async function run(sql, ...params) {
   const rows = await exec(sql, params);
   return { changes: rows.count ?? 0 };
