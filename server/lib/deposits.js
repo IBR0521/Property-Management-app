@@ -159,9 +159,12 @@ export async function addDeduction({
   }
 
   const already = await deductedFrom(returnId);
-  if (already + cents > Number(ret.held_cents)) {
+  /* Against what the books hold now, for the same reason the settlement uses
+     it: a deposit posted after the return opened is still that tenant's. */
+  const held = await heldFor(companyId, ret.lease_id);
+  if (already + cents > held) {
     throw new DepositRefused(
-      `Deductions would come to ${usd(already + cents)} against ${usd(ret.held_cents)} held. `
+      `Deductions would come to ${usd(already + cents)} against ${usd(held)} held. `
       + "A deposit cannot be overdrawn — anything beyond it is a debt to pursue separately, "
       + "not a deduction.");
   }
@@ -257,15 +260,28 @@ export async function returnDetail({ companyId, returnId }) {
 
   const deductions = await deductionsFor(returnId);
   const deducted = deductions.reduce((n, d) => n + Number(d.amount_cents), 0);
+
+  /* What is held *now*, from the journal.
+
+     `held_cents` on the row is what the books said when the return opened, and
+     a deposit posted afterwards — by the conversion, or by somebody catching
+     up — would leave it stale. Settling against a stale figure would release
+     less than `2100` holds and leave the difference stranded there for ever.
+     Once settled the row records what was actually released, so the history
+     stays true. */
+  const live = ret.status === "open"
+    ? await heldFor(companyId, ret.lease_id)
+    : Number(ret.held_cents);
   const tenants = await all(
     `SELECT t.name, t.email FROM lease_tenant lt JOIN tenant t ON t.id = lt.tenant_id
       WHERE lt.lease_id = ?`, ret.lease_id);
 
   return {
     ...ret,
-    held_cents: Number(ret.held_cents),
+    held_cents: live,
+    openedWith: Number(ret.held_cents),
     deductions, deducted,
-    balance: Number(ret.held_cents) - deducted,
+    balance: live - deducted,
     tenants,
     overdue: Boolean(ret.due_by && ret.status === "open" && today() > ret.due_by),
   };
@@ -355,11 +371,12 @@ export async function settleReturn({
 
     await run(
       `UPDATE deposit_return
-          SET status = 'settled', returned_cents = ?, journal_id = ?,
+          SET status = 'settled', held_cents = ?, returned_cents = ?, journal_id = ?,
               itemisation = ?, itemisation_outbox_id = ?,
               settled_by = ?, settled_at = ?
         WHERE id = ?`,
-      detail.balance, journalId, itemisation, outboxId, by, at, returnId);
+      detail.held_cents, detail.balance, journalId, itemisation, outboxId,
+      by, at, returnId);
   });
 
   return await one("SELECT * FROM deposit_return WHERE id = ?", returnId);

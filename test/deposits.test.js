@@ -317,6 +317,49 @@ describe("settling", () => {
     }
   });
 
+  test("a deposit posted after the return opened is still that tenant's", async () => {
+    /* `held_cents` on the row is what the books said when the return opened.
+       The conversion, or somebody catching up, can post a deposit afterwards
+       — and settling against the stale figure would leave the difference
+       stranded on 2100 for ever. */
+    const ret = await openReturn({
+      companyId: world.companyId, leaseId: world.leaseId, moveoutDate: "2026-06-30" });
+    assert.equal(Number(ret.held_cents), 0, "nothing was posted when it opened");
+
+    await takeDeposit({
+      companyId: world.companyId, leaseId: world.leaseId,
+      amountCents: 120000, date: "2026-01-01", by: "conversion" });
+
+    const detail = await returnDetail({ companyId: world.companyId, returnId: ret.id });
+    assert.equal(detail.held_cents, 120000, "the screen reads the books, not the row");
+    assert.equal(detail.openedWith, 0, "and still knows what it opened with");
+
+    const settled = await settleReturn({
+      companyId: world.companyId, returnId: ret.id, date: "2026-07-05", by: "Dana" });
+    assert.equal(Number(settled.returned_cents), 120000);
+    assert.equal(Number(settled.held_cents), 120000,
+      "and the settled row records what was actually released");
+    assert.equal(await liability("2100"), 0, "nothing stranded");
+  });
+
+  test("and a deduction is capped against what is held now", async () => {
+    const ret = await openReturn({
+      companyId: world.companyId, leaseId: world.leaseId, moveoutDate: "2026-06-30" });
+    await assert.rejects(() => addDeduction({
+      companyId: world.companyId, returnId: ret.id,
+      reason: "Carpet in the second bedroom", amountCents: 5000, by: "Dana" }),
+      /cannot be overdrawn/);
+
+    await takeDeposit({
+      companyId: world.companyId, leaseId: world.leaseId,
+      amountCents: 120000, date: "2026-01-01", by: "conversion" });
+
+    const deduction = await addDeduction({
+      companyId: world.companyId, returnId: ret.id,
+      reason: "Carpet in the second bedroom", amountCents: 5000, by: "Dana" });
+    assert.equal(Number(deduction.amount_cents), 5000);
+  });
+
   test("settling twice is refused", async () => {
     const ret = await opened();
     await settleReturn({

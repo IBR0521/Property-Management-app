@@ -16,7 +16,7 @@
 
    That is also why the signature panel says who is witnessing it. A typed
    name with nobody's name against it is worth less than one with. */
-import { all, get, one, insert, run } from "../lib/db.js";
+import { all, get, one, insert } from "../lib/db.js";
 import { id } from "../lib/ids.js";
 import { stamp, human, humanStamp, today } from "../lib/dates.js";
 import { sendHtml, redirect } from "../lib/http.js";

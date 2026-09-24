@@ -26,7 +26,6 @@ import {
   deductibleFrom, DepositRefused,
 } from "../lib/deposits.js";
 import { conditionLabel } from "../lib/inspections.js";
-import { fileUrl } from "../lib/files.js";
 
 export function registerDeposits(router) {
   router.get("/app/deposits", async (ctx) => {
@@ -355,8 +354,9 @@ export function registerDeposits(router) {
     } catch (err) {
       if (err instanceof DepositRefused) return back(err.message);
       /* A closed period refuses the posting, and that is the operator's
-         business rather than a fault. */
-      if (err?.name === "PeriodClosed") return back(err.message);
+         business rather than a fault. `periodClosed` rather than the class
+         name, because that is the flag accounting.js sets for exactly this. */
+      if (err?.periodClosed) return back(err.message);
       throw err;
     }
 

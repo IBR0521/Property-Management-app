@@ -17,9 +17,9 @@
    map field names when onboarding a specific network. */
 import { all, get, one, insert, update } from "../lib/db.js";
 import { id } from "../lib/ids.js";
-import { stamp, human, today } from "../lib/dates.js";
+import { stamp, today } from "../lib/dates.js";
 import { usd, parseMoney } from "../lib/money.js";
-import { sendHtml, redirect, BadRequest } from "../lib/http.js";
+import { sendHtml, redirect } from "../lib/http.js";
 import { html, attr } from "../lib/render.js";
 import { appPage, notice, empty } from "../views/layout.js";
 import { navCounts } from "../lib/counts.js";
