@@ -80,6 +80,11 @@ export const TABLES = {
   journal_split: { by: "parent", parent: "journal", on: "journal_id" },
   ledger_entry: { by: "company" },
   obligation: { by: "company" },
+  /* What a tenant is billed every month beside the rent. It belongs to the
+     company and it belongs in the export: a portfolio that left without its
+     pet rent and parking would arrive somewhere else billing the wrong
+     amount, which is the failure this whole feature exists to stop. */
+  recurring_charge: { by: "company" },
   late_fee: { by: "company" },
   delinquency: { by: "company" },
   delinquency_step: { by: "company" },

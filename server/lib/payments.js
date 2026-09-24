@@ -112,13 +112,26 @@ export async function balanceFor(leaseId, period = monthKey(today())) {
       WHERE lease_id = ? AND period = ? AND status IN ('pending', 'processing')`,
     leaseId, period);
 
-  const due = Number(lease.rent_cents) + Number(fees.c);
+  /* Rent is not all a tenant owes. Pet rent, parking and storage are billed
+     against the same lease every month, and a balance that left them out
+     would tell somebody to pay less than they owe and then call them
+     delinquent for the difference. */
+  const { monthlyExtrasFor } = await import("./recurring.js");
+  const extras = await monthlyExtrasFor(lease.company_id, leaseId, `${period}-01`);
+
+  const due = Number(lease.rent_cents) + Number(extras.cents) + Number(fees.c);
   const settled = settledCents;
   const pending = Number(inFlight.c);
 
   return {
     period,
     rentCents: Number(lease.rent_cents),
+    /* Itemised, not folded into one number. A tenant who cannot see what the
+       $75 is will ring up and ask. */
+    extras: extras.rows.map((r) => ({
+      label: r.label, cents: Number(r.amount_cents), category: r.category,
+    })),
+    extrasCents: Number(extras.cents),
     feeCents: Number(fees.c),
     dueCents: due,
     paidCents: settled,

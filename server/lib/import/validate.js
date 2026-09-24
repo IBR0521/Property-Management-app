@@ -60,6 +60,13 @@ const LEASE_SYNONYMS = {
 
 /* --- the whole thing --------------------------------------------------------- */
 
+/* "pet rent" -> "Pet rent". The tenant sees this on what they owe, so it is
+   the column heading tidied rather than a code. */
+function headerLabel(header) {
+  const t = String(header || "").trim().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  return t ? t[0].toUpperCase() + t.slice(1) : "Monthly charge";
+}
+
 export async function validateImport({ companyId, sourceSystem = "generic", files = {} }) {
   const entities = {};
   const problems = [];
@@ -280,6 +287,12 @@ const VALIDATORS = {
       balanceCents: readMoney(data.balance) ?? 0,
       dueDay: readInt(data.dueDay),
       status: "active",
+      /* Money the tenant pays every month beside the rent, read from the
+         columns this importer has always named and never read. Offered on the
+         preview; created only if somebody asks for it. */
+      recurring: Object.entries(data.__recurring || {})
+        .map(([header, value]) => ({ label: headerLabel(header), cents: readMoney(value) }))
+        .filter((r) => r.cents != null && r.cents > 0),
     };
 
     if (!out.startDate) {

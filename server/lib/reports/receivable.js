@@ -143,8 +143,16 @@ async function creditsByLease(companyId, asOf) {
    is known exactly and the due date comes from the lease's own due day. A
    charge that is not rent — a late fee, something entered by hand — has no
    period, and falls due the day it was raised. */
+const PERIODIC = new Set(["rent_charge", "rent_prepaid_applied", "recurring_charge"]);
+
 function dueDateOf(line, lease) {
-  if (line.source_type === "rent_charge" || line.source_type === "rent_prepaid_applied") {
+  /* A recurring charge falls due with the rent it sits beside — it carries
+     `<chargeId>:<period>` for the same reason the rent charge carries
+     `<leaseId>:<period>`. Without this it would age from the day it was
+     raised, which is the first of the month, and a tenant whose rent is due
+     on the fifteenth would read as a fortnight late on their pet rent while
+     being perfectly current on their rent. */
+  if (PERIODIC.has(line.source_type)) {
     const period = String(line.source_id || "").split(":")[1];
     if (/^\d{4}-\d{2}$/.test(period)) {
       return dueDateFor(period, lease.rent_due_day || 1);

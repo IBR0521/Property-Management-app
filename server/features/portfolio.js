@@ -7,6 +7,7 @@ import { sendHtml, redirect, BadRequest } from "../lib/http.js";
 import { html, attr, raw } from "../lib/render.js";
 import { appPage, notice, empty, tabs, PROPERTY_TABS } from "../views/layout.js";
 import { icons } from "../views/icons.js";
+import { addCharge, endCharge, chargesFor, CATEGORIES, ChargeRefused } from "../lib/recurring.js";
 import { navCounts } from "../lib/counts.js";
 import { linkTenant } from "../lib/identity.js";
 import { tick } from "../lib/scheduler.js";
@@ -418,6 +419,55 @@ export function registerPortfolio(router) {
   /* Burn a sticker. The only reason to need this is a code that got shared or
      photographed somewhere public and is now attracting junk — so it takes
      effect immediately and the reprint is the staff member's problem. */
+  /* Money charged every month beside the rent — pet rent, parking, storage.
+
+     The amount is what the tenant pays each month, not what they pay in
+     total: proration is worked out per period by the charge run, on the
+     company's own basis, the same way rent is. */
+  router.post("/app/portfolio/u/:id/charge", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const unit = await one(
+      `SELECT u.* FROM unit u JOIN property p ON p.id = u.property_id
+        WHERE u.id = ? AND p.company_id = ?`, ctx.params.id, cid);
+    const lease = await get(
+      "SELECT * FROM lease WHERE unit_id = ? AND status = 'active' ORDER BY start_date DESC LIMIT 1",
+      unit.id);
+    if (!lease) throw new BadRequest("There is no active lease on this home to charge.");
+
+    const cents = parseMoney(ctx.fields.amount);
+    if (cents == null || cents <= 0) throw new BadRequest("Give an amount to charge each month.");
+
+    try {
+      await addCharge({
+        companyId: cid, leaseId: lease.id,
+        label: String(ctx.fields.label || ""),
+        category: String(ctx.fields.category || "other"),
+        amountCents: cents,
+        /* The owner's, because these are the owner's property: the dog lives
+           in their home and the space is their space. A charge that is the
+           manager's own is a different posting and is not offered here. */
+        payee: "owner",
+        by: ctx.staff.id,
+      });
+    } catch (err) {
+      if (err instanceof ChargeRefused) throw new BadRequest(err.message);
+      throw err;
+    }
+    redirect(ctx.res, `/app/portfolio/u/${unit.id}?m=${encodeURIComponent("Charge added.")}`);
+  });
+
+  /* Ending one is not deleting it: what was billed was billed, and the
+     journals behind it are append-only. */
+  router.post("/app/portfolio/charge/:id/end", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const charge = await one(
+      "SELECT * FROM recurring_charge WHERE id = ? AND company_id = ?", ctx.params.id, cid);
+    const lease = await one("SELECT unit_id FROM lease WHERE id = ?", charge.lease_id);
+    await endCharge({ companyId: cid, chargeId: charge.id, by: ctx.staff.id });
+    redirect(ctx.res,
+      `/app/portfolio/u/${lease.unit_id}?m=${encodeURIComponent("Charge ended.")}`);
+  });
+
   router.post("/app/portfolio/u/:id/newtoken", async (ctx) => {
     const cid = ctx.staff.company_id;
     const unit = await get("SELECT id FROM unit WHERE id = ? AND company_id = ?", ctx.params.id, cid);
@@ -484,6 +534,8 @@ export function registerPortfolio(router) {
           CASE WHEN w.status IN ('complete','cancelled') THEN 1 ELSE 0 END,
           w.created_at DESC LIMIT 12`, u.id);
     const period = monthKey(today());
+    const extras = lease
+      ? await chargesFor(cid, lease.id) : [];
     const delinq = lease ? await get(
       "SELECT * FROM delinquency WHERE lease_id = ? AND period = ?", lease.id, period) : null;
     const paid = lease ? (await get(
@@ -548,6 +600,54 @@ export function registerPortfolio(router) {
             </div>
 
             ${lease ? html`
+              <div class="panel">
+                <div class="panel__head">
+                  <h2>Charged every month</h2>
+                  <p>Beside the rent. Billed with it, due on the same day.</p>
+                </div>
+                <div class="panel__body panel__body--flush">
+                  ${extras.length ? html`<div class="tablewrap"><table class="data">
+                    <thead><tr><th>What</th><th class="num">Amount</th><th class="shrink"></th></tr></thead>
+                    <tbody>${extras.map((c) => html`
+                      <tr>
+                        <td>${c.label}<span class="cellsub">${CATEGORIES[c.category] || c.category}${
+                          Number(c.prorate) ? "" : " · not prorated"}</span></td>
+                        <td class="num">${usd(c.amount_cents)}</td>
+                        <td class="shrink">
+                          <form method="post" action="/app/portfolio/charge/${c.id}/end">
+                            <input type="hidden" name="_csrf" value="${ctx.csrf}" />
+                            <button class="pill outline sm" type="submit">End</button>
+                          </form>
+                        </td>
+                      </tr>`)}</tbody>
+                    <tfoot><tr><td><b>Every month</b></td>
+                      <td class="num"><b>${usd(extras.reduce((n, c) => n + Number(c.amount_cents), 0))}</b></td>
+                      <td class="shrink"></td></tr></tfoot>
+                  </table></div>` : empty("Nothing extra", "Rent is all this lease is billed.")}
+                </div>
+                <div class="panel__foot">
+                  <form method="post" action="/app/portfolio/u/${u.id}/charge" class="filterbar"
+                        style="padding:0;border:0;gap:0.5rem;flex-wrap:wrap">
+                    <input type="hidden" name="_csrf" value="${ctx.csrf}" />
+                    <div class="field" style="min-width:9rem">
+                      <input name="label" type="text" placeholder="Pet rent"
+                             aria-label="What the charge is called" required />
+                    </div>
+                    <div class="field" style="min-width:7rem">
+                      <select name="category" aria-label="Kind of charge">
+                        ${Object.entries(CATEGORIES).map(([k, v]) =>
+                          html`<option value="${k}">${v}</option>`)}
+                      </select>
+                    </div>
+                    <div class="field" style="min-width:6rem">
+                      <input name="amount" type="text" inputmode="decimal" placeholder="50.00"
+                             aria-label="Amount each month" required />
+                    </div>
+                    <button class="pill outline sm" type="submit">Add</button>
+                  </form>
+                </div>
+              </div>
+
               <div class="panel">
                 <div class="panel__head"><h2>Rent this month</h2><p>${period}</p></div>
                 <div class="panel__body">

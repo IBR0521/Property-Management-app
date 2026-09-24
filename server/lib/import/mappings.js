@@ -217,11 +217,28 @@ export function mapHeaders(entity, headers) {
 }
 
 /* A row as this application's field names, reading through the mapping. */
-export function applyMapping(row, { mapping }) {
+export function applyMapping(row, { mapping, ignored = [] }) {
   const out = { __row: row.__row };
   for (const [field, header] of Object.entries(mapping)) {
     out[field] = row[normaliseHeader(header)] ?? "";
   }
+
+  /* The recurring-money columns are carried rather than dropped.
+
+     Everything unmapped used to be discarded here, which was right while
+     there was nowhere to put it. There is now: a column called "pet rent"
+     with 50.00 in it is a charge somebody is contractually paying, and
+     reading the heading while throwing away the figure would be a strange
+     place to stop. Nothing is created from them without being asked — see
+     the import screen — but they have to survive to be offered. */
+  const extra = {};
+  for (const header of ignored) {
+    if (!RECURRING_MONEY.includes(normaliseHeader(header))) continue;
+    const value = row[normaliseHeader(header)];
+    if (String(value ?? "").trim()) extra[header] = value;
+  }
+  if (Object.keys(extra).length) out.__recurring = extra;
+
   return out;
 }
 

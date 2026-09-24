@@ -147,24 +147,30 @@ describe("the preview", () => {
     assert.match(body, /Paid ahead by tenants at conversion<\/td><td class="num">\$0\.00/);
   });
 
-  test("money the application cannot hold is said in its own words", async () => {
+  test("money charged every month is said in its own words, and offered", async () => {
+    /* This used to be a warning that the money would be lost, because a lease
+       here had one rent and nowhere to put the rest. It can hold them now, so
+       the same columns are an offer — but an offer, not an action: a column
+       heading is not a decision to start billing somebody. */
     const { body } = await preview({
       ...FILES,
       lease: "id,unit id,tenant ids,start date,rent,pet rent,parking,deposit,balance\n"
         + "L-1,U-1,T-1,2026-01-01,1200,50,75,1200,450\n",
     });
-    assert.match(body, /Charges this application cannot hold yet/);
+    assert.match(body, /Money charged every month, beside the rent/);
     assert.match(body, /pet rent/);
     assert.match(body, /parking/);
-    assert.match(body, /will not be\s+billed after the import/,
-      "the consequence, not just the fact");
-    assert.match(body, /Nothing is wrong with these files/,
-      "it is a warning about the product, not a problem with the file");
+    assert.match(body, /Nothing is created unless you tick/,
+      "the tick is the decision, not the upload");
+    assert.match(body, /name="recurring_charges"/, "and there is a box to tick");
+    assert.match(body, /\$125\.00 a month/,
+      "with the figures, so the decision is made against money and not headings");
   });
 
   test("a file with no such column says nothing about it", async () => {
     const { body } = await preview();
-    assert.doesNotMatch(body, /Charges this application cannot hold yet/);
+    assert.doesNotMatch(body, /Money charged every month, beside the rent/);
+    assert.doesNotMatch(body, /name="recurring_charges"/);
   });
 
   test("a problem stops it, with the row number", async () => {

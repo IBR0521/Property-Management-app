@@ -40,10 +40,33 @@ import { usd } from "../money.js";
 import { BadRequest } from "../http.js";
 import { entityOrder } from "./mappings.js";
 
+/* Which kind of charge a column heading names. A guess, and a conservative
+   one: anything unrecognised is "other" rather than something wrong. */
+function categoryFor(label) {
+  const t = String(label).toLowerCase();
+  if (/pet|dog|cat/.test(t)) return "pet";
+  if (/park|garage|carport/.test(t)) return "parking";
+  if (/storage|locker/.test(t)) return "storage";
+  if (/util|water|sewer|trash|rubbish|electric|gas|rubs/.test(t)) return "utility";
+  if (/insur/.test(t)) return "insurance";
+  if (/amenit|pool|gym|valet/.test(t)) return "amenity";
+  if (/admin/.test(t)) return "admin";
+  return "other";
+}
+
 export async function commitImport({
   companyId, validated, sourceSystem = "generic",
   batchId = null, by = "import",
   conversionDate = today(), trustCashCents = null,
+  /* Off by default, and that is the decision rather than an oversight.
+
+     The lease file names money a tenant pays every month — pet rent, parking,
+     a space — and this application can hold it now. Creating those charges
+     silently would start billing somebody on the strength of a column
+     heading nobody checked, which is how a tenant gets an invoice for a dog
+     they do not have. The preview lists what would be created and this is
+     switched on by ticking it. */
+  recurringCharges = false,
 }) {
   if (!validated?.ok) {
     throw new BadRequest(
@@ -105,6 +128,41 @@ export async function commitImport({
       }
     }
 
+    /* The monthly charges the lease file named, if they were asked for.
+
+       Idempotent through `source_id`: re-uploading the same file updates the
+       charge rather than adding a second one, the same way every other row
+       here behaves. */
+    let charges = 0;
+    if (recurringCharges) {
+      const { addCharge } = await import("../recurring.js");
+      for (const row of validated.entities.lease?.rows || []) {
+        const leaseId = ids.lease.get(row.sourceId) || ids.lease.get(`row:${row.row}`);
+        if (!leaseId) continue;
+        for (const extra of row.data.recurring || []) {
+          const key = `${row.sourceId || `row:${row.row}`}:${extra.label}`;
+          const already = await get(
+            `SELECT id FROM recurring_charge
+              WHERE company_id = ? AND source_system = ? AND source_id = ?`,
+            companyId, sourceSystem, key);
+          if (already) {
+            await update("recurring_charge", already.id, { amount_cents: extra.cents });
+            continue;
+          }
+          await addCharge({
+            companyId, leaseId, label: extra.label, category: categoryFor(extra.label),
+            amountCents: extra.cents,
+            /* The owner's. Every column on that list is the owner's property
+               being paid for — the dog's home, the parking space, the water. */
+            payee: "owner",
+            startDate: row.data.startDate, by,
+            sourceSystem, sourceId: key,
+          });
+          charges += 1;
+        }
+      }
+    }
+
     const opening = await postOpeningJournal({
       companyId, validated, ids, conversionDate, trustCashCents, by,
     });
@@ -117,7 +175,7 @@ export async function commitImport({
       });
     }
 
-    return { created, updated, tenancies, opening };
+    return { created, updated, tenancies, recurringCharges: charges, opening };
   });
 }
 

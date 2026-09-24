@@ -425,6 +425,11 @@ export function registerImport(router) {
         companyId: cid, validated, sourceSystem: batch.source_system,
         batchId: batch.id, by: ctx.staff.id,
         conversionDate, trustCashCents,
+        /* Ticked on the preview, where the charges that would be created are
+           listed by name and amount. Unticked, the columns are read and
+           nothing is created — which is what happened to every import before
+           this application could hold them. */
+        recurringCharges: String(ctx.fields.recurring_charges || "") === "on",
       });
     } catch (err) {
       await update("import_batch", batch.id, {
@@ -470,18 +475,47 @@ function moneyNotes(notes) {
   return html`
     <div class="panel">
       <div class="panel__body">
-        ${notice("warn", "Charges this application cannot hold yet",
+        ${notice("warn", "Money charged every month, beside the rent",
           html`Your lease file has ${columns.map((c) => html`<span class="chip" data-tone="warn">${c}</span> `)}
-            in it. A lease here has one rent and one due day — there is no second
-            recurring charge, so these columns are not read and that money will not be
-            billed after the import.
+            in it — money a tenant pays every month beside the rent.
             <br /><br />
-            Nothing is wrong with the file and the import will work. What you have to
-            decide is what to do about the difference: fold it into the rent figure
-            before uploading, or keep billing it outside this system. Said here rather
-            than left in the list of unread columns, because it is money somebody is
-            contractually paying.`)}
+            These can be brought across now and billed with the rent from next month,
+            due on the same day, shown to the tenant itemised. They are charged to the
+            owner, because they are the owner's property being paid for.
+            <br /><br />
+            <b>Nothing is created unless you tick the box on the form below.</b> A
+            column heading is not a decision to start billing somebody, so the figures
+            are read and left alone until you say so.`)}
       </div>
+    </div>`;
+}
+
+/* The tick, listed by name and amount.
+
+   The warning above says these columns exist. This says what would be created
+   from them, so the decision is made against figures rather than headings. */
+function recurringOffer(validated) {
+  const rows = (validated.entities?.lease?.rows || [])
+    .flatMap((r) => (r.data.recurring || []).map((x) => ({ ...x, row: r.row })));
+  if (!rows.length) return "";
+
+  const total = rows.reduce((n, r) => n + r.cents, 0);
+  const byLabel = new Map();
+  for (const r of rows) byLabel.set(r.label, (byLabel.get(r.label) || 0) + r.cents);
+
+  return html`
+    <div class="field" style="margin-top:1rem">
+      <label class="radiotile" for="recurring_charges">
+        <input id="recurring_charges" name="recurring_charges" type="checkbox" />
+        <span>
+          Also create ${rows.length} monthly charge${rows.length === 1 ? "" : "s"},
+          ${usd(total)} a month in total
+          <small>${[...byLabel].map(([label, cents]) =>
+            html`${label} ${usd(cents)}. `)}Billed with the rent from next month, due on
+            the same day, and charged to the owner. Leave this unticked and the money is
+            not billed, which is what happened before this application could hold it.</small>
+        </span>
+      </label>
     </div>`;
 }
 
@@ -540,6 +574,8 @@ function commitPanel(ctx, batch, validated, heldCents) {
                   whatever you enter is <b>added</b> to that.` : ""}</span>
             </div>
           </div>
+
+          ${recurringOffer(validated)}
 
           ${validated.opening.depositsCents ? notice("warn", "If you leave the balance blank",
             html`${usd(validated.opening.depositsCents)} of deposits will be recorded as held

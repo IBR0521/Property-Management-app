@@ -28,6 +28,7 @@ import { runAutopay, paidForPeriod } from "./payments.js";
 import { prunePortalSessions } from "./magiclink.js";
 import { pruneDeadSubscriptions } from "./push/index.js";
 import { runRentCharges } from "./rentcharge.js";
+import { runRecurringCharges } from "./recurring.js";
 import { runOwnerStatements } from "./ownerstatements.js";
 import { runReportSchedules } from "./reports/saved.js";
 import { todayIn } from "./timezone.js";
@@ -107,6 +108,12 @@ export async function tick(reason = "manual") {
      after them would have every one of them judging a month that had not been
      billed yet. */
   Object.assign(out, await runRentCharges());
+
+  /* Straight after the rent, and before anything reads a balance. A tenant
+     owes rent plus whatever else is on their lease, and autopay, the
+     delinquency pass and the late-fee sweep all ask what is owed — they must
+     see both charges or neither. */
+  Object.assign(out, await runRecurringCharges());
 
   for (const company of await all("SELECT * FROM company")) {
     Object.assign(out, sumInto(out, await generateObligations(company)));
