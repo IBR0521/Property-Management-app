@@ -28,6 +28,7 @@ import { runAutopay, paidForPeriod } from "./payments.js";
 import { prunePortalSessions } from "./magiclink.js";
 import { pruneDeadSubscriptions } from "./push/index.js";
 import { runRentCharges } from "./rentcharge.js";
+import { runOwnerStatements } from "./ownerstatements.js";
 import { runReportSchedules } from "./reports/saved.js";
 import { todayIn } from "./timezone.js";
 
@@ -119,6 +120,11 @@ export async function tick(reason = "manual") {
     Object.assign(out, sumInto(out, await advanceDelinquencies(company)));
     Object.assign(out, sumInto(out, await judgePromises(company)));
   }
+
+  /* After the rent charges and the ledger work above, so a statement
+     snapshots a month that has finished being written to, and before the
+     outbox drain only because everything else is. It queues nothing. */
+  Object.assign(out, await runOwnerStatements());
 
   const drained = await drainOutbox();
   out.delivered = drained.sent;

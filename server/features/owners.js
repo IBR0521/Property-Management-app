@@ -390,7 +390,21 @@ export function registerOwners(router) {
     if (!s) return sendHtml(ctx.res, "Not found", 404);
     const owner = await one("SELECT * FROM owner WHERE id = ?", s.owner_id);
     const company = await one("SELECT * FROM company WHERE id = ?", s.company_id);
-    const t = JSON.parse(s.totals);
+
+    /* The PDF path has guarded this since it was written; this one did not,
+       and it is the page an owner actually opens. A bare parse takes the page
+       down twice over: on a snapshot that will not parse, and on one that
+       parses to the wrong shape — `t.jobs.length` is read a few lines below,
+       and a statement filed before `jobs` was added to the snapshot has no
+       such key. Stored JSON outlives the code that wrote it. */
+    const t = readTotals(s.totals);
+    if (!t) {
+      return sendHtml(ctx.res, publicPage({
+        company, title: "Statement", heading: "This statement cannot be shown",
+        lede: "Its figures could not be read. Ask your manager to generate it again.",
+        body: "",
+      }), 409);
+    }
 
     if (!s.sent_at) await update("owner_statement", s.id, { sent_at: stamp() });
 
@@ -582,6 +596,34 @@ async function sendStatementPdf(ctx, statement) {
 
 /* Snapshotted into owner_statement.totals so a statement an owner already has
    never silently changes underneath them. */
+/* A stored snapshot, read defensively.
+
+   Returns null when it cannot be trusted rather than throwing, so the caller
+   can say so in words. The list arrives as a list or not at all: a statement
+   written before a field existed must not be able to crash the page that
+   reads it. */
+function readTotals(raw) {
+  let t;
+  try { t = JSON.parse(raw); } catch { return null; }
+  if (!t || typeof t !== "object" || Array.isArray(t)) return null;
+  /* Every field `computeStatement` returns, normalised to the type the page
+     reads it as. The list is explicit and matches that function's return on
+     purpose: when a field is added there, this is the second place to touch,
+     and a missing one here shows up as an empty section rather than a 500. */
+  const list = (v) => (Array.isArray(v) ? v : []);
+  return {
+    ...t,
+    rent: Number(t.rent) || 0,
+    expenses: Number(t.expenses) || 0,
+    fees: Number(t.fees) || 0,
+    other: Number(t.other) || 0,
+    net: Number(t.net) || 0,
+    lines: list(t.lines),
+    jobs: list(t.jobs),
+    upcoming: list(t.upcoming),
+  };
+}
+
 export async function computeStatement(ownerId, from, to) {
   const lines = await all(
     `SELECT * FROM ledger_entry WHERE owner_id = ? AND date >= ? AND date <= ?
@@ -632,8 +674,10 @@ function thresholdOf(v) {
 
 function statementDayOf(v) {
   const n = parseInt(String(v || ""), 10);
-  // 29th to 31st do not exist in every month, so the safe ceiling is 28.
-  return Number.isFinite(n) && n >= 1 && n <= 28 ? n : 1;
+  /* 1 to 31. The ceiling was 28 because "29th to 31st do not exist in every
+     month", which is true of the number and not of the arrangement: the run
+     clamps the day to the length of the month, so 31 means the last day. */
+  return Number.isFinite(n) && n >= 1 && n <= 31 ? n : 1;
 }
 
 function ownerForm({ csrf, owner, error }) {
@@ -676,9 +720,10 @@ function ownerForm({ csrf, owner, error }) {
             </div>
             <div class="field">
               <label for="statement_day">Statement day</label>
-              <input id="statement_day" name="statement_day" type="number" min="1" max="28"
+              <input id="statement_day" name="statement_day" type="number" min="1" max="31"
                      value="${owner ? owner.statement_day : 1}" />
-              <span class="field__help">Day of the month. 28 is the highest, because February.</span>
+              <span class="field__help">Day of the month, where 31 means the last day. The previous
+                month's statement is prepared for you on this day; sending it stays your call.</span>
             </div>
           </div>
 
