@@ -141,14 +141,27 @@ async function subledgerLeg(companyId, asOf) {
       GROUP BY o.id, o.name
       ORDER BY o.name`, asOf, companyId);
 
-  /* Deposits are recorded on the lease and, today, posted nowhere. Carried as
-     its own figure rather than folded into the total, because a deposit that
-     exists on a lease and not in the books is a finding in its own right and
-     hiding it inside a subtotal is how it stays unnoticed. */
+  /* The deposits the leases say are still held, which is the subsidiary
+     ledger for `2100`.
+
+     Carried as its own figure rather than folded into the total, because a
+     deposit that exists on a lease and not in the books is a finding in its
+     own right and hiding it inside a subtotal is how it stays unnoticed.
+
+     "Still held" is an active tenancy **or** an ended one whose return has
+     not been settled. The second half was added with the deposit ledger: a
+     tenant who moved out on the 30th has left, and their money is still in
+     the trust account until somebody pays it back. Counting only active
+     leases reported every unsettled return as a variance for as long as it
+     took to settle — which is exactly the period somebody is most likely to
+     be looking at this report. */
   const dep = await get(
-    `SELECT COALESCE(SUM(deposit_cents), 0)::bigint AS cents, COUNT(*)::int AS n
-       FROM lease
-      WHERE company_id = ? AND status = 'active' AND deposit_cents > 0`, companyId);
+    `SELECT COALESCE(SUM(l.deposit_cents), 0)::bigint AS cents, COUNT(*)::int AS n
+       FROM lease l
+      WHERE l.company_id = ? AND l.deposit_cents > 0
+        AND (l.status = 'active'
+             OR EXISTS (SELECT 1 FROM deposit_return r
+                         WHERE r.lease_id = l.id AND r.status = 'open'))`, companyId);
 
   return {
     owners: owners.map((o) => ({ ownerId: o.id, name: o.name, cents: Number(o.cents) })),

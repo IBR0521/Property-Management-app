@@ -86,6 +86,8 @@ export const TABLES = {
   payment_promise: { by: "company" },
   owner_approval: { by: "company" },
   owner_statement: { by: "company" },
+  deposit_return: { by: "company" },
+  deposit_deduction: { by: "company" },
   trust_reconciliation: { by: "company" },
   vendor_invoice: { by: "company" },
   vendor_payout: { by: "company" },

@@ -15,6 +15,8 @@
     "test": "node --env-file=.env.test --test --test-concurrency=1 test/*.test.js",
     "test:watch": "node --env-file=.env.test --test --watch test/*.test.js",
     "correct:plan": "node -e \"import('./server/lib/correct.js').then(async m=>console.log(m.describe(await m.plan())))\"",
+    "deposits:plan": "node -e \"import('./server/lib/deposits.js').then(async m=>console.log(m.describeConversion(await m.planConversion())))\"",
+    "deposits:commit": "node -e \"import('./server/lib/deposits.js').then(m=>m.commitConversion({confirm:'post-held-deposits'})).then(r=>console.log(JSON.stringify(r,null,2)))\"",
     "correct:commit": "node -e \"import('./server/lib/correct.js').then(m=>m.commit({confirm:'correct-postings'})).then(r=>console.log(JSON.stringify(r,null,2)))\"",
     "icons": "node scripts/icons.js",
     "vapid": "node -e \"import('./server/lib/push/vapid.js').then(m=>{const k=m.generateVapidKeys();console.log('\\nVAPID_PUBLIC_KEY='+k.publicKey);console.log('VAPID_PRIVATE_KEY='+k.privateKey);console.log('VAPID_SUBJECT=mailto:you@example.com\\n');console.log('Put these in your environment. The public key is handed to browsers,');console.log('so changing it later invalidates every existing subscription.\\n')})\"",

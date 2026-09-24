@@ -216,6 +216,7 @@ const ROUTE_CAPABILITY = [
   ["/app/accounting", "money.view"],
   ["/app/banking", "bank.link"],
   ["/app/owners", "money.view"],
+  ["/app/deposits", "money.view"],
   ["/app/payments", "money.view"],
   ["/app/payouts", "money.view"],
   ["/app/rent", "money.view"],
@@ -270,6 +271,8 @@ const WRITE_CAPABILITY = [
   ["/app/banking", "money.write"],
   ["/app/rent", "money.write"],
   ["/app/owners", "money.write"],
+  /* Settling a return posts a journal and pays somebody's deposit back. */
+  ["/app/deposits", "money.write"],
   /* Connecting a payment account, changing who bears a fee, and putting a
      lease on cash-only are all decisions about money, not about settings. */
   ["/app/payments", "money.write"],
