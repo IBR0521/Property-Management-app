@@ -111,7 +111,10 @@ export function registerListings(router) {
             <p>One page that works today, one feed that needs somebody's approval first</p>
           </div>
           <div class="panel__body panel__body--flush">
-            <div class="tablewrap"><table class="data"><tbody>
+            <!-- Two labelled rows, not tabular data. The presentation role
+                 stops a screen reader announcing "table, 2 columns, row 1 of 2"
+                 before every line of what is really a short list. -->
+            <div class="tablewrap"><table class="data" role="presentation"><tbody>
               <tr>
                 <td class="shrink"><b>Your page</b></td>
                 <td><a href="${publicPath(company, "/listings")}" target="_blank">${publicPath(company, "/listings")}</a>

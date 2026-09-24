@@ -197,7 +197,7 @@ export function portalPage({ title, heading, lede, body, person, company, tabs: 
 <html lang="en">
 <head>${HEAD(`${title} · ${company?.name || "Your account"}`, { install: PORTAL_MANIFEST })}</head>
 <body class="antialiased">
-<div class="pub" style="max-width:52rem">
+<div class="pub" role="main" style="max-width:52rem">
   <div class="pub__brand" style="justify-content:space-between">
     <span style="display:inline-flex;align-items:center;gap:0.5rem">
       ${icons.logo}<b>${company?.name || "Your account"}</b>
@@ -238,7 +238,7 @@ export function publicPage({ title, heading, lede, body, company, foot, install 
 <html lang="en">
 <head>${HEAD(title, { install })}</head>
 <body class="antialiased">
-<div class="pub">
+<div class="pub" role="main">
   <div class="pub__brand">${icons.logo}<b>${company?.name || "Property operations"}</b></div>
   ${heading ? html`<h1>${heading}</h1>` : ""}
   ${lede ? html`<p class="lede">${lede}</p>` : ""}
@@ -255,7 +255,7 @@ export function signInPage({ error, company, csrf, next }) {
 <html lang="en">
 <head>${HEAD("Sign in", { install: APP_MANIFEST })}</head>
 <body class="antialiased">
-<div class="pub" style="max-width:24rem">
+<div class="pub" role="main" style="max-width:24rem">
   <div class="pub__brand">${icons.logo}<b>${company?.name || "Property operations"}</b></div>
   <h1>Sign in</h1>
   <div class="panel">
