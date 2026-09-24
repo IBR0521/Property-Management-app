@@ -246,8 +246,8 @@ export function registerTurns(router) {
                         <form method="post" action="/app/turns/${t.id}/task/${k.id}" class="btnrow">
                           <input type="hidden" name="_csrf" value="${ctx.csrf}" />
                           <input name="cost" type="text" inputmode="decimal" placeholder="cost"
-                                 style="width:5.5rem;padding:0.375rem 0.5rem;border:1px solid var(--hairline);border-radius:var(--radius-xl);font-size:0.8125rem" />
-                          <select name="vendor_id" style="width:8rem;padding:0.375rem;border:1px solid var(--hairline);border-radius:var(--radius-xl);font-size:0.8125rem">
+                                 style="width:5.5rem;padding:0.375rem 0.5rem;border:1px solid var(--control-edge);border-radius:var(--radius-xl);font-size:0.8125rem" />
+                          <select name="vendor_id" style="width:8rem;padding:0.375rem;border:1px solid var(--control-edge);border-radius:var(--radius-xl);font-size:0.8125rem">
                             <option value="">vendor…</option>
                             ${vendors.map((v) => html`<option value="${v.id}">${v.name}</option>`)}
                           </select>
@@ -261,7 +261,7 @@ export function registerTurns(router) {
               <form method="post" action="/app/turns/${t.id}/task" class="btnrow">
                 <input type="hidden" name="_csrf" value="${ctx.csrf}" />
                 <input name="label" type="text" required placeholder="Add a task"
-                       style="flex:1;min-width:12rem;padding:0.625rem 0.875rem;border:1px solid var(--hairline);border-radius:var(--radius-xl);font-size:0.875rem" />
+                       style="flex:1;min-width:12rem;padding:0.625rem 0.875rem;border:1px solid var(--control-edge);border-radius:var(--radius-xl);font-size:0.875rem" />
                 <button class="pill outline sm" type="submit">Add</button>
               </form>
             </div>

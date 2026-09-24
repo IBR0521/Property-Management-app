@@ -50,6 +50,13 @@ const PAIRS = [
   ["#ffffff", "var(--brand)", "the current nav item", NORMAL],
   ["#ffffff", "var(--warn)", "a count badge", NORMAL],
   ["#ffffff", "var(--danger)", "a destructive button", NORMAL],
+
+  /* Boundaries rather than text: 1.4.11 asks 3:1 for the visual information
+     that tells you where a control is. Fields sit both inside a panel and
+     directly on the page, so the edge has to hold against both. */
+  ["var(--control-edge)", "var(--surface-card)", "the outline of a field in a panel", UI],
+  ["var(--control-edge)", "var(--background)", "the outline of a field", UI],
+  ["var(--control-edge)", "var(--surface)", "the outline of a field on the page", UI],
 ];
 
 /* --- what does not pass, written down -------------------------------------
@@ -64,23 +71,31 @@ const PAIRS = [
    to whoever owns the design, and it is in the phase report as a decision
    waiting on them.
 
-   What is left is the borders. Reaching 3:1 against white would take the
-   hairline from #e6e8ec to around #8f96a3, turning every panel edge and every
-   field outline from a whisper into a visible grey rule. That is a redesign,
-   not a tweak. The mitigation today is that no control is identified by its
-   border alone: fields carry labels, panels carry headings, and the focus
-   state uses --brand-light with a 2px ring rather than the hairline.
+   What is left is --hairline, and it stays light on purpose.
 
-   The secondary-text grey used to be here too. It was #717784, which came to
-   4.49:1 on white against a 4.5 requirement — missing by a hundredth, at the
-   12px size where it matters most. It is #6a7079 now, which clears 4.5:1 on
-   white and on the page background both, and the three pairs that depend on
-   it have moved up into the list above. */
+   1.4.11 governs "the visual information required to identify user interface
+   components and states". A panel edge, a table row rule and an <hr> identify
+   nothing: the panel is identified by its heading, the row by its content.
+   Darkening those to 3:1 would put a heavy grey line between every row of
+   every table in an application that is mostly dense tables of money, and
+   would buy no one anything.
+
+   What 1.4.11 does govern is the outline that tells you where a field is, and
+   that is --control-edge now, checked in the list above. The split is the
+   whole point: the two were one token, so making the fields findable would
+   have meant repainting every divider in the product.
+
+   Both of the other entries that used to be here are gone. The secondary-text
+   grey was #717784 at 4.49:1 — missing by a hundredth at 12px — and is
+   #6a7079 now, clearing 4.5:1 on white and on the page background both. The
+   --ghost entry was wrong twice: it is not a disabled control's edge, and
+   `.gword` and `.cdots` are the only rules that use it, neither of which
+   appears in any markup this application serves. */
 const ACCEPTED = [
   ["var(--hairline)", "var(--surface-card)", "the edge of a panel", 1.22, UI,
-    "decorative: a panel is identified by its heading, not its rule"],
-  ["var(--ghost)", "var(--background)", "a disabled control's edge", 1.40, UI,
-    "a disabled control is exempt from 1.4.11, and this is also used for dividers"],
+    "decorative, and exempt: a panel is identified by its heading, not its rule"],
+  ["var(--hairline)", "var(--background)", "a table row rule", 1.22, UI,
+    "decorative: darkening it would put a grey line between every row"],
 ];
 
 describe("the tokens these claims are about still exist", () => {

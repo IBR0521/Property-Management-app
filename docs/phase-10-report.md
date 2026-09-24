@@ -113,15 +113,36 @@ is a judgement a person makes with a real screen reader.
 the sRGB linearisation the naive version omits — the step whose absence
 flatters exactly the mid-tone greys this palette uses.
 
-Twelve pairs pass. **Two do not**, and they are recorded with measured ratios
-and reasons rather than left off the list.
+**Everything WCAG governs now passes.** Fifteen pairs, including every
+control boundary. Two entries remain in the accepted table and both are
+decorative borders that 1.4.11 exempts.
 
-The secondary-text grey was one of the failures when this was written:
-`#717784` came to 4.49:1 on white against a 4.5 requirement, missing by a
-hundredth at the 12px size where it matters most. It is `#6a7079` now — 4.99:1
-on white and 4.54:1 on the page background — and the three pairs that depend
-on it have moved into the passing list. What is left is the hairline and ghost
-borders, which would need a redesign rather than a tweak.
+Two palette changes got it there, both at your direction.
+
+`--ink-soft` was 4.49:1 on white against a 4.5 requirement — missing by a
+hundredth, at the 12px size where it matters most. It is `#6a7079` now: 4.99:1
+on white, 4.54:1 on the page background.
+
+The borders needed splitting rather than darkening. `--hairline` was doing two
+jobs at 1.22:1 — the outline that tells you where a field is, which 1.4.11
+requires to reach 3:1, and the panel edges and table row rules it does not
+govern at all. A single darkened token would have made the fields findable at
+the cost of putting a heavy grey line between every row of every table, in an
+application that is mostly dense tables of money. So there is now a
+`--control-edge` at `#858c9a` — 3.38:1 on white, 3.07:1 on the page
+background — carried by the ten places that are genuinely controls: the field,
+select, textarea and radio-tile rules, the outline arrow button, and six
+inline borders in the setup, turns and applications screens. `--hairline`
+stays where it was, decorative.
+
+Verified in the browser rather than asserted: signed in, the rendered input
+border computes to `rgb(133,140,154)` and the panel border to
+`rgb(230,232,236)`, and a screenshot of the trial balance shows the date
+fields outlined and the row rules unchanged.
+
+A third entry disappeared on inspection. `--ghost` was listed as a disabled
+control's edge; it is nothing of the sort, and the only two rules that use it
+— `.gword` and `.cdots` — appear in no markup this application serves.
 
 ---
 
@@ -238,21 +259,14 @@ overdue ones: rotate the Supabase service-role key and the database password
 account. `npm run deposits:plan` shows what would post. It is your call; it
 posts journals against your books.
 
-**The palette.** Two colour pairs still miss WCAG AA:
+**The palette is done.** Both changes were yours to call and you called them:
+`--ink-soft` to `#6a7079`, and the border split that put a `--control-edge` at
+`#858c9a` on the things 1.4.11 actually governs while leaving the decorative
+hairline alone.
 
-- The hairline and ghost borders are 1.22:1 and 1.40:1 against a 3:1
-  requirement. Reaching it would take the hairline to around `#8f96a3` and
-  turn every panel edge and field outline from a whisper into a visible grey
-  rule. **That is a redesign and I have not done it.**
-
-`--ink-soft` was the third: **4.49:1** on white, missing by a hundredth, and
-it is the secondary text everywhere at 12px. You asked for `#6a7079` and it is
-done — 4.99:1 on white, 4.54:1 on the page background, clearing AA on both.
-
-I have not touched the rest of the palette, because how the product looks is
-your call and not a thing to alter quietly while writing a test. The test
-records the current ratios, fails if any gets worse, and fails if one is fixed
-— so the number in it can never be stale.
+Nothing WCAG requires is outstanding. The two entries left in the accepted
+table are the panel edge and the table row rule, both exempt, both kept light
+deliberately — and the test still fails if either gets worse.
 
 ---
 

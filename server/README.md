@@ -196,11 +196,11 @@ Ordered by what stops a launch versus what merely should be done first.
 
 - [ ] Vercel Blob has no backup at all. Every uploaded photograph, receipt and
       signed document has exactly one copy. See `docs/BACKUPS.md`.
-- [ ] Two colour pairs miss WCAG AA — the hairline and ghost borders, at
-      1.22:1 and 1.40:1 against a 3:1 requirement. Measured ratios and reasons
-      are in `test/contrast.test.js`. Reaching 3:1 means taking the hairline
-      to around `#8f96a3`, which is a redesign. The secondary-text grey that
-      used to be on this list is fixed.
+- [x] Colour contrast. Every pair WCAG governs passes, including all control
+      boundaries — `--ink-soft` is `#6a7079` and controls carry a
+      `--control-edge` at `#858c9a`. The two entries left in
+      `test/contrast.test.js` are the panel edge and the table row rule, which
+      1.4.11 exempts and which are kept light on purpose.
 - [ ] `4000 Rent income` is now unposted under the agency model, and
       `5000 Repairs` means only the manager's own costs. Both are live traps
       for whoever reads the chart next. (OPEN-ITEMS A2, A3)

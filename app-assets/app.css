@@ -190,7 +190,7 @@ table.data a:hover{ text-decoration:underline; }
 .formgrid{ display:grid; gap:1rem; }
 .formgrid--2{ grid-template-columns:repeat(auto-fit,minmax(min(14rem,100%),1fr)); }
 .field select{
-  width:100%; border-radius:var(--radius-xl); border:1px solid var(--hairline);
+  width:100%; border-radius:var(--radius-xl); border:1px solid var(--control-edge);
   background:var(--background); padding:0.75rem 1rem; font-size:0.875rem;
   font-family:inherit; color:var(--ink);
 }
@@ -213,7 +213,7 @@ table.data a:hover{ text-decoration:underline; }
 .field .radiotile span small{ color:var(--ink-soft); }
 .radiotile{
   display:grid; grid-template-columns:1.0625rem 1fr; gap:0.625rem; align-items:start;
-  padding:0.75rem 0.875rem; border:1px solid var(--hairline); border-radius:var(--radius-xl);
+  padding:0.75rem 0.875rem; border:1px solid var(--control-edge); border-radius:var(--radius-xl);
   background:var(--background); font-size:0.875rem; cursor:pointer;
 }
 .radiotile:hover{ border-color:var(--ink-soft); }

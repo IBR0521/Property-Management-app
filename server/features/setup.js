@@ -201,10 +201,10 @@ export function registerSetup(router) {
                       <input type="hidden" name="_csrf" value="${ctx.csrf}" />
                       <input name="threshold" type="text" inputmode="decimal" placeholder="400"
                              aria-label="Approval threshold for ${o.name}"
-                             style="width:6rem;padding:0.375rem 0.5rem;border:1px solid var(--hairline);border-radius:var(--radius-xl);font-size:0.8125rem" />
+                             style="width:6rem;padding:0.375rem 0.5rem;border:1px solid var(--control-edge);border-radius:var(--radius-xl);font-size:0.8125rem" />
                       <input name="email" type="email" placeholder="email" value="${o.email || ""}"
                              aria-label="Email address for ${o.name}"
-                             style="width:12rem;padding:0.375rem 0.5rem;border:1px solid var(--hairline);border-radius:var(--radius-xl);font-size:0.8125rem" />
+                             style="width:12rem;padding:0.375rem 0.5rem;border:1px solid var(--control-edge);border-radius:var(--radius-xl);font-size:0.8125rem" />
                       <button class="pill outline sm" type="submit">Save</button>
                     </form>
                   </td>

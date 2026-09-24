@@ -393,7 +393,7 @@ export function registerApplications(router) {
                               <option value="na"${attr("selected", c.result === "na")}>Not applicable</option>
                             </select>
                             <input name="note_${item.key}" type="text" value="${c.note || ""}" placeholder="note"
-                                   style="flex:1;min-width:10rem;padding:0.625rem 0.875rem;border:1px solid var(--hairline);border-radius:var(--radius-xl);font-size:0.875rem" />
+                                   style="flex:1;min-width:10rem;padding:0.625rem 0.875rem;border:1px solid var(--control-edge);border-radius:var(--radius-xl);font-size:0.875rem" />
                           </div>
                         </div>`;
                     })}
