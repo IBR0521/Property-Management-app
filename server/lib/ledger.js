@@ -266,13 +266,40 @@ export async function postMoney({
 }) {
   const amount = Math.abs(Math.round(Number(amountCents) || 0));
 
-  /* Rent received splits across two liabilities — earned and held — but the
-     owner's statement gets the whole receipt, because the whole receipt is
-     theirs: 2200 and 2300 are both money this company holds for that owner,
-     and the reconciliation compares their sum against the owner ledgers. */
   const splits = kind === "rent_payment" && amount > 0
     ? await rentPaymentSplits({ companyId, leaseId, amount })
     : postingFor(kind, amountCents);
+
+  /* What of this receipt is the owner's.
+
+     Rent received splits across two liabilities — earned and held — and the
+     owner's statement used to get the whole receipt, because the whole
+     receipt was theirs: `2200` and `2300` are both money held for that owner.
+
+     That stopped being true when payments began settling `1200`. A tenant
+     paying a late fee is paying the *manager*, and a receipt that cleared a
+     fee credited neither owner account while the owner's ledger recorded the
+     lot — so the control account and the owners' own ledgers disagreed by
+     exactly the fee, which is the comparison `clients_vs_subledger` exists to
+     make. Caught by the sweep's tests, which refuse to offer a figure while
+     that variance stands.
+
+     So the entry is the part that reached an owner-held account. Derived from
+     the splits rather than recomputed, because the splits are what actually
+     posted. */
+  /* Only when this call is the one posting the journal, and only for money
+     coming in. A returned payment is a `rent_payment` for a negative amount
+     whose journal is posted elsewhere and handed in — `returnPayment` builds
+     the reversal — so the splits computed above are never used, and deriving
+     an owner figure from them would turn a refund into a receipt. The owner
+     is meant to see a negative line, which is the whole point of reversing
+     rather than deleting. */
+  const ownerAmount = kind === "rent_payment" && splits && !existingJournalId
+    && Math.round(Number(amountCents)) > 0
+    ? splits
+      .filter((sp) => OWNER_HELD_ACCOUNTS.includes(sp.code))
+      .reduce((n, sp) => n + Number(sp.credit || 0) - Number(sp.debit || 0), 0)
+    : null;
   const { postJournal } = await import("../features/accounting.js");
 
   return await tx(async () => {
@@ -299,7 +326,8 @@ export async function postMoney({
     await insert("ledger_entry", {
       id: entryId, company_id: companyId, owner_id: ownerId,
       property_id: propertyId, unit_id: unitId, lease_id: leaseId,
-      date, kind, amount_cents: Math.round(Number(amountCents)),
+      date, kind,
+      amount_cents: ownerAmount == null ? Math.round(Number(amountCents)) : ownerAmount,
       memo: memo || null, source,
       work_order_id: workOrderId, receipt_path: receiptPath,
       journal_id: journalId,

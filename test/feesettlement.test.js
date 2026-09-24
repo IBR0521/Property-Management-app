@@ -177,3 +177,63 @@ describe("a real late fee, end to end", () => {
     assert.equal(await bal("2300"), 0, "without any of it becoming the owner's");
   });
 });
+
+/* What the owner is shown for a receipt that was partly a fee.
+
+   The owner's ledger used to get the whole receipt, and that was right while
+   the whole receipt was theirs: `2200` and `2300` are both money held for
+   that owner. It stopped being right the moment payments began settling
+   `1200`, because a tenant paying a late fee is paying the manager.
+
+   A receipt that cleared a fee credited neither owner account while the
+   owner's ledger recorded the lot, so the control account and the owners' own
+   ledgers disagreed by exactly the fee — which is the comparison
+   `clients_vs_subledger` exists to make, and it is the reason the trust sweep
+   would not offer a figure. Found that way. */
+describe("the owner's ledger, for a payment that was partly a fee", () => {
+  const entryTotal = async () => Number((await get(
+    `SELECT COALESCE(SUM(amount_cents), 0)::bigint c FROM ledger_entry
+      WHERE owner_id = ? AND kind = 'rent_payment'`, world.ownerId)).c);
+
+  test("shows the rent, not the fee", async () => {
+    await chargeRent(world.companyId, { period: "2026-03" });
+    await post("other", 5000);
+    await post("rent_payment", 105000);
+
+    assert.equal(await entryTotal(), 100000,
+      "the owner received the rent; the 50 was the manager's");
+  });
+
+  test("and the control account agrees with it", async () => {
+    await chargeRent(world.companyId, { period: "2026-03" });
+    await post("other", 5000);
+    await post("rent_payment", 105000);
+
+    const r = await trustReconciliation(world.companyId);
+    assert.equal(r.variances.find((v) => v.key === "clients_vs_subledger").cents, 0,
+      "the owners' ledgers and 2200 + 2300 must say the same thing");
+  });
+
+  test("a receipt that is entirely a fee credits the owner nothing", async () => {
+    await post("other", 5000);
+    await post("rent_payment", 5000);
+
+    assert.equal(await entryTotal(), 0, "none of it was theirs");
+    const r = await trustReconciliation(world.companyId);
+    assert.equal(r.variances.find((v) => v.key === "clients_vs_subledger").cents, 0);
+  });
+
+  test("and an ordinary rent payment is unchanged", async () => {
+    await chargeRent(world.companyId, { period: "2026-03" });
+    await post("rent_payment", 100000);
+    assert.equal(await entryTotal(), 100000);
+  });
+
+  test("money paid ahead is still the owner's", async () => {
+    /* 2300 is an owner-held account, so a prepayment belongs on their ledger
+       exactly as it always did. */
+    await post("rent_payment", 100000);
+    assert.equal(await entryTotal(), 100000);
+    assert.equal(await bal("2300"), -100000);
+  });
+});

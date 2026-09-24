@@ -17,6 +17,9 @@ import { sendHtml, redirect, BadRequest } from "../lib/http.js";
 import { html, attr } from "../lib/render.js";
 import { appPage, notice, empty, tabs } from "../views/layout.js";
 import { navCounts } from "../lib/counts.js";
+import {
+  planSweep, commitSweep, SweepRefused, CONFIRMATION as SWEEP_CONFIRMATION,
+} from "../lib/trustsweep.js";
 
 /* The codes the rest of the app posts against. Referred to by name so a call
    site never carries a bare string that a typo turns into a silent miss. */
@@ -338,6 +341,77 @@ const ACCOUNTING_TABS = [
   { key: "trust", href: "/app/accounting/trust", label: "Trust position" },
 ];
 
+/* What is the manager's, and a form to record having taken it.
+
+   A surplus in the trust account is normally fees earned and not yet moved.
+   The figure is only meaningful while the rest of the reconciliation is
+   sound, so when it is not this shows the reason instead of an amount — the
+   claim "this money is nobody's" is worthless if the obligation side is
+   broken. */
+function sweepPanel(sweep, ctx) {
+  if (sweep.blocked.length) {
+    return html`
+      <div class="panel">
+        <div class="panel__head"><h2>Your own fees</h2><p>Cannot be worked out yet</p></div>
+        <div class="panel__body">
+          ${notice("danger", "Fix the reconciliation first",
+            html`${sweep.blocked[0].title}. Until that is right, what looks like a surplus
+              is measured against an obligation total that is not real, and moving it
+              could take money that belongs to a client.`)}
+        </div>
+      </div>`;
+  }
+
+  if (!sweep.sweepableCents && !sweep.history.length) return "";
+
+  return html`
+    <div class="panel">
+      <div class="panel__head">
+        <h2>Your own fees</h2>
+        <p>Earned, and still in the client account</p>
+      </div>
+      <div class="panel__body">
+        ${sweep.warnings.map((w) => notice("warn", w.title, w.detail))}
+        <div class="grid grid--3">
+          <div class="tile"${attr("data-tone", sweep.sweepableCents ? "ok" : null)}>
+            <span class="tile__label">Yours to move</span>
+            <span class="tile__value">${usd(sweep.sweepableCents)}</span>
+            <span class="tile__note">it should not grow month on month</span></div>
+        </div>
+        ${sweep.sweepableCents ? html`
+          <form method="post" action="/app/accounting/trust/sweep" class="filterbar"
+                style="padding:0;border:0;gap:0.5rem;flex-wrap:wrap;margin-top:1rem">
+            <input type="hidden" name="_csrf" value="${ctx.csrf}" />
+            <div class="field" style="min-width:7rem">
+              <input name="amount" type="text" inputmode="decimal"
+                     value="${(sweep.sweepableCents / 100).toFixed(2)}"
+                     aria-label="Amount moved" required />
+            </div>
+            <div class="field" style="min-width:9rem">
+              <input name="date" type="date" value="${today()}" aria-label="Date moved" />
+            </div>
+            <div class="field" style="min-width:10rem">
+              <input name="reference" type="text" placeholder="Bank reference"
+                     aria-label="Bank reference" />
+            </div>
+            <button class="pill outline sm" type="submit">Record the transfer</button>
+          </form>
+          <span class="field__help" style="display:block;margin-top:0.5rem">
+            Move the money between your own accounts first. This records that you did;
+            it does not move anything.</span>` : ""}
+      </div>
+      ${sweep.history.length ? html`
+        <div class="panel__body panel__body--flush" style="border-top:1px solid var(--hairline)">
+          <div class="tablewrap tablewrap--narrow"><table class="data">
+            <thead><tr><th>Date</th><th>Reference</th><th class="num">Moved</th></tr></thead>
+            <tbody>${sweep.history.map((h) => html`
+              <tr><td class="shrink">${human(h.date)}</td><td>${h.memo}</td>
+                  <td class="num">${usd(h.cents)}</td></tr>`)}</tbody>
+          </table></div>
+        </div>` : ""}
+    </div>`;
+}
+
 export function registerAccounting(router) {
   router.get("/app/accounting", async (ctx) => {
     const cid = ctx.staff.company_id;
@@ -429,6 +503,7 @@ export function registerAccounting(router) {
   router.get("/app/accounting/trust", async (ctx) => {
     const cid = ctx.staff.company_id;
     const pos = await trustPosition(cid);
+    const sweep = await planSweep(cid);
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "accounting", counts: await navCounts(cid),
       title: "Trust position",
@@ -451,8 +526,34 @@ export function registerAccounting(router) {
             <tbody>${pos.rows.map((r) => html`
               <tr><td>${r.code}</td><td>${r.name}</td><td class="num">${usd(r.balance)}</td></tr>`)}</tbody>
           </table></div>
-        </div></div>`,
+        </div></div>
+
+        ${sweepPanel(sweep, ctx)}`,
     }));
+  });
+
+  /* Recording that earned fees were moved out of the trust account.
+
+     This records a transfer; it does not make one. Somebody moves the money
+     between their own two bank accounts and tells this what they did — the
+     same rule the payouts follow, and the reason the platform is never the
+     custodian. */
+  router.post("/app/accounting/trust/sweep", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const cents = parseMoney(ctx.fields.amount);
+    if (cents == null || cents <= 0) throw new BadRequest("Give the amount you moved.");
+    try {
+      await commitSweep({
+        companyId: cid, amountCents: cents,
+        date: String(ctx.fields.date || "") || today(),
+        reference: String(ctx.fields.reference || "").trim() || null,
+        by: ctx.staff.id, confirm: SWEEP_CONFIRMATION,
+      });
+    } catch (err) {
+      if (err instanceof SweepRefused) throw new BadRequest(err.message);
+      throw err;
+    }
+    redirect(ctx.res, `/app/accounting/trust?m=${encodeURIComponent("Recorded.")}`);
   });
 
   router.get("/app/accounting/new", async (ctx) => {
