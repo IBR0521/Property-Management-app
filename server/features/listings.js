@@ -23,170 +23,61 @@ import { sendHtml, redirect, BadRequest } from "../lib/http.js";
 import { html, attr } from "../lib/render.js";
 import { appPage, notice, empty } from "../views/layout.js";
 import { navCounts } from "../lib/counts.js";
+import { companyBySlug, publicPath } from "../lib/tenancy.js";
+import { buildMits, feedsArePerCompany } from "../lib/listings/mits.js";
 
 /* --- the feed ------------------------------------------------------------- */
 
-/* Everything publishable, for every company. The endpoint is unauthenticated
-   and company-agnostic by design: an aggregator crawls one URL hourly and does
-   not hold an account. Only listings explicitly marked for syndication appear. */
-export async function feedRows() {
-  return await all(
-    `SELECT l.*, u.label, u.beds AS unit_beds, u.baths AS unit_baths, u.sqft AS unit_sqft,
-            p.line1, p.city, p.state, p.zip, p.year_built,
-            c.name AS company_name, c.phone AS company_phone
-       FROM listing l
-       JOIN unit u ON u.id = l.unit_id
-       JOIN property p ON p.id = u.property_id
-       JOIN company c ON c.id = l.company_id
-      WHERE l.status = 'active' AND l.syndicate = 1
-      ORDER BY p.line1, u.label`);
-}
-
-export async function feedPhotos(listingIds) {
-  if (!listingIds.length) return new Map();
-  const rows = await all(
-    `SELECT * FROM listing_photo WHERE listing_id IN (${listingIds.map(() => "?").join(",")})
-      ORDER BY listing_id, rank`, ...listingIds);
-  const map = new Map();
-  for (const r of rows) {
-    if (!map.has(r.listing_id)) map.set(r.listing_id, []);
-    map.get(r.listing_id).push(r);
-  }
-  return map;
-}
-
-export async function buildListingsXml(origin) {
-  const rows = await feedRows();
-  const photos = await feedPhotos(rows.map((r) => r.id));
-  const generated = new Date().toISOString();
-
-  /* Grouped by property so a building with eight vacancies is one Property
-     element with eight Units, which is what every aggregator expects and what
-     stops the same address appearing eight times in search results. */
-  const byProperty = new Map();
-  for (const r of rows) {
-    if (!byProperty.has(r.line1 + r.zip)) byProperty.set(r.line1 + r.zip, []);
-    byProperty.get(r.line1 + r.zip).push(r);
-  }
-
-  const out = [];
-  out.push(`<?xml version="1.0" encoding="UTF-8"?>`);
-  out.push(`<PhysicalProperty xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">`);
-  out.push(`  <Management>`);
-  out.push(`    <ManagementID>${x(rows[0] ? rows[0].company_name : "property-operations")}</ManagementID>`);
-  out.push(`    <GeneratedOn>${x(generated)}</GeneratedOn>`);
-  out.push(`  </Management>`);
-
-  for (const [, group] of byProperty) {
-    const p = group[0];
-    out.push(`  <Property>`);
-    out.push(`    <PropertyID>`);
-    out.push(`      <Identification IDValue="${x(hashId(p.line1 + p.zip))}" OrganizationName="${x(p.company_name)}" />`);
-    out.push(`      <MarketingName>${x(p.headline || p.line1)}</MarketingName>`);
-    out.push(`      <Address AddressType="property">`);
-    out.push(`        <AddressLine1>${x(p.line1)}</AddressLine1>`);
-    out.push(`        <City>${x(p.city)}</City>`);
-    out.push(`        <State>${x(p.state)}</State>`);
-    out.push(`        <PostalCode>${x(p.zip)}</PostalCode>`);
-    out.push(`        <Country>US</Country>`);
-    out.push(`      </Address>`);
-    out.push(`      <Phone><PhoneNumber>${x(p.contact_phone || p.company_phone || "")}</PhoneNumber></Phone>`);
-    if (p.contact_email) out.push(`      <Email>${x(p.contact_email)}</Email>`);
-    out.push(`    </PropertyID>`);
-    if (p.year_built) out.push(`    <Information><YearBuilt>${x(p.year_built)}</YearBuilt></Information>`);
-
-    for (const l of group) {
-      const beds = l.unit_beds == null ? "" : String(l.unit_beds);
-      const baths = l.unit_baths == null ? "" : String(l.unit_baths);
-      out.push(`    <ILS_Unit IDValue="${x(l.id)}">`);
-      out.push(`      <Units>`);
-      out.push(`        <Unit>`);
-      out.push(`          <Identification IDValue="${x(l.id)}" />`);
-      out.push(`          <MarketingName>${x(l.label ? `Unit ${l.label}` : l.line1)}</MarketingName>`);
-      if (beds) out.push(`          <UnitBedrooms>${x(beds)}</UnitBedrooms>`);
-      if (baths) out.push(`          <UnitBathrooms>${x(baths)}</UnitBathrooms>`);
-      if (l.unit_sqft) out.push(`          <MinSquareFeet>${x(l.unit_sqft)}</MinSquareFeet>`);
-      out.push(`          <UnitEconomicStatus>vacantAvailable</UnitEconomicStatus>`);
-      out.push(`        </Unit>`);
-      out.push(`      </Units>`);
-      out.push(`      <Availability>`);
-      if (l.available_date) out.push(`        <MadeReadyDate>${x(l.available_date)}</MadeReadyDate>`);
-      out.push(`        <VacateDate />`);
-      out.push(`      </Availability>`);
-      out.push(`      <Pricing>`);
-      out.push(`        <MarketRent Min="${cents(l.rent_cents)}" Max="${cents(l.rent_cents)}" />`);
-      if (l.deposit_cents != null) out.push(`        <Deposit Min="${cents(l.deposit_cents)}" />`);
-      if (l.lease_months) out.push(`        <LeaseTerm>${x(l.lease_months)}</LeaseTerm>`);
-      out.push(`      </Pricing>`);
-      if (l.description) out.push(`      <Comment>${x(l.description)}</Comment>`);
-      if (l.pets) out.push(`      <Policy><Pet><PetType>${x(l.pets)}</PetType></Pet></Policy>`);
-      if (l.virtual_tour_url) out.push(`      <VirtualTour><Src>${x(l.virtual_tour_url)}</Src></VirtualTour>`);
-
-      for (const ph of photos.get(l.id) || []) {
-        out.push(`      <File>`);
-        out.push(`        <FileType>Photo</FileType>`);
-        out.push(`        <Src>${x(absolute(origin, ph.path))}</Src>`);
-        if (ph.caption) out.push(`        <Caption>${x(ph.caption)}</Caption>`);
-        out.push(`        <Rank>${x(ph.rank)}</Rank>`);
-        out.push(`      </File>`);
-      }
-      out.push(`    </ILS_Unit>`);
-    }
-    out.push(`  </Property>`);
-  }
-
-  out.push(`</PhysicalProperty>`);
-  return out.join("\n");
-}
-
-/* XML has five characters that must never appear raw, and a listing
-   description is typed by a person. Escaping here rather than trusting the
-   input is the difference between a feed and an injection. */
-function x(v) {
-  return String(v ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;")
-    // Control characters are not legal in XML 1.0 at all, escaped or otherwise.
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
-}
-
-const cents = (v) => (v == null ? "0.00" : (Number(v) / 100).toFixed(2));
-
-/* A stable identifier for a property across crawls. Aggregators de-duplicate on
-   it, so it must not change between runs — which rules out anything random. */
-function hashId(seed) {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = ((h << 5) - h + seed.charCodeAt(i)) | 0;
-  return `P${Math.abs(h).toString(36)}`;
-}
-
-function absolute(origin, path) {
-  if (!path) return "";
-  if (/^https?:\/\//i.test(path)) return path;
-  return `${origin}${path.startsWith("/") ? "" : "/"}${path}`;
-}
+/* The feed builder moved to `lib/listings/mits.js` when it became one
+   document per company rather than one for the whole platform — see the
+   routes below for why that was not a detail. */
 
 /* --- routes --------------------------------------------------------------- */
 
 export function registerListings(router) {
-  /* The feed, also served from the app origin so it works without the
-     Vercel-specific api/ file. Public and unauthenticated by design. */
+  /* The feeds. Public and unauthenticated by design: an aggregator crawls a
+     URL hourly and does not hold an account.
+
+     **One per company.** This used to be a single document containing every
+     company on the platform, labelled with whichever one sorted first — so a
+     manager who handed that URL to Zillow would have been publishing their
+     competitors' listings under their own management id, and the network
+     would have been right to believe them. Found by writing the MITS
+     management block, which is the element a feed agreement is matched
+     against.
+
+     The platform-wide URL still answers, and carries no listings, because
+     somebody will hand a network the obvious address and the obvious address
+     should not publish everybody. */
+  const feedHeaders = {
+    "Content-Type": "application/xml; charset=utf-8",
+    // Aggregators crawl hourly; this stops them paying for a rebuild each time.
+    "Cache-Control": "public, max-age=900",
+    "X-Robots-Tag": "noindex",
+  };
+
   router.get("/feeds/listings.xml", async (ctx) => {
-    const xml = await buildListingsXml(`${ctx.url.protocol}//${ctx.url.host}`);
-    ctx.res.writeHead(200, {
-      "Content-Type": "application/xml; charset=utf-8",
-      // Aggregators crawl hourly; this stops them paying for a rebuild each time.
-      "Cache-Control": "public, max-age=900",
-      "X-Robots-Tag": "noindex",
-    });
+    ctx.res.writeHead(200, feedHeaders);
+    ctx.res.end(feedsArePerCompany(`${ctx.url.protocol}//${ctx.url.host}`));
+  });
+
+  router.get("/feeds/:slug/listings.xml", async (ctx) => {
+    const company = await companyBySlug(ctx.params.slug);
+    if (!company) {
+      ctx.res.writeHead(404, feedHeaders);
+      return ctx.res.end(`<?xml version="1.0" encoding="UTF-8"?>\n`
+        + `<PhysicalProperty><Management><Comment>No company with that address.`
+        + `</Comment></Management></PhysicalProperty>`);
+    }
+    const xml = await buildMits({
+      companyId: company.id, origin: `${ctx.url.protocol}//${ctx.url.host}` });
+    ctx.res.writeHead(200, feedHeaders);
     ctx.res.end(xml);
   });
 
   router.get("/app/listings", async (ctx) => {
     const cid = ctx.staff.company_id;
+    const company = await one("SELECT * FROM company WHERE id = ?", cid);
     const rows = await all(
       `SELECT l.*, u.label, p.line1, p.city,
               (SELECT COUNT(*) FROM listing_photo ph WHERE ph.listing_id = l.id)::int AS photos
@@ -208,10 +99,45 @@ export function registerListings(router) {
       staff: ctx.staff, csrf: ctx.csrf, active: "listings", counts: await navCounts(cid),
       title: "Vacancy marketing",
       subtitle: `${rows.length} listing${rows.length === 1 ? "" : "s"} · ${live} syndicated`,
+      actions: html`<a class="pill outline sm" href="${publicPath(company, "/listings")}"
+        target="_blank">Your public page</a>`,
       body: html`
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
         ${unlisted.length ? notice("warn", `${unlisted.length} empty unit(s) not advertised`,
           "An empty unit with no listing is losing rent quietly.") : ""}
+
+        <div class="panel">
+          <div class="panel__head"><h2>Where these appear</h2>
+            <p>One page that works today, one feed that needs somebody's approval first</p>
+          </div>
+          <div class="panel__body panel__body--flush">
+            <div class="tablewrap"><table class="data"><tbody>
+              <tr>
+                <td class="shrink"><b>Your page</b></td>
+                <td><a href="${publicPath(company, "/listings")}" target="_blank">${publicPath(company, "/listings")}</a>
+                  <span class="cellsub">Every active listing, with an enquiry form that lands in
+                    your inbox. Needs nobody's permission — send somebody the link.</span></td>
+              </tr>
+              <tr>
+                <td class="shrink"><b>Your feed</b></td>
+                <td><code>/feeds/${company.slug || "\u2014"}/listings.xml</code>
+                  <span class="cellsub">MITS, which is what both Zillow and Apartments.com read.
+                    <b>Only the listings you ticked for syndication.</b> Give a network
+                    <em>this</em> address — the one without your name in it carries no
+                    listings on purpose, because a shared feed would publish other
+                    companies' properties under yours.</span></td>
+              </tr>
+            </tbody></table></div>
+            <div class="panel__body">
+              ${notice("info", "Before a feed does anything",
+                html`Zillow wants an integration request approved by their Rentals Integrations
+                  team <b>before</b> a feed is worth pointing at them, then four to six weeks of
+                  their own feed testing. Apartments.com will send you their guide and take the
+                  XML by URL. Both are free. Neither will look at a feed from somebody who has
+                  not asked, so that is an email you send rather than a setting here.`)}
+            </div>
+          </div>
+        </div>
 
         ${unlisted.length ? html`
           <div class="panel">

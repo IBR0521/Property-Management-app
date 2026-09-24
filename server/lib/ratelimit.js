@@ -24,6 +24,13 @@ export const LIMITS = {
      enough for somebody who mistypes an amount twice and comes back, tight
      enough that the link cannot be used to run up API calls. */
   pay: { max: 10, windowMinutes: 30 },
+  /* Enquiries from a public listing page. The first page this application
+     serves to strangers at scale — everything public before it was behind a
+     token somebody was given, and a listing is meant to be found. Generous
+     enough for a family enquiring about four flats on the same road, tight
+     enough that the form is not a way to post into somebody's inbox all
+     afternoon. */
+  enquiry: { max: 10, windowMinutes: 60 },
   /* Portal sign-in attempts, counted per network before any lookup happens.
      The inner limit in magiclink.js counts links actually issued; this one
      counts tries, so a script pointed at a thousand addresses is stopped
