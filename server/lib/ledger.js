@@ -178,6 +178,22 @@ export async function outstandingReceivable(companyId, leaseId) {
   return Number(row?.cents || 0);
 }
 
+/* Which kinds move owner-held money, derived from the postings above rather
+   than listed by hand somewhere else.
+
+   The trust reconciliation compares `2200 + 2300` against the sum of each
+   owner's ledger entries, and that comparison is only meaningful over the
+   kinds that actually touch those accounts. A hand-kept list in the report
+   drifted once already — see the note in `reports/trust.js` — so it is
+   computed from the single place that knows. */
+export const OWNER_HELD_ACCOUNTS = ["2200", "2300"];
+
+export const ownerHeldKinds = () =>
+  Object.keys(POSTINGS).filter((kind) => {
+    const splits = POSTINGS[kind](1000);
+    return splits.some((s) => OWNER_HELD_ACCOUNTS.includes(s.code));
+  });
+
 export function postingFor(kind, amountCents) {
   const build = POSTINGS[kind];
   if (!build) return null;

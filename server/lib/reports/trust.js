@@ -35,6 +35,7 @@
    reason, and a variance involving it is not calculated rather than being
    calculated against a zero nobody meant. */
 import { all, get } from "../db.js";
+import { ownerHeldKinds } from "../ledger.js";
 import { today } from "../dates.js";
 
 /* --- the legs -------------------------------------------------------------- */
@@ -132,13 +133,33 @@ async function outstandingPayments(companyId, asOf) {
    control account and its subsidiary ledger can disagree, and when they do it
    is the subsidiary ledger somebody has been reading. */
 async function subledgerLeg(companyId, asOf) {
+  /* Only the kinds that move `2200`/`2300`, because that is what this total
+     is compared against.
+
+     The other half of a correction made once before and left unfinished. The
+     control-account side was split so deposits sat in their own leg; the
+     subsidiary-ledger side went on summing every entry an owner had. A
+     deposit writes an owner ledger entry on purpose — the owner should see
+     that money arrived into the trust account their funds are in — but it
+     credits `2100`, the tenant's liability, and never touches `2200`. So
+     every deposit taken through the application pushed this leg out by
+     exactly the deposit, and the same was true of rent charged and of the
+     `other` kinds.
+
+     It stayed invisible because the fixtures posted rent and little else. The
+     load-test portfolio posted two thousand deposits and the restore drill's
+     verification read the result as a control account disagreeing with its
+     own subsidiary ledger by $2,399,550. */
+  const kinds = ownerHeldKinds();
+  const placeholders = kinds.map(() => "?").join(", ");
   const owners = await all(
     `SELECT o.id, o.name, COALESCE(SUM(e.amount_cents), 0)::bigint AS cents
        FROM owner o
-       LEFT JOIN ledger_entry e ON e.owner_id = o.id AND e.date <= ?
+       LEFT JOIN ledger_entry e
+         ON e.owner_id = o.id AND e.date <= ? AND e.kind IN (${placeholders})
       WHERE o.company_id = ?
       GROUP BY o.id, o.name
-      ORDER BY o.name`, asOf, companyId);
+      ORDER BY o.name`, asOf, ...kinds, companyId);
 
   /* The deposits the leases say are still held, which is the subsidiary
      ledger for `2100`.

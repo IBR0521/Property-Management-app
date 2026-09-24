@@ -437,3 +437,67 @@ describe("as at a date", () => {
     assert.equal(later.legs.book.cents, RENT);
   });
 });
+
+/* Found by the restore drill, on the load-test portfolio.
+
+   The control-account side of this leg was corrected once: `2100` was split
+   out so tenant deposits stopped being compared against the owners' ledgers.
+   The subsidiary-ledger side of the same comparison was left summing *every*
+   entry an owner had, which put the deposits straight back in through the
+   other door.
+
+   It survived because the fixtures posted rent and little else. Two thousand
+   seeded deposits made it a $2,399,550 variance, and the verification that
+   runs at the end of the restore drill read it — correctly — as a control
+   account that disagreed with its own subsidiary ledger. */
+describe("what belongs in the owners' subsidiary ledger", () => {
+  test("only the kinds that actually move 2200 or 2300", async () => {
+    const { ownerHeldKinds } = await import("../server/lib/ledger.js");
+    assert.deepEqual(ownerHeldKinds().sort(),
+      ["expense", "management_fee", "rent_payment"],
+      "a kind that does not touch owner-held accounts cannot reconcile against them");
+  });
+
+  test("a deposit taken the ordinary way leaves the leg at zero", async () => {
+    const { takeDeposit } = await import("../server/lib/deposits.js");
+    const before = await trustReconciliation(world.companyId);
+    const leg = (r) => r.variances.find((v) => v.key === "clients_vs_subledger").cents;
+    assert.equal(leg(before), 0, "the fixture starts reconciled");
+
+    await takeDeposit({
+      companyId: world.companyId, leaseId: world.leaseId,
+      amountCents: 150000, date: today(), by: "test",
+    });
+
+    assert.equal(leg(await trustReconciliation(world.companyId)), 0,
+      "a deposit is the tenant's money on 2100; it must not appear as an owner-funds variance");
+  });
+
+  test("the owner is still shown the deposit on their statement", async () => {
+    const { takeDeposit } = await import("../server/lib/deposits.js");
+    await takeDeposit({
+      companyId: world.companyId, leaseId: world.leaseId,
+      amountCents: 150000, date: today(), by: "test",
+    });
+    /* Excluding it from the reconciliation must not mean hiding it. The money
+       arrived in the trust account the owner's funds are in, and the entry
+       exists so the owner can see that. */
+    const entry = await get(
+      "SELECT kind, owner_id, amount_cents FROM ledger_entry WHERE kind = 'deposit_held'");
+    assert.ok(entry, "the owner ledger entry is still written");
+    assert.equal(entry.owner_id, world.ownerId);
+    assert.equal(Number(entry.amount_cents), 150000);
+  });
+
+  test("rent received still reconciles, which is the case that always worked", async () => {
+    const { postMoney } = await import("../server/lib/ledger.js");
+    await postMoney({
+      companyId: world.companyId, ownerId: world.ownerId, propertyId: world.propertyId,
+      unitId: world.unitId, leaseId: world.leaseId, date: today(),
+      kind: "rent_payment", amountCents: 120000, memo: "rent", source: "manual", postedBy: "test",
+    });
+    const r = await trustReconciliation(world.companyId);
+    assert.equal(r.variances.find((v) => v.key === "clients_vs_subledger").cents, 0);
+    assert.equal(r.legs.subledger.cents, 120000, "rent received is owner money and still counts");
+  });
+});
