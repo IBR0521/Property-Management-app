@@ -71,7 +71,12 @@ const DEFAULT_CHART = [
   [ACCT.RENT_DUE_OWNERS, "Rent due to owners — uncollected", "liability", "credit", 0],
   [ACCT.RETAINED, "Retained earnings", "equity", "credit", 0],
   [ACCT.OPENING_CONVERSION, "Opening balance conversion", "equity", "credit", 0],
-  [ACCT.RENT_INCOME, "Rent income", "income", "credit", 0],
+  /* Retired: under agency the rent is the owner's income, so nothing credits
+     this. Kept in the chart for the companies whose older journals used it —
+     see migration 050 — and created inactive so it is never offered for a new
+     posting. `ensureChart` only inserts accounts that are missing, so this
+     does not revive one a company has deliberately retired. */
+  [ACCT.RENT_INCOME, "Rent income", "income", "credit", 0, 0],
   [ACCT.LATE_FEE_INCOME, "Late fee income", "income", "credit", 0],
   [ACCT.MGMT_FEE_INCOME, "Management fee income", "income", "credit", 0],
   [ACCT.FEE_RECOVERED, "Processing fee recovered", "income", "credit", 0],
@@ -92,11 +97,11 @@ export async function ensureChart(companyId) {
     "SELECT code FROM account WHERE company_id = ?", companyId);
   const have = new Set(existing.map((r) => r.code));
 
-  for (const [code, name, type, normal, trust] of DEFAULT_CHART) {
+  for (const [code, name, type, normal, trust, active = 1] of DEFAULT_CHART) {
     if (have.has(code)) continue;
     await insert("account", {
       id: id(), company_id: companyId, code, name, type,
-      normal_balance: normal, is_trust: trust, active: 1, created_at: stamp(),
+      normal_balance: normal, is_trust: trust, active, created_at: stamp(),
     });
   }
 }

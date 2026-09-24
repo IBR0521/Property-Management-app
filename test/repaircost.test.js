@@ -421,3 +421,161 @@ describe("the history records the supersede", () => {
     assert.equal(entry, undefined);
   });
 });
+
+/* Whose cost a vendor's invoice is.
+
+   OPEN-ITEMS A3. `5000 Repairs` used to take every invoice, which booked the
+   owner's repair as the manager's own expense: the manager's profit and loss
+   carried repairs they never bore, and `2200` was never reduced by money that
+   had genuinely left the owner's funds. An agent spending a client's money
+   reduces what is owed to that client; it does not incur an expense.
+
+   The code has branched on this since that correction. Nothing held it —
+   `ownerBorne` appeared in no test — and a posting rule with no test is how
+   the deposit and owner-list bugs survived ten phases each. */
+describe("an invoice lands in the account whose cost it is", () => {
+  const bal = async (code) => Number((await get(
+    `SELECT COALESCE(SUM(s.debit_cents - s.credit_cents), 0)::bigint c
+       FROM journal_split s JOIN account a ON a.id = s.account_id
+      WHERE a.company_id = ? AND a.code = ?`, world.companyId, code)).c);
+
+  test("against a property, it reduces what is owed to the owner", async () => {
+    const wo = await f.makeWorkOrder(world.companyId, world.unitId);
+    const res = await recordInvoice({
+      companyId: world.companyId, vendorId: world.vendorId, workOrderId: wo,
+      amountCents: 30000, taxCents: 0, invoiceNo: "INV-1",
+      invoiceDate: today(), createdBy: staff.id,
+    });
+
+    assert.equal(res.ownerBorne, true);
+    assert.equal(await bal("2200"), 30000,
+      "the owner's money paid for it, so less is owed to them");
+    assert.equal(await bal("5000"), 0,
+      "and it is not the manager's expense — booking it as one inflated their P&L");
+    assert.equal(await bal("2000"), -30000, "the contractor is owed either way");
+  });
+
+  test("with no property behind it, it is the manager's own", async () => {
+    /* The office printer. No unit, so no owner whose money could have paid. */
+    const res = await recordInvoice({
+      companyId: world.companyId, vendorId: world.vendorId,
+      amountCents: 12000, taxCents: 0, invoiceNo: "INV-2",
+      invoiceDate: today(), createdBy: staff.id,
+    });
+
+    assert.equal(res.ownerBorne, false);
+    assert.equal(await bal("5000"), 12000, "genuinely theirs to bear");
+    assert.equal(await bal("2200"), 0, "and no owner's funds were touched");
+  });
+
+  test("the owner sees their repair on their own ledger", async () => {
+    const wo = await f.makeWorkOrder(world.companyId, world.unitId);
+    await recordInvoice({
+      companyId: world.companyId, vendorId: world.vendorId, workOrderId: wo,
+      amountCents: 30000, taxCents: 0, invoiceDate: today(), createdBy: staff.id,
+    });
+    const entry = await get(
+      "SELECT kind, amount_cents FROM ledger_entry WHERE owner_id = ? AND kind = 'expense'",
+      world.ownerId);
+    assert.ok(entry, "in the books and absent from the ledger would be worse than either");
+    assert.equal(Number(entry.amount_cents), -30000);
+  });
+
+  test("the manager's own invoice reaches no owner's ledger", async () => {
+    await recordInvoice({
+      companyId: world.companyId, vendorId: world.vendorId,
+      amountCents: 12000, taxCents: 0, invoiceDate: today(), createdBy: staff.id,
+    });
+    assert.deepEqual(
+      await all("SELECT id FROM ledger_entry WHERE kind = 'expense'"), [],
+      "nobody else paid for the office printer");
+  });
+
+  test("tax goes wherever the invoice goes", async () => {
+    const wo = await f.makeWorkOrder(world.companyId, world.unitId);
+    await recordInvoice({
+      companyId: world.companyId, vendorId: world.vendorId, workOrderId: wo,
+      amountCents: 30000, taxCents: 2400, invoiceDate: today(), createdBy: staff.id,
+    });
+    assert.equal(await bal("2200"), 32400, "the owner pays the tax on their own repair");
+    assert.equal(await bal("5000"), 0);
+  });
+
+  test("and the books still balance either way", async () => {
+    const wo = await f.makeWorkOrder(world.companyId, world.unitId);
+    await recordInvoice({
+      companyId: world.companyId, vendorId: world.vendorId, workOrderId: wo,
+      amountCents: 30000, taxCents: 2400, invoiceDate: today(), createdBy: staff.id,
+    });
+    await recordInvoice({
+      companyId: world.companyId, vendorId: world.vendorId,
+      amountCents: 12000, taxCents: 0, invoiceDate: today(), createdBy: staff.id,
+    });
+    const net = await get(
+      `SELECT COALESCE(SUM(s.debit_cents - s.credit_cents), 0)::bigint c
+         FROM journal_split s JOIN journal j ON j.id = s.journal_id
+        WHERE j.company_id = ?`, world.companyId);
+    assert.equal(Number(net.c), 0);
+    assert.equal((await parity(world.companyId)).inParity, true,
+      "every owner-visible line has a journal behind it");
+  });
+});
+
+/* Retiring an account, and what it must not do.
+
+   OPEN-ITEMS A2. `4000 Rent income` is unposted under the agency model —
+   a rent charge credits `2400` and the receipt moves it to `2200`, because an
+   agent collecting rent holds somebody else's money rather than earning
+   revenue. The account sat in every chart, offered on the journal form,
+   posting to nothing: the account somebody reaches for when they are looking
+   for where the rent went, and the wrong answer.
+
+   The larger half of that item was that retiring it was not safe. Every
+   report in `reports/financial.js` filtered on `active = 1`, so retiring an
+   account with postings took them off the profit and loss and put the balance
+   sheet out by the same amount — for any account, not just this one. */
+describe("retiring an account", () => {
+  test("takes it off the journal form", async () => {
+    const offered = await all(
+      "SELECT code FROM account WHERE company_id = ? AND active = 1 ORDER BY code",
+      world.companyId);
+    const codes = offered.map((r) => r.code);
+    assert.ok(!codes.includes("4000"),
+      "nothing credits 4000 under agency, so it must not be offered");
+    assert.ok(codes.includes("2400"), "and the account that is credited still is");
+  });
+
+  test("but keeps the account and its history", async () => {
+    const acct = await get(
+      "SELECT code, name, active FROM account WHERE company_id = ? AND code = '4000'",
+      world.companyId);
+    assert.ok(acct, "a company whose older journals used it still needs the account");
+    assert.equal(Number(acct.active), 0);
+  });
+
+  test("and does not remove its postings from the reports", async () => {
+    /* The bug the fix is for. Posted to a retired account, then read back. */
+    const { postJournal } = await import("../server/features/accounting.js");
+    const { profitAndLoss, balanceSheet } = await import("../server/lib/reports/financial.js");
+    await postJournal({
+      companyId: world.companyId, date: "2026-03-01", memo: "rent, the old way",
+      splits: [{ code: "1300", debit: 50000 }, { code: "4000", credit: 50000 }],
+    });
+
+    const pl = await profitAndLoss(world.companyId, { from: "2026-01-01", to: "2026-12-31" });
+    assert.equal(pl.incomeCents, 50000,
+      "income on a retired account is still income that was earned");
+
+    const bs = await balanceSheet(world.companyId, { asOf: "2026-12-31" });
+    assert.equal(bs.outOfBalanceCents, 0,
+      "and a balance sheet must not stop balancing because somebody tidied the chart");
+  });
+
+  test("a retired account with nothing on it stays out of the way", async () => {
+    const { profitAndLoss } = await import("../server/lib/reports/financial.js");
+    const pl = await profitAndLoss(world.companyId, { from: "2026-01-01", to: "2026-12-31" });
+    const codes = (pl.rows || []).map((r) => r.code);
+    assert.ok(!codes.includes("4000"),
+      "retired and never posted to is noise on a report nobody needs");
+  });
+});

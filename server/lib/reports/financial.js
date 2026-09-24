@@ -41,6 +41,18 @@ import { today } from "../dates.js";
    while the journal comes back NULL. That is how the trial balance shipped
    with a date filter that silently did not filter, and it is worth restating
    here because every report in this file would inherit it. */
+/* Every account that is active **or** carries history.
+
+   The filter was `a.active = 1` alone, which meant retiring an account that
+   had ever been posted to silently removed its postings from every report in
+   this file. Measured rather than assumed: an account holding $500 of income,
+   retired, took the income off the profit and loss and put the balance sheet
+   out by exactly that amount.
+
+   Retiring is meant to stop an account being offered for new postings, which
+   is what the journal form's own filter does. It is not meant to rewrite the
+   past — and a balance sheet that stops balancing because somebody tidied the
+   chart is the last thing anybody would connect back to the tidying. */
 async function balances(companyId, { from = null, to = null, propertyId = null, ownerId = null,
                                      unallocatedOnly = false } = {}) {
   /* No join to `journal`.
@@ -59,7 +71,9 @@ async function balances(companyId, { from = null, to = null, propertyId = null, 
         AND (?::text IS NULL OR s.property_id = ?)
         AND (?::text IS NULL OR s.owner_id = ?)
         AND (? = 0 OR s.property_id IS NULL)
-      WHERE a.company_id = ? AND a.active = 1
+      WHERE a.company_id = ?
+        AND (a.active = 1
+             OR EXISTS (SELECT 1 FROM journal_split h WHERE h.account_id = a.id))
       GROUP BY a.code, a.name, a.type, a.normal_balance, a.is_trust
       ORDER BY a.code`,
     from, from, to, to, from, from, to, to,
