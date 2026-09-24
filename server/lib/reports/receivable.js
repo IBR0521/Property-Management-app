@@ -63,20 +63,78 @@ const bucketFor = (daysLate) => {
 const emptyBuckets = () =>
   Object.fromEntries(BUCKETS.map((b) => [b.key, 0]));
 
-/* Every movement on the tenant receivable, per lease, with enough of the
-   journal attached to work out what each charge was for. */
-async function receivableLines(companyId, asOf) {
+/* The charges, per lease, with enough of the journal attached to work out
+   what each one was for.
+
+   Debits only. This used to select every movement on the receivable and then
+   throw the credits into a single running total per lease, which is all the
+   aging ever does with them — so 108,000 of the 228,000 rows crossed the wire
+   to be added up. They are summed in the database now, by `creditsByLease`.
+
+   And no `ORDER BY`. The rows were sorted by (lease, date, created_at) in
+   Postgres, which at 2,000 units spilled 12MB to disk as an external merge —
+   and then the caller re-sorted each lease's charges by *due* date anyway.
+   The order that matters is applied per lease, over a handful of rows, in the
+   caller. Sorting the whole set first bought nothing and cost the merge.
+
+   The tie-break the caller's sort relies on is preserved by doing it here:
+   `Array.prototype.sort` is stable, so charges that fall due on the same day
+   keep the order they were inserted in, which is why this still returns them
+   grouped and in insertion order per lease. */
+async function receivableCharges(companyId, asOf) {
   return await all(
-    `SELECT s.lease_id, j.date, j.source_type, j.source_id, j.memo,
-            s.debit_cents::bigint AS debit, s.credit_cents::bigint AS credit
+    `SELECT s.id, s.lease_id, s.date, s.source_type, s.source_id,
+            s.debit_cents::bigint AS debit
        FROM journal_split s
        JOIN account a ON a.id = s.account_id
-       JOIN journal j ON j.id = s.journal_id
       WHERE a.company_id = ? AND a.code = '1300'
         AND s.lease_id IS NOT NULL
         AND s.date <= ?
-      ORDER BY s.lease_id, s.date, j.created_at`,
+        AND s.debit_cents > 0`,
     companyId, asOf);
+}
+
+/* The memo for the charges that are actually still owed.
+
+   It is read for one thing — the line of detail under an open charge — so it
+   is fetched for the charges that have one, after the aging has worked out
+   which those are. Selecting it with everything else meant carrying 120,000
+   strings across to use a couple of thousand of them. */
+async function memosFor(splitIds) {
+  if (!splitIds.length) return new Map();
+  const out = new Map();
+  const CHUNK = 1000;
+  for (let i = 0; i < splitIds.length; i += CHUNK) {
+    const batch = splitIds.slice(i, i + CHUNK);
+    const rows = await all(
+      /* The journal's memo, which is what this always showed. The split
+         carries its own — "rent charged" — and the journal's is the one a
+         person recognises: "Rent 2026-04". */
+      `SELECT s.id, j.memo AS memo
+         FROM journal_split s
+         JOIN journal j ON j.id = s.journal_id
+        WHERE s.id IN (${batch.map(() => "?").join(", ")})`, ...batch);
+    for (const r of rows) out.set(r.id, r.memo);
+  }
+  return out;
+}
+
+/* What has been paid against the receivable, per lease.
+
+   One number each, which is all the aging uses: nothing records which month a
+   payment was for, so they are pooled and applied oldest-charge-first. */
+async function creditsByLease(companyId, asOf) {
+  const rows = await all(
+    `SELECT s.lease_id, SUM(s.credit_cents)::bigint AS credit
+       FROM journal_split s
+       JOIN account a ON a.id = s.account_id
+      WHERE a.company_id = ? AND a.code = '1300'
+        AND s.lease_id IS NOT NULL
+        AND s.date <= ?
+        AND s.credit_cents > 0
+      GROUP BY s.lease_id`,
+    companyId, asOf);
+  return new Map(rows.map((r) => [r.lease_id, Number(r.credit)]));
 }
 
 /* When a charge fell due.
@@ -108,31 +166,35 @@ export async function agedReceivables(companyId, { asOf = today() } = {}) {
       ORDER BY p.line1, u.label`, companyId);
 
   const byLease = new Map(leases.map((l) => [l.id, l]));
-  const lines = await receivableLines(companyId, asOf);
-  const prepaid = await prepaidByLease(companyId, asOf);
+  const [lines, credits, prepaid] = await Promise.all([
+    receivableCharges(companyId, asOf),
+    creditsByLease(companyId, asOf),
+    prepaidByLease(companyId, asOf),
+  ]);
 
-  /* Charges per lease, oldest first, each with what is still unpaid on it. */
+  /* Charges per lease, each with what is still unpaid on it. */
   const charges = new Map();
-  const credits = new Map();
 
   for (const line of lines) {
     const lease = byLease.get(line.lease_id);
     if (!lease) continue;
 
-    const debit = Number(line.debit), credit = Number(line.credit);
-    if (debit > 0) {
-      if (!charges.has(line.lease_id)) charges.set(line.lease_id, []);
-      charges.get(line.lease_id).push({
-        due: dueDateOf(line, lease),
-        raised: line.date,
-        memo: line.memo,
-        period: String(line.source_id || "").split(":")[1] || null,
-        cents: debit, unpaid: debit,
-      });
-    }
-    if (credit > 0) {
-      credits.set(line.lease_id, (credits.get(line.lease_id) || 0) + credit);
-    }
+    if (!charges.has(line.lease_id)) charges.set(line.lease_id, []);
+    charges.get(line.lease_id).push({
+      splitId: line.id,
+      due: dueDateOf(line, lease),
+      raised: line.date,
+      period: String(line.source_id || "").split(":")[1] || null,
+      cents: Number(line.debit), unpaid: Number(line.debit),
+    });
+  }
+
+  /* The order the database used to impose, applied per lease instead. Two
+     charges falling due on the same day are settled in the order they were
+     raised, which is what the sort below preserves only if the array is in
+     that order to begin with. */
+  for (const own of charges.values()) {
+    own.sort((a, b) => a.raised.localeCompare(b.raised));
   }
 
   const rows = [];
@@ -186,6 +248,13 @@ export async function agedReceivables(companyId, { asOf = today() } = {}) {
       oldestDue, graceEnds, inGrace,
       open,
     });
+  }
+
+  /* Now that the aging has said which charges are still open, fetch the one
+     column only those need. */
+  const memos = await memosFor(rows.flatMap((r) => r.open.map((o) => o.splitId)));
+  for (const row of rows) {
+    for (const o of row.open) o.memo = memos.get(o.splitId) ?? null;
   }
 
   const totals = emptyBuckets();

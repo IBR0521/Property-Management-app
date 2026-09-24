@@ -206,6 +206,13 @@ export async function postJournal({
            change and the copy cannot drift — and the database checks the two
            match on the way in rather than trusting this line. */
         date: on,
+        /* And what it was for, for the same reason. Aged receivables has to
+           know whether a charge is rent — rent ages from its due date, which
+           comes from the period in `source_id` — and joining 120,000 splits
+           to their journals for those two columns cost 800ms of a 945ms
+           query. Append-only, so the copy cannot drift; checked on the way
+           in, so it cannot be forgotten either. */
+        source_type: sourceType, source_id: sourceId,
         debit_cents: r.d, credit_cents: r.c,
         owner_id: r.ownerId || null, property_id: r.propertyId || null,
         unit_id: r.unitId || null, lease_id: r.leaseId || null, vendor_id: r.vendorId || null,
@@ -249,6 +256,10 @@ export async function reverseJournal(journalId, { companyId, by = "system", memo
         /* The reversal's own date, not the original's — the same date the
            journal above carries. */
         date: on,
+        /* The source is the original's, which is what the reversal journal
+           above carries too: a reversal is about the same thing the posting
+           was about. */
+        source_type: original.source_type, source_id: original.source_id,
         debit_cents: s.credit_cents, credit_cents: s.debit_cents,
         owner_id: s.owner_id, property_id: s.property_id, unit_id: s.unit_id,
         lease_id: s.lease_id, vendor_id: s.vendor_id,

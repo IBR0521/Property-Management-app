@@ -248,6 +248,68 @@ describe("the double-entry journal is append-only", () => {
   });
 });
 
+/* The copies on a split cannot disagree with the journal they came from.
+
+   Two columns are denormalised onto `journal_split` for speed: `date` by
+   migration 046, and `source_type`/`source_id` by 048. The argument that this
+   is safe is that a journal is append-only, so what is copied can never
+   change — and the database checks it rather than trusting the argument.
+
+   Worth a test of its own because the failure is silent. A split whose source
+   disagreed with its journal would not throw anything or look wrong; it would
+   age somebody's rent from the wrong day on a report nobody could check. */
+describe("what is copied onto a split matches its journal", () => {
+  test("a split cannot be given a source its journal does not have", async () => {
+    await truncateAll();
+    const { postJournal } = await import("../server/features/accounting.js");
+    const { today } = await import("../server/lib/dates.js");
+    const w = await f.makeWorld({ name: "Copy Co" });
+    const jid = await postJournal({
+      companyId: w.companyId, date: today(), memo: "a charge",
+      source: "rent", sourceType: "rent_charge", sourceId: `${w.leaseId}:2026-01`,
+      splits: [{ code: "1300", debit: 50000 }, { code: "2400", credit: 50000 }],
+    });
+
+    await run("ALTER TABLE journal_split DISABLE TRIGGER journal_split_no_update");
+    try {
+      await assert.rejects(
+        () => run("UPDATE journal_split SET source_id = 'something-else' WHERE journal_id = ?", jid),
+        /does not match its journal/i,
+        "a source that disagrees with the journal must be refused");
+      await assert.rejects(
+        () => run("UPDATE journal_split SET source_type = 'late_fee' WHERE journal_id = ?", jid),
+        /does not match its journal/i);
+    } finally {
+      await run("ALTER TABLE journal_split ENABLE TRIGGER journal_split_no_update");
+    }
+  });
+
+  test("every split posted through the application already agrees", async () => {
+    await truncateAll();
+    const { postJournal } = await import("../server/features/accounting.js");
+    const { today } = await import("../server/lib/dates.js");
+    const w = await f.makeWorld({ name: "Agreement Co" });
+    await postJournal({
+      companyId: w.companyId, date: today(), memo: "a charge",
+      source: "rent", sourceType: "rent_charge", sourceId: `${w.leaseId}:2026-02`,
+      splits: [{ code: "1300", debit: 50000 }, { code: "2400", credit: 50000 }],
+    });
+    /* And one with no source at all, which is legitimate: a manual journal
+       has none, so the copy must be allowed to be null too. */
+    await postJournal({
+      companyId: w.companyId, date: today(), memo: "by hand",
+      splits: [{ code: "1300", debit: 100 }, { code: "2400", credit: 100 }],
+    });
+
+    const drift = await get(
+      `SELECT COUNT(*)::int n FROM journal_split s JOIN journal j ON j.id = s.journal_id
+        WHERE s.source_type IS DISTINCT FROM j.source_type
+           OR s.source_id IS DISTINCT FROM j.source_id
+           OR s.date IS DISTINCT FROM j.date`);
+    assert.equal(Number(drift.n), 0);
+  });
+});
+
 describe("late fees only under a written policy", () => {
   test("a lease with no policy is never charged", async () => {
     await truncateAll();

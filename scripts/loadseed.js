@@ -44,15 +44,34 @@ const pick = (list, n) => list[n % list.length];
 
 /* One statement per batch. Postgres takes 65,535 parameters in a statement,
    so the batch size is whatever fits inside that for the row width. */
-async function insertMany(table, columns, rows, { batch = null } = {}) {
+/* `groupBy` names a column whose rows must not be split across two batches.
+
+   `journal_split_balanced` is a deferred constraint trigger: it asks whether
+   a journal balances, and it asks at the end of the statement. A journal
+   whose splits straddle a batch boundary is therefore checked when only half
+   of it has been written, and is correctly reported as not balancing.
+
+   That this worked before was arithmetic luck. Batches are sized at 60,000
+   parameters divided by the column count, so adding two columns to
+   `journal_split` moved every boundary and the first journal to land across
+   one failed — "debits 290000 vs credits 145000", exactly one side of a
+   deposit. Wrapping the call in a transaction does not help, because the
+   insert below takes the pool's connection rather than the transaction's.
+
+   So a batch grows until the group ends. */
+async function insertMany(table, columns, rows, { batch = null, groupBy = null } = {}) {
   if (!rows.length) return 0;
   const perRow = columns.length;
   const size = batch || Math.max(1, Math.floor(60000 / perRow));
   const quoted = columns.map((c) => `"${c}"`).join(", ");
 
   let written = 0;
-  for (let i = 0; i < rows.length; i += size) {
-    const slice = rows.slice(i, i + size);
+  for (let i = 0; i < rows.length;) {
+    let end = Math.min(i + size, rows.length);
+    if (groupBy) {
+      while (end < rows.length && rows[end][groupBy] === rows[end - 1][groupBy]) end += 1;
+    }
+    const slice = rows.slice(i, end);
     const values = slice
       .map((_, n) => `(${columns.map((__, c) => `$${n * perRow + c + 1}`).join(", ")})`)
       .join(", ");
@@ -60,6 +79,7 @@ async function insertMany(table, columns, rows, { batch = null } = {}) {
     const { db } = await import("../server/lib/db.js");
     await db.unsafe(`INSERT INTO "${table}" (${quoted}) VALUES ${values}`, params);
     written += slice.length;
+    i = end;
   }
   return written;
 }
@@ -209,6 +229,8 @@ export async function loadSeed({ units = UNITS, years = YEARS, log = console.log
       splits.push({
         id: id(), journal_id: journalId, account_id: accounts.get(line.code),
         date,
+        /* The journal's, copied — migration 048, checked by a trigger. */
+        source_type: sourceType ?? null, source_id: sourceId ?? null,
         debit_cents: line.debit || 0, credit_cents: line.credit || 0,
         owner_id: line.ownerId || null, property_id: line.propertyId || null,
         unit_id: line.unitId || null, lease_id: line.leaseId || null,
@@ -292,9 +314,14 @@ export async function loadSeed({ units = UNITS, years = YEARS, log = console.log
   await insertMany("journal",
     ["id", "company_id", "date", "memo", "source", "source_type", "source_id",
       "posted_by", "created_at"], journals);
+
+  /* Grouped by journal, so a journal's splits are never divided between two
+     statements — see `insertMany`. */
   await insertMany("journal_split",
-    ["id", "journal_id", "account_id", "date", "debit_cents", "credit_cents", "owner_id",
-      "property_id", "unit_id", "lease_id", "memo"], splits);
+    ["id", "journal_id", "account_id", "date", "source_type", "source_id",
+      "debit_cents", "credit_cents", "owner_id",
+      "property_id", "unit_id", "lease_id", "memo"], splits,
+    { groupBy: "journal_id" });
   await insertMany("ledger_entry",
     ["id", "company_id", "owner_id", "property_id", "unit_id", "lease_id", "date",
       "kind", "amount_cents", "memo", "source", "journal_id", "created_at"], entries);

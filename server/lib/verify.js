@@ -86,6 +86,19 @@ export async function verifyDatabase({ checkFiles = false, log = () => {} } = {}
       `${dateDrift.n} of them — every report filters on the copy`);
   }
 
+  /* The same question for what migration 048 copied. Aged receivables reads
+     the source to decide when a charge fell due, so a split that disagreed
+     with its journal would age somebody's rent from the wrong day. */
+  const sourceDrift = await get(
+    `SELECT COUNT(*)::int AS n FROM journal_split s
+       JOIN journal j ON j.id = s.journal_id
+      WHERE s.source_type IS DISTINCT FROM j.source_type
+         OR s.source_id IS DISTINCT FROM j.source_id`);
+  if (Number(sourceDrift.n)) {
+    note("error", "a split's source disagrees with its journal's",
+      `${sourceDrift.n} of them — the aging reads the copy to find the due date`);
+  }
+
   /* --- the trust position -------------------------------------------------- */
 
   /* Not every variance means the same thing, and treating them alike would
