@@ -36,6 +36,9 @@ const UI = 3;         // the edge of something you have to find
 const PAIRS = [
   ["var(--ink)", "var(--background)", "body text", NORMAL],
   ["var(--ink)", "var(--surface-card)", "text on a panel", NORMAL],
+  ["var(--ink-soft)", "var(--background)", "the .cellsub line under a name, at 12px", NORMAL],
+  ["var(--ink-soft)", "var(--surface-card)", "help text under a field", NORMAL],
+  ["var(--ink-soft)", "var(--surface)", "a panel foot, on the darker page background", NORMAL],
   ["var(--brand)", "var(--surface-card)", "a link in a table", NORMAL],
   ["var(--brand)", "var(--background)", "a link on the page", NORMAL],
 
@@ -61,27 +64,19 @@ const PAIRS = [
    to whoever owns the design, and it is in the phase report as a decision
    waiting on them.
 
-   The two groups are not the same size of problem:
+   What is left is the borders. Reaching 3:1 against white would take the
+   hairline from #e6e8ec to around #8f96a3, turning every panel edge and every
+   field outline from a whisper into a visible grey rule. That is a redesign,
+   not a tweak. The mitigation today is that no control is identified by its
+   border alone: fields carry labels, panels carry headings, and the focus
+   state uses --brand-light with a 2px ring rather than the hairline.
 
-   `--ink-soft` misses by 0.01. It is the secondary text everywhere — the line
-   under a name in a table, the help under a field — set at 12px, which is the
-   size where this matters most. Darkening it to #6a7079 clears 4.5:1 on white
-   and on the panel background, and is all but invisible next to #717784.
-
-   The borders are a different matter. Reaching 3:1 against white would take
-   the hairline from #e6e8ec to around #8f96a3, turning every panel edge and
-   every field outline from a whisper into a visible grey rule. That is a
-   redesign, not a tweak. The mitigation today is that no control is
-   identified by its border alone: fields carry labels, panels carry headings,
-   and the focus state uses --brand-light with a 2px ring rather than the
-   hairline. */
+   The secondary-text grey used to be here too. It was #717784, which came to
+   4.49:1 on white against a 4.5 requirement — missing by a hundredth, at the
+   12px size where it matters most. It is #6a7079 now, which clears 4.5:1 on
+   white and on the page background both, and the three pairs that depend on
+   it have moved up into the list above. */
 const ACCEPTED = [
-  ["var(--ink-soft)", "var(--background)", "secondary text at 12px", 4.49, NORMAL,
-    "misses AA by 0.01; #6a7079 would clear it"],
-  ["var(--ink-soft)", "var(--surface-card)", "help text under a field", 4.49, NORMAL,
-    "same token as above"],
-  ["var(--ink-soft)", "var(--surface)", "a panel foot", 4.08, NORMAL,
-    "the same grey on the darker page background"],
   ["var(--hairline)", "var(--surface-card)", "the edge of a panel", 1.22, UI,
     "decorative: a panel is identified by its heading, not its rule"],
   ["var(--ghost)", "var(--background)", "a disabled control's edge", 1.40, UI,

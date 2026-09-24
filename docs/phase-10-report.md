@@ -113,8 +113,15 @@ is a judgement a person makes with a real screen reader.
 the sRGB linearisation the naive version omits — the step whose absence
 flatters exactly the mid-tone greys this palette uses.
 
-Nine pairs pass. **Five do not**, and they are recorded with measured ratios
-and reasons rather than left off the list. See "Decisions waiting on you".
+Twelve pairs pass. **Two do not**, and they are recorded with measured ratios
+and reasons rather than left off the list.
+
+The secondary-text grey was one of the failures when this was written:
+`#717784` came to 4.49:1 on white against a 4.5 requirement, missing by a
+hundredth at the 12px size where it matters most. It is `#6a7079` now — 4.99:1
+on white and 4.54:1 on the page background — and the three pairs that depend
+on it have moved into the passing list. What is left is the hairline and ghost
+borders, which would need a redesign rather than a tweak.
 
 ---
 
@@ -231,22 +238,21 @@ overdue ones: rotate the Supabase service-role key and the database password
 account. `npm run deposits:plan` shows what would post. It is your call; it
 posts journals against your books.
 
-**The palette.** Five colour pairs miss WCAG AA:
+**The palette.** Two colour pairs still miss WCAG AA:
 
-- `--ink-soft` on white is **4.49:1** against a 4.5 requirement. It is the
-  secondary text everywhere, at 12px, which is where it matters most.
-  `#6a7079` clears it on both backgrounds and is all but indistinguishable
-  from `#717784`. This one is nearly free.
-- The same grey on the panel background is 4.08:1.
 - The hairline and ghost borders are 1.22:1 and 1.40:1 against a 3:1
   requirement. Reaching it would take the hairline to around `#8f96a3` and
   turn every panel edge and field outline from a whisper into a visible grey
   rule. **That is a redesign and I have not done it.**
 
-I did not change the palette, because how the product looks is your call and
-not a thing to alter quietly while writing a test. The test records the
-current ratios, fails if any gets worse, and fails if one is fixed — so the
-number in it can never be stale.
+`--ink-soft` was the third: **4.49:1** on white, missing by a hundredth, and
+it is the secondary text everywhere at 12px. You asked for `#6a7079` and it is
+done — 4.99:1 on white, 4.54:1 on the page background, clearing AA on both.
+
+I have not touched the rest of the palette, because how the product looks is
+your call and not a thing to alter quietly while writing a test. The test
+records the current ratios, fails if any gets worse, and fails if one is fixed
+— so the number in it can never be stale.
 
 ---
 

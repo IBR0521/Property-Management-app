@@ -119,7 +119,7 @@ run the push services accept what we send them.
 | A3 | **`5000 Repairs` now means only the manager's own costs** | Owner-borne repairs reduce owner funds instead. The vendor-invoice path still debits 5000, which is right only if the invoice is the manager's to bear — see A1. |
 | A4 | **Post the deposits that are on leases and in no account** | $8,435.00 across seven leases, which the trust reconciliation has reported as a variance every month since Phase 6 — correctly. Phase 9 built the deposit ledger and a conversion in the shape of `correct.js`: run `npm run deposits:plan` to see what it would do and `npm run deposits:commit` to do it. It never posts behind a close, and a lease with *part* of a deposit posted is named and left alone, because guessing at the difference is how a conversion makes things worse. **This is your call — it posts journals against your books.** |
 
-| A5 | **Five colour pairs miss WCAG AA** | Measured, recorded in `test/contrast.test.js` with reasons. `--ink-soft` misses by 0.01 at 12px — `#6a7079` clears it and is all but indistinguishable. The hairline borders would need a redesign. **A palette decision, so it is yours.** |
+| A5 | **Two colour pairs miss WCAG AA** | Measured, recorded in `test/contrast.test.js` with reasons. The secondary-text grey is fixed — `--ink-soft` went #717784 → #6a7079 at your direction, clearing 4.5:1 on white (4.99) and on the page background (4.54). What remains is the hairline and ghost borders at 1.22:1 and 1.40:1 against a 3:1 requirement; reaching it would take the hairline to around #8f96a3 and turn every panel edge into a visible grey rule. **A redesign, so it is yours.** |
 
 ---
 
