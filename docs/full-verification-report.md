@@ -5,14 +5,14 @@ taken from the runs themselves.
 
 | | |
 |---|---|
-| **Tests** | **1,945 passing, 412 suites, 0 failing** |
+| **Tests** | **1,947 passing, 413 suites, 0 failing** |
 | **Routes** | **321 of 321 exercised** — 160 GET fetched, 161 POST submitted |
 | **Forms** | **137 found, 137 valid** — every action resolves, every one carries CSRF |
 | **Crashes** | **0** — nothing returned 5xx, nothing threw |
-| **Pages over 1s at 2,000 units** | **1 of 28** |
+| **Pages over 1s at 2,000 units** | **0 of 28** |
 | **Dependencies** | **0 vulnerabilities** |
 
-**Three real defects were found, and one of them was returning wrong money.**
+**Four real defects were found, and one of them was returning wrong money.**
 
 ---
 
@@ -78,24 +78,18 @@ Four routes were not walked, and each is named rather than hidden:
 
 | ms | page |
 |---:|---|
-| 1,443 | `/app/reports/aged_receivables` |
-| 912 | `/app/reports/balance_sheet` |
-| 901 | `/app/reports/profit_and_loss` |
-| 386 | `/app/reports/trial_balance` |
-| 267 | `/app/reports/trust_reconciliation` |
+| 882 | `/app/reports/profit_and_loss` |
+| 849 | `/app/reports/balance_sheet` |
+| 629 | `/app/reports/aged_receivables` |
+| 387 | `/app/reports/trial_balance` |
+| 246 | `/app/reports/trust_reconciliation` |
 | 104 | `/app/accounting` |
 | 61 | `/app/reports/owner_list` |
 | 46 | `/app` |
 | ≤ 7 | the remaining 19 pages |
 
-**One page over a second.** `aged_receivables` pulls 228,000 rows — every
-movement on tenant receivable over five years — and buckets them in
-JavaScript, sorting on disk (12MB external merge). It is not a missing index
-and not an N+1; it is the design. 1.4s for that throughput is defensible, and
-the fix is to aggregate in SQL, which means rewriting due-date rules that
-differ per charge type. **I have not done it.** It is correct, it is the
-heaviest analytical report, and rewriting it in the same session as a
-correctness fix elsewhere is how a second bug gets shipped.
+**Nothing over a second.** `aged_receivables` was 1,443ms when this report
+was first written and is fixed — see finding D.
 
 ## 4. Coverage of exported names — `scripts/coverage.js`
 
@@ -177,11 +171,41 @@ is not one to switch on unasked. One line turns it on. 13 tests.
   hand-made wrong. The tamper check caught my fixture.
 - The schema-drop guard refused to run against a database not named `_test`
 
+## D. Aged receivables took 1.4 seconds, and the journal join was 800ms of it
+
+The last page over a second, and the one deliberately left alone when this
+report was first written. Fixed afterwards, carefully.
+
+The report has to know what each charge was for, because rent ages from its
+due date and the due date comes from the period in `journal.source_id` — so it
+joined 120,000 splits to their journals for two text columns. **945ms with the
+join, 144ms without.** Migration 048 copies `source_type` and `source_id` onto
+the split, exactly as 046 did for `date`, with the same argument (a journal is
+append-only, so the copy cannot drift) and the same discipline (a trigger
+checks it on the way in).
+
+Two smaller costs went with it. 108,000 of the 228,000 rows were credits,
+fetched individually to be added into one number per lease — summed in the
+database now, which alone was 464ms because 046's index carries no `lease_id`.
+And the rows were sorted in Postgres, spilling 12MB to disk, then re-sorted
+per lease by the caller anyway.
+
+**1,443ms → 629ms, and the output is identical** — old and new run against the
+same 2,000-unit database, full JSON diffed, every bucket and memo the same.
+The first attempt was not identical: it showed the split's memo where the
+report had always shown the journal's. The diff caught it.
+
+Two things fixed in passing: `loadseed` batched splits by a size derived from
+the column count, so adding two columns split a journal across a batch and
+failed the deferred balance check — luck, not design, and it now batches on
+journal boundaries. And `verify.js` checks the new copy the way it already
+checked the date.
+
+---
+
 ## Outstanding
 
-1. **`aged_receivables` at 1.4s** — correct, the heaviest report, needs a SQL
-   rewrite of per-charge-type due-date rules. Yours to schedule.
-2. **19 functions referenced nowhere** — likely dead, listed by
+1. **19 functions referenced nowhere** — likely dead, listed by
    `scripts/coverage.js`.
 3. **166 exported functions named in no test** — most are reached through the
    walk, but they are not asserted about.
