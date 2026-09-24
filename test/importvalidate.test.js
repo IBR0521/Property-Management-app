@@ -177,13 +177,24 @@ describe("what stops it", () => {
     assert.match(r.problems[0].message, /single, multi, condo/);
   });
 
-  test("a rent day past the 28th is refused", async () => {
-    /* The same rule the rent charge and the report schedules follow. */
+  test("the last day of the month is a rent day like any other", async () => {
+    /* It used to be refused, on the grounds that "later days do not exist in
+       every month" — which `dueDateFor` had always handled by clamping the day
+       to the length of the month it lands in. The rule cost the second most
+       common arrangement there is: rent due on the last day. */
     const r = await run_({
       ...GOOD,
       lease: "id,unit id,start date,rent,due day\nL-1,U-1,2026-01-01,900,31\n",
     });
-    assert.match(r.problems[0].message, /do not exist in every month/);
+    assert.deepEqual(r.problems, [], "31 is a rent day");
+  });
+
+  test("a rent day that is not a day of the month still is", async () => {
+    const r = await run_({
+      ...GOOD,
+      lease: "id,unit id,start date,rent,due day\nL-1,U-1,2026-01-01,900,32\n",
+    });
+    assert.match(r.problems[0].message, /not a day of the month/);
   });
 
   test("a lease that ends before it starts", async () => {

@@ -301,8 +301,8 @@ const VALIDATORS = {
 
     /* 1 to 28. The 29th, 30th and 31st do not exist in every month, which is
        the same rule the rent charge and the report schedules follow. */
-    if (out.dueDay != null && (out.dueDay < 1 || out.dueDay > 28)) {
-      errors.push(`Rent day ${out.dueDay} is not usable — later days do not exist in every month.`);
+    if (out.dueDay != null && (out.dueDay < 1 || out.dueDay > 31)) {
+      errors.push(`Rent day ${out.dueDay} is not a day of the month.`);
       out.dueDay = null;
     }
 

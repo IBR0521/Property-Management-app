@@ -18,7 +18,7 @@
    orchestrates and records; it is never the custodian. */
 import { all, get, one, insert, update, run } from "../lib/db.js";
 import { usd, parseMoney } from "../lib/money.js";
-import { human, humanStamp, monthKey, today, dueDateFor, stamp } from "../lib/dates.js";
+import { human, humanStamp, monthKey, today, dueDateFor, stamp, rentDayLabel } from "../lib/dates.js";
 import { sendHtml, redirect } from "../lib/http.js";
 import { NotFound } from "../lib/db.js";
 import { html, attr, raw } from "../lib/render.js";
@@ -371,7 +371,7 @@ function payForm({ company, lease, balance, methods, csrf, tok }) {
       </div>
       <div class="panel__foot">
         Payments go directly to ${company.name}. ${lease.rent_due_day
-          ? `Rent is due on the ${ordinal(lease.rent_due_day)} of each month.` : ""}
+          ? `Rent is due on ${rentDayLabel(lease.rent_due_day)} of each month.` : ""}
       </div>
     </div>`;
 }
@@ -393,7 +393,7 @@ function autopayPanel({ company, lease, autopay, method, csrf, tok }) {
               <dd>${autopay.max_amount_cents == null ? "No limit set" : usd(autopay.max_amount_cents)}</dd></div>
             <div><dt>Taken on</dt>
               <dd>${Number(autopay.days_before_due) === 0
-                ? `the ${ordinal(lease.rent_due_day)}, the day it is due`
+                ? `${rentDayLabel(lease.rent_due_day)}, the day it is due`
                 : `${autopay.days_before_due} day${Number(autopay.days_before_due) === 1 ? "" : "s"} before it is due`}
                 — next on ${human(charge > today() ? charge : nextCharge(lease, autopay))}</dd></div>
             ${autopay.last_period
@@ -515,12 +515,6 @@ function nextCharge(lease, autopay) {
   const d = new Date(`${due}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() - Number(autopay.days_before_due || 0));
   return d.toISOString().slice(0, 10);
-}
-
-function ordinal(n) {
-  const v = Number(n) || 1;
-  const s = ["th", "st", "nd", "rd"][((v % 100) - 20) % 10] || ["th", "st", "nd", "rd"][v % 100] || "th";
-  return `${v}${s}`;
 }
 
 

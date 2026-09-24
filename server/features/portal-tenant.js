@@ -15,7 +15,7 @@
    `leaseIfHeld` is asked first, and it answers about rows rather than roles. */
 import { all, get, one, insert, update, run } from "../lib/db.js";
 import { usd, parseMoney } from "../lib/money.js";
-import { human, humanStamp, monthKey, today, stamp } from "../lib/dates.js";
+import { human, humanStamp, monthKey, today, stamp, rentDayLabel } from "../lib/dates.js";
 import { sendHtml, redirect } from "../lib/http.js";
 import { NotFound } from "../lib/db.js";
 import { html, attr } from "../lib/render.js";
@@ -199,7 +199,7 @@ function tenancyCard({ lease, balance, company }) {
     <div class="panel">
       <div class="panel__head">
         <h2>${lease.line1}${lease.label ? `, unit ${lease.label}` : ""}</h2>
-        <p>Rent ${usd(lease.rent_cents)} on the ${ordinal(lease.rent_due_day)}</p>
+        <p>Rent ${usd(lease.rent_cents)} on ${rentDayLabel(lease.rent_due_day)}</p>
       </div>
       <div class="panel__body">
         <div class="grid grid--3">
@@ -325,12 +325,6 @@ function noticesPanel(notices) {
         </div>
       </div>
     </div>`;
-}
-
-function ordinal(n) {
-  const v = Number(n) || 1;
-  const s = ["th", "st", "nd", "rd"][((v % 100) - 20) % 10] || ["th", "st", "nd", "rd"][v % 100] || "th";
-  return `${v}${s}`;
 }
 
 /* ==========================================================================

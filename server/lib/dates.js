@@ -63,6 +63,24 @@ export function dueDateFor(period, dueDay) {
   return `${y}-${pad(m)}-${pad(Math.min(dueDay, last))}`;
 }
 
+/* How a rent day reads to a person.
+
+   31 is the last day of the month and nothing else: `dueDateFor` clamps it to
+   28, 29, 30 or 31 depending on the month, so a lease set to 31 falls due on
+   the last day every time. Saying "the 31st" would be wrong in eleven months
+   of the year, so it does not.
+
+   29 and 30 are left as themselves. They are genuinely the 29th and the 30th
+   and only bend in February, which is the ordinary behaviour of a date and
+   not worth a special phrase. */
+export function rentDayLabel(dueDay) {
+  const n = Number(dueDay) || 1;
+  if (n >= 31) return "the last day of the month";
+  const s = ["th", "st", "nd", "rd"][((n % 100) - 20) % 10]
+    || ["th", "st", "nd", "rd"][n % 100] || "th";
+  return `the ${n}${s}`;
+}
+
 export function human(isoDate) {
   if (!isoDate) return "—";
   const [y, m, d] = isoDate.slice(0, 10).split("-").map(Number);

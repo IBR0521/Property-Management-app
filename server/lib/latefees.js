@@ -23,7 +23,8 @@
 import { all, get, one, run, insert, tx } from "./db.js";
 import { todayIn } from "./timezone.js";
 import { id } from "./ids.js";
-import { stamp, today, monthKey, daysBetween } from "./dates.js";
+import { stamp, today, monthKey, daysBetween, dueDateFor, prevMonthRange, monthRange, addDays }
+  from "./dates.js";
 
 const JOB_NAME = "late-fee-sweep";
 
@@ -105,6 +106,40 @@ async function paidInPeriod(leaseId, period) {
 
    `postJournal` is imported lazily because features/accounting.js imports from
    lib/*, and importing it at module scope here would close the loop. */
+/* Which periods this lease can be judged on today.
+
+   Always the current one. The previous one *only* when it could never have
+   been judged inside its own month.
+
+   The sweep used to look at `monthKey(today)` and nothing else, which gave a
+   period a window running from the day after it fell due to the end of that
+   same month. Rent due on the 1st has most of the month; nothing was wrong.
+   Rent due late in the month can have no window at all — rent due on the 31st
+   is first overdue on the 1st, by which time the sweep had moved to the next
+   period and would never look back. It was never only the last day either:
+   the 28th with five days grace needs the 34th of January, and there isn't
+   one. Those leases were allowed all along and silently never charged.
+
+   The condition is exact rather than "always look back one month", and the
+   difference matters. An unconditional lookback would, on its first run after
+   this ships, charge a back-dated fee against every lease that happened to be
+   behind last month — periods the manager had already passed over. Only the
+   periods whose window did not exist are reopened; a lease due on the 1st is
+   assessed exactly as it was before. */
+function assessablePeriods(lease, localToday) {
+  const current = monthKey(localToday);
+  const dueDay = Math.min(Math.max(Number(lease.rent_due_day) || 1, 1), 31);
+  const grace = Number(lease.grace_days) || 0;
+
+  const prev = monthKey(prevMonthRange(localToday).start);
+  /* The first day the fee could be charged for that period, and the last day
+     the old sweep would still have been looking at it. */
+  const firstChargeable = addDays(dueDateFor(prev, dueDay), grace + 1);
+  const prevMonthEnd = monthRange(`${prev}-01`).end;
+
+  return firstChargeable > prevMonthEnd ? [prev, current] : [current];
+}
+
 /* `asOf` overrides every company's local date, which only a test wants. Left
    undefined in production so each lease is judged on its own calendar. */
 export async function sweepLateFees({ asOf = null, postedBy = "system", now = new Date() } = {}) {
@@ -119,77 +154,87 @@ export async function sweepLateFees({ asOf = null, postedBy = "system", now = ne
   for (const lease of rows) {
     /* The company's date, not the server's. */
     const localToday = asOf || todayIn(lease.company_timezone, now);
-    const period = monthKey(localToday);
 
     if (lease.start_date > localToday) { out.skipped++; continue; }
 
-    const already = await get(
-      "SELECT id FROM late_fee WHERE lease_id = ? AND period = ?", lease.id, period);
-    if (already) { out.skipped++; continue; }
+    const periods = assessablePeriods(lease, localToday);
 
-    const dueDay = Math.min(Math.max(Number(lease.rent_due_day) || 1, 1), 28);
-    const dueDate = `${period}-${String(dueDay).padStart(2, "0")}`;
-    if (localToday <= dueDate) { out.skipped++; continue; }
+    for (const period of periods) {
+      if (period < monthKey(lease.start_date)) { out.skipped++; continue; }
 
-    const daysLate = daysBetween(dueDate, localToday);
-    const outstanding = Number(lease.rent_cents) - await paidInPeriod(lease.id, period);
-    if (outstanding <= 0) { out.skipped++; continue; }
+      const already = await get(
+        "SELECT id FROM late_fee WHERE lease_id = ? AND period = ?", lease.id, period);
+      if (already) { out.skipped++; continue; }
 
-    const fee = feeFor(lease, {
-      rentCents: Number(lease.rent_cents),
-      daysLate,
-      graceDays: Number(lease.grace_days) || 0,
-    });
-    if (!fee) { out.noPolicy++; continue; }
+      /* Through `dueDateFor`, which resolves the day against the real length
+         of the month. Built by string concatenation before, which was safe
+         only while the day could not exceed 28: `2026-02-31` is not a date,
+         and no day is ever greater than it, so a tenant due on the 31st was
+         silently never late. */
+      const dueDay = Math.min(Math.max(Number(lease.rent_due_day) || 1, 1), 31);
+      const dueDate = dueDateFor(period, dueDay);
+      if (localToday <= dueDate) { out.skipped++; continue; }
 
-    try {
-      /* One transaction per lease: the fee, the owner-visible ledger line and
-         the journal either all land or none do. A fee charged without its
-         accounting is a number on a statement that reconciles to nothing. */
-      await tx(async () => {
-        const feeId = id();
-        const entryId = id();
+      const daysLate = daysBetween(dueDate, localToday);
+      const outstanding = Number(lease.rent_cents) - await paidInPeriod(lease.id, period);
+      if (outstanding <= 0) { out.skipped++; continue; }
 
-        await insert("late_fee", {
-          id: feeId, company_id: lease.cid, lease_id: lease.id, unit_id: lease.unit_id,
-          period, assessed_date: localToday, amount_cents: fee.amount, basis: fee.basis,
-          rent_cents: lease.rent_cents, days_late: daysLate, created_at: stamp(),
-        });
-
-        await insert("ledger_entry", {
-          id: entryId, company_id: lease.cid, owner_id: lease.owner_id,
-          property_id: lease.property_id, unit_id: lease.unit_id, lease_id: lease.id,
-          date: localToday, kind: "other", amount_cents: fee.amount,
-          memo: `Late fee ${period} — ${fee.basis}`,
-          source: "system", created_at: stamp(),
-        });
-
-        const jid = await postJournal({
-          companyId: lease.cid, date: localToday,
-          memo: `Late fee ${period}`,
-          source: "late_fee", sourceType: "late_fee", sourceId: feeId, postedBy,
-          splits: [
-            { code: ACCT.RENT_RECEIVABLE, debit: fee.amount, leaseId: lease.id,
-              unitId: lease.unit_id, ownerId: lease.owner_id, memo: fee.basis },
-            { code: ACCT.LATE_FEE_INCOME, credit: fee.amount, leaseId: lease.id,
-              ownerId: lease.owner_id, memo: `late fee ${period}` },
-          ],
-        });
-
-        await run("UPDATE late_fee SET journal_id = ?, ledger_entry_id = ? WHERE id = ?",
-          jid, entryId, feeId);
-        /* The sweep already posted both books; this links them so the parity
-           check sees a fee as posted rather than as an orphan. */
-        await run("UPDATE ledger_entry SET journal_id = ? WHERE id = ?", jid, entryId);
+      const fee = feeFor(lease, {
+        rentCents: Number(lease.rent_cents),
+        daysLate,
+        graceDays: Number(lease.grace_days) || 0,
       });
+      if (!fee) { out.noPolicy++; continue; }
 
-      out.charged++;
-      out.amountCents += fee.amount;
-    } catch (err) {
-      /* Another run got there first. That is the unique index doing its job,
-         and it is the expected outcome of an overlapping retry, not an error. */
-      if (String(err.message).includes("duplicate key")) { out.duplicates++; continue; }
-      throw err;
+      try {
+        /* One transaction per fee: the fee, the owner-visible ledger line and
+           the journal either all land or none do. A fee charged without its
+           accounting is a number on a statement that reconciles to nothing. */
+        await tx(async () => {
+          const feeId = id();
+          const entryId = id();
+
+          await insert("late_fee", {
+            id: feeId, company_id: lease.cid, lease_id: lease.id, unit_id: lease.unit_id,
+            period, assessed_date: localToday, amount_cents: fee.amount, basis: fee.basis,
+            rent_cents: lease.rent_cents, days_late: daysLate, created_at: stamp(),
+          });
+
+          await insert("ledger_entry", {
+            id: entryId, company_id: lease.cid, owner_id: lease.owner_id,
+            property_id: lease.property_id, unit_id: lease.unit_id, lease_id: lease.id,
+            date: localToday, kind: "other", amount_cents: fee.amount,
+            memo: `Late fee ${period} — ${fee.basis}`,
+            source: "system", created_at: stamp(),
+          });
+
+          const jid = await postJournal({
+            companyId: lease.cid, date: localToday,
+            memo: `Late fee ${period}`,
+            source: "late_fee", sourceType: "late_fee", sourceId: feeId, postedBy,
+            splits: [
+              { code: ACCT.RENT_RECEIVABLE, debit: fee.amount, leaseId: lease.id,
+                unitId: lease.unit_id, ownerId: lease.owner_id, memo: fee.basis },
+              { code: ACCT.LATE_FEE_INCOME, credit: fee.amount, leaseId: lease.id,
+                ownerId: lease.owner_id, memo: `late fee ${period}` },
+            ],
+          });
+
+          await run("UPDATE late_fee SET journal_id = ?, ledger_entry_id = ? WHERE id = ?",
+            jid, entryId, feeId);
+          /* The sweep already posted both books; this links them so the parity
+             check sees a fee as posted rather than as an orphan. */
+          await run("UPDATE ledger_entry SET journal_id = ? WHERE id = ?", jid, entryId);
+        });
+
+        out.charged++;
+        out.amountCents += fee.amount;
+      } catch (err) {
+        /* Another run got there first. That is the unique index doing its job,
+           and it is the expected outcome of an overlapping retry, not an error. */
+        if (String(err.message).includes("duplicate key")) { out.duplicates++; continue; }
+        throw err;
+      }
     }
   }
   return out;

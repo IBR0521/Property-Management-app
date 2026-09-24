@@ -18,7 +18,7 @@ import { test, describe, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { freshDatabase, truncateAll, closeDb, all, get, run } from "./helpers/db.js";
 import * as f from "./helpers/factories.js";
-import { today, addDays, monthKey } from "../server/lib/dates.js";
+import { today, addDays, monthKey, dueDateFor, rentDayLabel } from "../server/lib/dates.js";
 import { prorate, occupancyIn, PRORATION_BASES } from "../server/lib/proration.js";
 import { planCharges, chargeRent, runRentCharges } from "../server/lib/rentcharge.js";
 import { ensureChart } from "../server/features/accounting.js";
@@ -462,5 +462,150 @@ describe("a tenant who pays ahead", () => {
       "every pound held is somebody's");
     assert.equal(r.variances.find((v) => v.key === "clients_vs_subledger").cents, 0,
       "and the control account agrees with the owner's own ledger");
+  });
+});
+
+/* Rent due on the last day of the month.
+
+   A property manager chooses whether rent falls due on the first or the last
+   day, and both are ordinary. The engine could always do it — `dueDateFor`
+   has clamped the day to the length of its month since it was written — but
+   the form capped the field at 28 "for the same reason statements use it:
+   February", and February was never the problem the clamp had not already
+   solved. What the cap actually did was forbid the arrangement, and forbid it
+   quietly: anything outside 1–28 fell back to 1, so a lease imported as due
+   on the 30th silently became due on the 1st. */
+describe("choosing when rent falls due", () => {
+  test("31 means the last day, in every month", () => {
+    assert.equal(dueDateFor("2026-01", 31), "2026-01-31");
+    assert.equal(dueDateFor("2026-02", 31), "2026-02-28");
+    assert.equal(dueDateFor("2028-02", 31), "2028-02-29", "and it knows about leap years");
+    assert.equal(dueDateFor("2026-04", 31), "2026-04-30");
+  });
+
+  test("it reads as the last day rather than as the 31st", () => {
+    /* Saying "the 31st" would be wrong in eleven months of the year. */
+    assert.equal(rentDayLabel(31), "the last day of the month");
+    assert.equal(rentDayLabel(1), "the 1st");
+    assert.equal(rentDayLabel(2), "the 2nd");
+    assert.equal(rentDayLabel(3), "the 3rd");
+    assert.equal(rentDayLabel(15), "the 15th");
+    assert.equal(rentDayLabel(30), "the 30th", "30 is genuinely the 30th and only bends in February");
+  });
+
+  test("a lease due on the last day is charged for the right period", async () => {
+    const world = await f.makeWorld({ name: "Last Day Co" });
+    await run("UPDATE lease SET rent_due_day = 31 WHERE id = ?", world.leaseId);
+    const plan = await planCharges(world.companyId, { period: "2026-02" });
+    const row = plan.rows.find((r) => r.leaseId === world.leaseId);
+    assert.ok(row, "the lease should be chargeable");
+    assert.equal(row.dueDate, "2026-02-28",
+      "February has no 31st, and the charge still has to fall due");
+  });
+});
+
+/* The trap that came with allowing it.
+
+   `latefees.js` clamped the due day to 28 before computing lateness. Leave
+   that in place while letting a lease be due on the 31st and a tenant is
+   called late on the 29th of a 31-day month — the fee arriving two days
+   before the rent is even due. */
+describe("a late fee cannot arrive before the rent is due", () => {
+  test("the sweep measures against the real due date, not a capped one", async () => {
+    const world = await f.makeWorld({ name: "Late Trap Co" });
+    await run(
+      "UPDATE lease SET rent_due_day = 31, grace_days = 0, late_fee_cents = 5000 WHERE id = ?",
+      world.leaseId);
+
+    const { sweepLateFees } = await import("../server/lib/latefees.js");
+
+    /* The 29th of a 31-day month: rent is not due for two more days. */
+    const early = await sweepLateFees({ asOf: "2026-01-29", postedBy: "test" });
+    assert.ok(early.considered >= 1,
+      "the sweep has to have looked at this lease, or the assertion below proves nothing");
+    assert.equal(
+      await get("SELECT id FROM late_fee WHERE lease_id = ? AND period = '2026-01'", world.leaseId),
+      undefined,
+      "rent due on the 31st is not late on the 29th");
+
+    /* And the positive half, so the negative cannot pass by the sweep simply
+       never charging anything. */
+    await sweepLateFees({ asOf: "2026-02-03", postedBy: "test" });
+    const charged = await get(
+      "SELECT amount_cents FROM late_fee WHERE lease_id = ? AND period = '2026-01'", world.leaseId);
+    assert.ok(charged, "once the last day has passed, the fee is due");
+    assert.equal(Number(charged.amount_cents), 5000);
+  });
+});
+
+/* The window a late fee can be assessed in.
+
+   The sweep judged `monthKey(today)` and nothing else, so a period could only
+   be assessed between the day after it fell due and the end of that same
+   month. Rent due on the 1st has most of the month and nothing was wrong.
+   Rent due late in the month has no window at all — the first day it is
+   overdue already belongs to the next period, and the sweep had moved on.
+
+   It was never only about the last day. The 28th with five days grace needs
+   the 34th of the month, and there isn't one. Those leases were allowed all
+   along and silently never charged a fee. */
+describe("rent that falls due near the end of the month", () => {
+  async function leaseDue(dueDay, graceDays) {
+    const world = await f.makeWorld({ name: `Due ${dueDay}/${graceDays} Co` });
+    await run(
+      "UPDATE lease SET rent_due_day = ?, grace_days = ?, late_fee_cents = 5000 WHERE id = ?",
+      dueDay, graceDays, world.leaseId);
+    return world;
+  }
+  const feeFor = async (world, period) => await get(
+    "SELECT amount_cents, days_late FROM late_fee WHERE lease_id = ? AND period = ?",
+    world.leaseId, period);
+
+  test("the 28th with five days grace is charged, having never been before", async () => {
+    const world = await leaseDue(28, 5);
+    const { sweepLateFees } = await import("../server/lib/latefees.js");
+    /* The 6th of the next month: three days past due, past the grace. */
+    await sweepLateFees({ asOf: "2026-02-06", postedBy: "test" });
+    const fee = await feeFor(world, "2026-01");
+    assert.ok(fee, "the 34th of January does not exist, so this was never assessable");
+    assert.equal(Number(fee.amount_cents), 5000);
+  });
+
+  test("the last day of the month is charged once it has passed", async () => {
+    const world = await leaseDue(31, 0);
+    const { sweepLateFees } = await import("../server/lib/latefees.js");
+    await sweepLateFees({ asOf: "2026-02-02", postedBy: "test" });
+    const fee = await feeFor(world, "2026-01");
+    assert.ok(fee, "rent due 31 January is late on 1 February");
+    assert.equal(Number(fee.days_late), 2);
+  });
+
+  test("and still not before it has passed", async () => {
+    const world = await leaseDue(31, 0);
+    const { sweepLateFees } = await import("../server/lib/latefees.js");
+    const res = await sweepLateFees({ asOf: "2026-01-31", postedBy: "test" });
+    assert.ok(res.considered >= 1, "the lease must have been looked at");
+    assert.equal(await feeFor(world, "2026-01"), undefined,
+      "the day it is due is not a day it is late");
+  });
+
+  test("looking at two periods does not charge the same one twice", async () => {
+    const world = await leaseDue(1, 0);
+    const { sweepLateFees } = await import("../server/lib/latefees.js");
+    await sweepLateFees({ asOf: "2026-02-10", postedBy: "test" });
+    await sweepLateFees({ asOf: "2026-02-11", postedBy: "test" });
+    const rows = await all(
+      "SELECT period FROM late_fee WHERE lease_id = ? ORDER BY period", world.leaseId);
+    const periods = rows.map((r) => r.period);
+    assert.deepEqual(periods, [...new Set(periods)], "one fee per period, however often it runs");
+  });
+
+  test("a period before the lease began is never charged", async () => {
+    const world = await leaseDue(31, 0);
+    await run("UPDATE lease SET start_date = '2026-02-01' WHERE id = ?", world.leaseId);
+    const { sweepLateFees } = await import("../server/lib/latefees.js");
+    await sweepLateFees({ asOf: "2026-02-15", postedBy: "test" });
+    assert.equal(await feeFor(world, "2026-01"), undefined,
+      "there was no tenancy in January to be late on");
   });
 });

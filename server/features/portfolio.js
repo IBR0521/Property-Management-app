@@ -1,7 +1,7 @@
 /* Portfolio: the properties, units and leases everything else hangs off. */
 import { all, get, insert, update, one, tx } from "../lib/db.js";
 import { id, stickerToken } from "../lib/ids.js";
-import { stamp, human, humanStamp, today, daysBetween, monthKey } from "../lib/dates.js";
+import { stamp, human, humanStamp, today, daysBetween, monthKey, rentDayLabel } from "../lib/dates.js";
 import { usd, parseMoney } from "../lib/money.js";
 import { sendHtml, redirect, BadRequest } from "../lib/http.js";
 import { html, attr, raw } from "../lib/render.js";
@@ -531,7 +531,7 @@ export function registerPortfolio(router) {
                       <div><dt>Tenants</dt><dd>${tenants.length
                         ? tenants.map((t) => html`${t.name}${t.phone ? html` · <a href="tel:${t.phone}">${t.phone}</a>` : ""}<br />`)
                         : "none recorded"}</dd></div>
-                      <div><dt>Rent</dt><dd>${usd(lease.rent_cents)} on day ${lease.rent_due_day}, ${lease.grace_days} days grace</dd></div>
+                      <div><dt>Rent</dt><dd>${usd(lease.rent_cents)} on ${rentDayLabel(lease.rent_due_day)}, ${lease.grace_days} days grace</dd></div>
                       <div><dt>Lease</dt><dd>${human(lease.start_date)} to ${lease.end_date ? human(lease.end_date) : "open"}
                         ${lease.end_date ? html`<span class="cellsub">${daysBetween(today(), lease.end_date)} days left</span>` : ""}</dd></div>
                       <div><dt>Deposit held</dt><dd>${usd(lease.deposit_cents)}</dd></div>
@@ -714,8 +714,16 @@ function yearOf(v) {
 
 function dueDayOf(v) {
   const n = parseInt(String(v || ""), 10);
-  // 28 is the ceiling for the same reason statements use it: February.
-  return Number.isFinite(n) && n >= 1 && n <= 28 ? n : 1;
+  /* 1 to 31. It used to stop at 28 "for the same reason statements use it:
+     February" — but `dueDateFor` has always clamped the day to the length of
+     the month it lands in, so February was never the problem the ceiling
+     solved. What the ceiling did instead was forbid the second most common
+     arrangement there is: rent due on the last day of the month. It also did
+     it quietly, because anything outside the range fell back to 1, so a lease
+     imported as due on the 30th silently became due on the 1st.
+
+     31 means the last day, in every month. */
+  return Number.isFinite(n) && n >= 1 && n <= 31 ? n : 1;
 }
 
 function graceOf(v) {
@@ -945,7 +953,8 @@ function moveInForm({ csrf, unit, error }) {
           <div class="formgrid formgrid--2">
             <div class="field">
               <label for="rent_due_day">Rent due on the</label>
-              <input id="rent_due_day" name="rent_due_day" type="number" min="1" max="28" value="1" />
+              <input id="rent_due_day" name="rent_due_day" type="number" min="1" max="31" value="1" />
+              <span class="field__help">Day of the month. 31 means the last day, whatever its length.</span>
             </div>
             <div class="field">
               <label for="grace_days">Grace days</label>
