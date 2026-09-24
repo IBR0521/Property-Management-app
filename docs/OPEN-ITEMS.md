@@ -119,6 +119,19 @@ run the push services accept what we send them.
 | A3 | **`5000 Repairs` now means only the manager's own costs** | Owner-borne repairs reduce owner funds instead. The vendor-invoice path still debits 5000, which is right only if the invoice is the manager's to bear — see A1. |
 | A4 | **Post the deposits that are on leases and in no account** | $8,435.00 across seven leases, which the trust reconciliation has reported as a variance every month since Phase 6 — correctly. Phase 9 built the deposit ledger and a conversion in the shape of `correct.js`: run `npm run deposits:plan` to see what it would do and `npm run deposits:commit` to do it. It never posts behind a close, and a lease with *part* of a deposit posted is named and left alone, because guessing at the difference is how a conversion makes things worse. **This is your call — it posts journals against your books.** |
 
+| A5 | **Five colour pairs miss WCAG AA** | Measured, recorded in `test/contrast.test.js` with reasons. `--ink-soft` misses by 0.01 at 12px — `#6a7079` clears it and is all but indistinguishable. The hairline borders would need a redesign. **A palette decision, so it is yours.** |
+
+---
+
+## Backups — what Phase 10 could not do for you
+
+| | What | Why it matters |
+|---|---|---|
+| B1 | **Enable point-in-time recovery on Supabase**, 7 days minimum | Daily backups alone mean losing up to a day. A bad migration is noticed hours later, not immediately. It is a paid feature, so it is off until someone turns it on. |
+| B2 | **Run `scripts/restoredrill.sh` against a real Supabase PITR restore** | The drill proves `pg_dump`/`pg_restore` round-trip this schema, against the 2,000-unit portfolio. Supabase's restore is a different mechanism and is unproven. |
+| B3 | **Back up Vercel Blob — there is no backup at all** | Every uploaded photograph, receipt, insurance certificate and signed document has exactly one copy. A deposit dispute turns on the move-out photographs. `node server/lib/verify.js --files` reports files the database names and cannot find; nothing brings them back. |
+| B4 | **Run `verify.js --files` against production once** | It has never been run outside the test environment, so the Vercel Blob branch is exercised only by unit tests. |
+
 ---
 
 ## Security — overdue, and not blocked on anything
@@ -147,7 +160,7 @@ gated, and a test holds the sidebar against the gate for every role.
 |---|---|---|
 | 5 | **The production Vercel URL**, set as `APP_BASE_URL` | Twilio signs webhooks over the full URL; a mismatch rejects every callback. Also used for links inside messages. I have only ever seen a preview URL. |
 | 6 | **Confirm the deploy succeeds with the cron block restored** | A cron entry broke a deploy once by exceeding the Hobby plan limit. One daily entry is within it, but I cannot deploy to confirm. |
-| 7a | **Two npm advisories in `@vercel/blob`'s `undici`** (1 high, 1 moderate) | Pre-existing, not from the `pdf-lib` install. `npm audit fix --force` upgrades `@vercel/blob` 0.27 → 2.8, which is a breaking change, so it is your call rather than something to do quietly. |
+| ~~7a~~ | ~~**Two npm advisories in `@vercel/blob`'s `undici`**~~ | **Done in Phase 10.** `@vercel/blob` upgraded 0.27 → 2.8. `npm audit` reports 0 vulnerabilities, and the full suite passes on the new major. |
 | 7 | **`APP_ENCRYPTION_KEY` set in every environment** | Bank tokens and taxpayer IDs refuse to store without it. Losing it makes sealed fields unrecoverable, so it belongs in a secret manager. |
 
 ---

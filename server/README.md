@@ -121,24 +121,87 @@ reminders at each lead offset, opens delinquencies once rent passes due-plus-
 grace, walks the ladder, judges payment promises, drains the outbox, prunes
 sessions.
 
-## Before a real deployment
+## The pre-launch checklist
 
-- [ ] **Wire message delivery — this is the blocker.** Nothing is sent today:
-      messages are composed and queued, and `drainOutbox` in `lib/scheduler.js`
-      returns immediately with no provider set. The emergency design depends on
-      it: the tenant sees a stop card and is told to call, which works, but the
-      backup SMS to the on-call number never fires, so the whole guarantee rests
-      on the tenant actually dialling. Email and SMS providers are plain HTTP
-      APIs (Resend/Postmark/SES, Twilio), so `fetch` covers it and the
-      zero-dependency property survives. Add retry and backoff — the `attempts`
-      and `last_error` columns are already there — plus a "send a test" button
-      in Setup.
-- [ ] Replace the seeded compliance windows — they are marked `PLACEHOLDER`
-      and must be confirmed with the client's attorney for their jurisdiction
-- [ ] Replace the two unapproved notice templates with the attorney's text
-- [ ] Have the screening criteria reviewed before they are used
-- [ ] Serve over HTTPS (session cookies set `Secure` automatically then)
-- [ ] Back up `data/app.db` — it is the whole system of record
+Every line is either a command you can run or a thing only you can do. The
+commands were run on 2026-09-24 and their results are recorded beside them;
+re-run them before you go live, because the point of a checklist is the
+running and not the writing.
+
+### Things the machine can answer
+
+| | Command | Result on 2026-09-24 |
+|---|---|---|
+| Every test | `npm test` | 1,896 passing, 0 failing |
+| No known vulnerabilities | `npm audit` | 0 vulnerabilities |
+| Every route is gated or deliberately public | `node --env-file=.env.test --test test/routes.test.js` | 321 routes, all accounted for |
+| The invariants still hold | `node --env-file=.env.test --test test/invariants.test.js` | passing — including no score column anywhere |
+| The books are sound | `node server/lib/verify.js` | run it against production, not the test database |
+| A backup restores *and* is sound | `scripts/restoredrill.sh` | passed against the 2,000-unit portfolio |
+| Uploaded files are all still there | `node server/lib/verify.js --files` | **not yet run against production** |
+
+### Things only you can do
+
+Ordered by what stops a launch versus what merely should be done first.
+
+**Blocking — do not launch without these.**
+
+- [ ] Rotate the Supabase service-role key. It bypasses RLS by design and was
+      pasted into a chat log. (OPEN-ITEMS security 1)
+- [ ] Rotate the database password and update `DATABASE_URL` in Vercel. Same
+      chat log. (security 2)
+- [ ] Turn on *Enforce SSL on incoming connections* in Supabase. The pooler
+      accepts unencrypted connections today. (security 3)
+- [ ] Put `DATABASE_CA_CERT` in place. TLS is encrypted but unverified, so it
+      defends against eavesdropping and not interception. `/health` reports
+      which mode is live. (security 4)
+- [ ] `APP_ENCRYPTION_KEY` set in every environment, and held in a secret
+      manager. Bank tokens and taxpayer IDs refuse to store without it, and
+      losing it makes sealed fields unrecoverable. (deployment 7)
+- [ ] Confirm the deployed build is the current one. The Vercel deployment has
+      been serving old code since Phase 4; it is diagnosed and unfixed, and
+      everything below is worthless if the deploy does not carry it.
+- [ ] Point-in-time recovery enabled on Supabase, 7 days minimum, and
+      `scripts/restoredrill.sh` run against a real PITR restore rather than a
+      local `pg_dump` round trip. See `docs/BACKUPS.md`.
+- [ ] Replace the seeded compliance windows. They are marked `PLACEHOLDER` and
+      have to be confirmed with the client's attorney for their jurisdiction —
+      these are the deadlines the deposit clock counts down to.
+- [ ] Replace the two unapproved notice templates with the attorney's text. An
+      unapproved template cannot be sent, so this blocks notices entirely.
+- [ ] Have the screening criteria reviewed before a single application is run
+      against them.
+
+**Before the first real money moves.**
+
+- [ ] Decide OPEN-ITEMS A4: $8,435.00 of deposits recorded on leases and in no
+      account. `npm run deposits:plan` shows what would post;
+      `npm run deposits:commit` does it. It posts journals against your books,
+      so it is your call and not mine.
+- [ ] Live Stripe keys, and one real payment taken and reconciled end to end.
+- [ ] One real payout run through to the bank, on paper, before any owner
+      depends on it.
+- [ ] `APP_BASE_URL` set to the production URL. Twilio signs webhooks over the
+      full URL, so a mismatch rejects every callback. (deployment 5)
+
+**Before the first message goes out.**
+
+- [ ] A Resend account and API key, and a sending domain with SPF, DKIM and
+      DMARC. Without domain authentication, rent notices land in spam.
+- [ ] Send one of each kind — email and SMS — and confirm the provider
+      accepted it. The UI will not claim a message was sent unless it did, so
+      an unconfigured provider shows as unsent rather than as a lie.
+
+**Known and accepted, recorded so nobody rediscovers them in a panic.**
+
+- [ ] Vercel Blob has no backup at all. Every uploaded photograph, receipt and
+      signed document has exactly one copy. See `docs/BACKUPS.md`.
+- [ ] Five colour pairs miss WCAG AA; the measured ratios and the reasons are
+      in `test/contrast.test.js`. The secondary-text grey misses by 0.01 and
+      `#6a7079` would clear it — a palette decision, not a code change.
+- [ ] `4000 Rent income` is now unposted under the agency model, and
+      `5000 Repairs` means only the manager's own costs. Both are live traps
+      for whoever reads the chart next. (OPEN-ITEMS A2, A3)
 
 ---
 
