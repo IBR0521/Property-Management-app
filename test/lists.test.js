@@ -538,3 +538,74 @@ describe("the three ask for the right capability", () => {
     assert.ok(!offered.includes("bank_line_list"));
   });
 });
+
+/* The owner list, for an owner who owns more than one thing.
+
+   This report joined `property`, `unit` and `ledger_entry` to `owner` in one
+   statement and grouped. Units and ledger entries are independent branches
+   from the same owner, so the join produced a row for every combination of
+   the two, and the aggregates ran over that.
+
+   `COUNT(DISTINCT ...)` survived it. `SUM(e.amount_cents)` did not: every
+   entry was added once per unit, so the balance shown was the owner's real
+   balance multiplied by their unit count. At 51 units, $3,366.00 read as
+   $171,666.00.
+
+   It survived ten phases because `makeWorld` builds one property with one
+   unit, and one times anything is itself. Every test here asserted a figure
+   that happened to be right for the only shape being tested.
+
+   So this one gives an owner several units and several entries, which is the
+   only arrangement in which the bug is visible at all. */
+describe("an owner with more than one unit", () => {
+  test("the balance is not multiplied by the unit count", async () => {
+    const UNITS = 4;
+    for (let i = 0; i < UNITS - 1; i += 1) {
+      await f.makeUnit(world.companyId, world.propertyId, { label: `extra-${i}` });
+    }
+
+    /* Three entries, on one lease, totalling 1,500.00. */
+    const amounts = [50000, 60000, 40000];
+    for (const [i, cents] of amounts.entries()) {
+      await postMoney({
+        companyId: world.companyId, ownerId: world.ownerId,
+        propertyId: world.propertyId, unitId: world.unitId, leaseId: world.leaseId,
+        date: `2026-0${i + 1}-05`, kind: "rent_payment", amountCents: cents,
+        memo: `Rent ${i + 1}`, source: "manual", postedBy: "test",
+      });
+    }
+
+    const r = await ownerList(world.companyId);
+    const row = r.rows.find((x) => x.ownerId === world.ownerId);
+
+    assert.equal(row.units, UNITS, "the unit count itself must stay right");
+    assert.equal(row.balanceCents, 150000,
+      "the balance is the sum of the entries, not the sum times the units");
+  });
+
+  test("the property and unit counts are not multiplied by the entries", async () => {
+    await f.makeUnit(world.companyId, world.propertyId, { label: "second" });
+    for (let i = 0; i < 5; i += 1) {
+      await postMoney({
+        companyId: world.companyId, ownerId: world.ownerId,
+        propertyId: world.propertyId, unitId: world.unitId, leaseId: world.leaseId,
+        date: `2026-01-0${i + 1}`, kind: "rent_payment", amountCents: 1000,
+        memo: `E${i}`, source: "manual", postedBy: "test",
+      });
+    }
+    const r = await ownerList(world.companyId);
+    const row = r.rows.find((x) => x.ownerId === world.ownerId);
+    assert.equal(row.properties, 1);
+    assert.equal(row.units, 2);
+  });
+
+  test("an owner with no properties and no entries reads as zero, not as absent", async () => {
+    const lonely = await f.makeOwner(world.companyId, { name: "Aaa Lonely Owner" });
+    const r = await ownerList(world.companyId);
+    const row = r.rows.find((x) => x.ownerId === lonely);
+    assert.ok(row, "an owner with nothing is still an owner");
+    assert.equal(row.properties, 0);
+    assert.equal(row.units, 0);
+    assert.equal(row.balanceCents, 0);
+  });
+});

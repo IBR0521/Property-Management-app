@@ -19,17 +19,34 @@ import { all } from "../db.js";
 import { today } from "../dates.js";
 
 export async function ownerList(companyId) {
+  /* Three independent aggregates, each asked separately.
+
+     This joined `property`, `unit` and `ledger_entry` to `owner` in one
+     statement and grouped. Units and ledger entries are independent branches
+     from the same owner, so the join produced one row per combination of the
+     two — an owner with 51 units and 300 ledger entries made 15,300 rows —
+     and then aggregated over them.
+
+     The counts survived that, because they were `COUNT(DISTINCT ...)`. The
+     money did not. `SUM(e.amount_cents)` added every entry once per unit, so
+     the balance on this report was the owner's real balance multiplied by
+     their unit count: $3,366,000 shown as $171,666,000 at 51 units.
+
+     It read correctly for an owner with exactly one unit, which is what every
+     fixture builds, and that is why it survived. It also took fifteen seconds
+     at 2,000 units — but the wrong number was the serious half.
+
+     Scalar subqueries, which is how the rest of this file already does it. */
   const rows = await all(
     `SELECT o.id, o.name, o.email, o.phone, o.approval_threshold_cents, o.statement_day,
-            COUNT(DISTINCT p.id)::int AS properties,
-            COUNT(DISTINCT u.id)::int AS units,
-            COALESCE(SUM(e.amount_cents), 0)::bigint AS balance_cents
+            (SELECT COUNT(*) FROM property p WHERE p.owner_id = o.id)::int AS properties,
+            (SELECT COUNT(*) FROM unit u
+               JOIN property p ON p.id = u.property_id
+              WHERE p.owner_id = o.id)::int AS units,
+            (SELECT COALESCE(SUM(e.amount_cents), 0)
+               FROM ledger_entry e WHERE e.owner_id = o.id)::bigint AS balance_cents
        FROM owner o
-       LEFT JOIN property p ON p.owner_id = o.id
-       LEFT JOIN unit u ON u.property_id = p.id
-       LEFT JOIN ledger_entry e ON e.owner_id = o.id
       WHERE o.company_id = ?
-      GROUP BY o.id, o.name, o.email, o.phone, o.approval_threshold_cents, o.statement_day
       ORDER BY o.name`, companyId);
 
   return {

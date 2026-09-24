@@ -358,19 +358,32 @@ describe("scheduling from the screen", () => {
     assert.equal((await all("SELECT id FROM report_schedule")).length, 0, "and nothing was saved");
   });
 
-  test("a day past the 28th is refused on the screen", async () => {
+  test("the last day of the month is accepted on the screen", async () => {
+    /* It used to be refused here, because `isDue` compared the day exactly
+       and a schedule on the 31st would have skipped February. `isDue` clamps
+       now, so the arrangement is available rather than forbidden. */
     const { c, saved } = await savedView();
-    const res = await c.post("/app/reports/saved/new/schedule", {
+    await c.post("/app/reports/saved/new/schedule", {
       saved_report_id: saved.id, cadence: "monthly", day_of: 31,
       period: "last_month", recipients: world.staff.admin.id,
     }, { csrfFrom: "/app/reports/saved" });
 
-    /* "1 to 28" also appears in the form's own help text, so matching on
-       that alone passes whether or not anything was refused. The sentence
-       only the error carries, and the absence of a saved row, are what
-       actually prove it. */
+    const rows = await all("SELECT day_of FROM report_schedule");
+    assert.equal(rows.length, 1, "the schedule should have been saved");
+    assert.equal(Number(rows[0].day_of), 31);
+  });
+
+  test("a day that is not a day of the month is still refused on the screen", async () => {
+    const { c, saved } = await savedView();
+    const res = await c.post("/app/reports/saved/new/schedule", {
+      saved_report_id: saved.id, cadence: "monthly", day_of: 32,
+      period: "last_month", recipients: world.staff.admin.id,
+    }, { csrfFrom: "/app/reports/saved" });
+
+    /* The absence of a saved row is what proves the refusal; the wording
+       alone could match the form's own help text. */
     const { body } = await c.follow(res);
-    assert.match(body, /Later days do not exist in every month/);
+    assert.match(body, /1 to 31/);
     assert.equal((await all("SELECT id FROM report_schedule")).length, 0);
   });
 

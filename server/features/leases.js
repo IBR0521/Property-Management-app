@@ -130,8 +130,20 @@ export function documentIntact(doc) {
 async function signatureState(doc) {
   const signatures = await all(
     "SELECT * FROM lease_signature WHERE document_id = ? ORDER BY signed_at", doc.id);
+  /* Parsed *and* shaped. The catch alone was not enough: `JSON.parse` is
+     happy with `1` or `"tenant"` or `null`, all of which are valid JSON and
+     none of which has `.filter`, so a row whose column held anything but an
+     array took the page down with a TypeError rather than falling back.
+     Nothing in the application writes one — the default is a JSON array and
+     so is every insert — but an import, a migration or a hand-run UPDATE can,
+     and the fallback exists precisely for the case nobody planned. */
+  const DEFAULT_REQUIRED = ["tenant", "manager"];
   let required;
-  try { required = JSON.parse(doc.required); } catch { required = ["tenant", "manager"]; }
+  try {
+    const parsed = JSON.parse(doc.required);
+    required = Array.isArray(parsed) && parsed.every((r) => typeof r === "string")
+      ? parsed : DEFAULT_REQUIRED;
+  } catch { required = DEFAULT_REQUIRED; }
   const signed = new Set(signatures.map((s) => s.party_type));
   const outstanding = required.filter((r) => !signed.has(r));
   return { signatures, required, outstanding, complete: outstanding.length === 0 };
