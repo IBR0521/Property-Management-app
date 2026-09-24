@@ -213,16 +213,31 @@ describe("when it fires", () => {
     assert.equal(isDue(weekly(1), "2026-03-03"), false);
   });
 
-  test("a day after the 28th is refused when the schedule is made", async () => {
-    /* The 29th, 30th and 31st do not exist in every month, and a schedule
-       that silently skips February is one nobody debugs until March. */
+  test("a day that is not a day of the month is refused when the schedule is made", async () => {
+    /* 29 to 31 are accepted now: `isDue` clamps them to the length of the
+       month, so the 31st means the last day rather than a run that silently
+       skips February. What is still refused is a number that is not a day. */
     const { id } = await saveOne();
-    for (const day of [0, 29, 31, 40]) {
+    for (const day of [0, 32, 40, -1]) {
       await assert.rejects(() => scheduleReport({
         companyId: world.companyId, savedReportId: id,
         cadence: "monthly", dayOf: day, period: "last_month",
         recipients: [world.staff.admin.id],
-      }), /1 to 28/, String(day));
+      }), /1 to 31/, String(day));
+    }
+  });
+
+  test("the last day of the month can be chosen", async () => {
+    const { id } = await saveOne();
+    for (const day of [29, 30, 31]) {
+      const sched = await scheduleReport({
+        companyId: world.companyId, savedReportId: id,
+        cadence: "monthly", dayOf: day, period: "last_month",
+        recipients: [world.staff.admin.id],
+      });
+      const stored = await get("SELECT day_of FROM report_schedule WHERE id = ?", sched.id);
+      assert.equal(Number(stored.day_of), day, `day ${day} should be storable`);
+      await deleteSchedule(world.companyId, sched.id);
     }
   });
 
@@ -351,5 +366,60 @@ describe("what goes out", () => {
 
     assert.equal(await deleteSchedule(world.companyId, list[0].id), 1);
     assert.deepEqual(await schedulesFor(world.companyId), []);
+  });
+});
+
+/* A monthly schedule set to the last day of the month.
+
+   `isDue` compared the day exactly — `getUTCDate() === day_of` — so a
+   schedule on the 31st would never match in February, April, June, September
+   or November, and would silently not run in five months of the year. The
+   validator capped the day at 28 to prevent that, which worked but cost the
+   arrangement outright.
+
+   It clamps now, the same way rent due dates always have. */
+describe("a schedule on the last day of the month", () => {
+  const monthlyOn = (day) => ({ active: 1, cadence: "monthly", day_of: day, last_sent_on: null });
+
+  test("31 runs on the last day, whatever the month's length", () => {
+    assert.equal(isDue(monthlyOn(31), "2026-01-31"), true, "January has a 31st");
+    assert.equal(isDue(monthlyOn(31), "2026-02-28"), true, "February's last day is the 28th");
+    assert.equal(isDue(monthlyOn(31), "2028-02-29"), true, "and the 29th in a leap year");
+    assert.equal(isDue(monthlyOn(31), "2026-04-30"), true, "April's is the 30th");
+  });
+
+  test("and not on any other day of those months", () => {
+    assert.equal(isDue(monthlyOn(31), "2026-02-27"), false);
+    assert.equal(isDue(monthlyOn(31), "2026-04-29"), false);
+    assert.equal(isDue(monthlyOn(31), "2026-01-30"), false);
+  });
+
+  test("February is no longer skipped — the bug the cap was guarding", () => {
+    /* Every month gets exactly one run. Before the clamp, five of these
+       would have produced none at all. */
+    const days = {
+      "2026-01": 31, "2026-02": 28, "2026-03": 31, "2026-04": 30,
+      "2026-05": 31, "2026-06": 30, "2026-09": 30, "2026-11": 30,
+    };
+    for (const [month, last] of Object.entries(days)) {
+      let fired = 0;
+      for (let d = 1; d <= last; d += 1) {
+        if (isDue(monthlyOn(31), `${month}-${String(d).padStart(2, "0")}`)) fired += 1;
+      }
+      assert.equal(fired, 1, `${month} should fire exactly once, fired ${fired}`);
+    }
+  });
+
+  test("a day inside every month is unaffected", () => {
+    /* The existing behaviour, which must not move. */
+    assert.equal(isDue(monthlyOn(5), "2026-02-05"), true);
+    assert.equal(isDue(monthlyOn(5), "2026-02-28"), false);
+    assert.equal(isDue(monthlyOn(1), "2026-02-01"), true);
+  });
+
+  test("30 lands on the 28th in February but stays the 30th elsewhere", () => {
+    assert.equal(isDue(monthlyOn(30), "2026-02-28"), true);
+    assert.equal(isDue(monthlyOn(30), "2026-01-30"), true);
+    assert.equal(isDue(monthlyOn(30), "2026-01-31"), false);
   });
 });

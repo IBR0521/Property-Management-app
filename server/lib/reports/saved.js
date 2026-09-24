@@ -154,10 +154,12 @@ export async function scheduleReport({
   if (!PERIODS[period]) throw new BadRequest("Choose a period for the schedule.");
 
   const day = Number(dayOf);
-  if (cadence === "monthly" && !(day >= 1 && day <= 28)) {
-    /* The 29th, 30th and 31st do not exist in every month, and a schedule
-       that skips February is one nobody debugs until March. */
-    throw new BadRequest("Pick a day from 1 to 28. Later days do not exist in every month.");
+  if (cadence === "monthly" && !(day >= 1 && day <= 31)) {
+    /* It used to stop at 28, because a schedule that skips February is one
+       nobody debugs until March — and with `isDue` comparing the day exactly,
+       skipping is what would have happened. `isDue` clamps now, so the 31st
+       means the last day of the month and February is not skipped. */
+    throw new BadRequest("Pick a day from 1 to 31.");
   }
   if (cadence === "weekly" && !(day >= 0 && day <= 6)) {
     throw new BadRequest("Pick a day of the week.");
@@ -231,8 +233,22 @@ export function isDue(schedule, on = today()) {
   if (schedule.last_sent_on === on) return false;
 
   const date = new Date(`${on}T00:00:00Z`);
-  if (schedule.cadence === "monthly") return date.getUTCDate() === Number(schedule.day_of);
+  if (schedule.cadence === "monthly") {
+    /* Clamped to the length of the month, so a schedule set to the 31st runs
+       on the 28th in February and the 30th in April rather than skipping
+       those months entirely. Exact equality was the reason the day could not
+       go past 28: `getUTCDate()` never returns 31 in February, so the run
+       was silently missed in five months of the year. Comparing against the
+       clamped day is what lets the last day of the month be chosen at all. */
+    return date.getUTCDate() === dayInMonth(on, Number(schedule.day_of));
+  }
   return date.getUTCDay() === Number(schedule.day_of);
+}
+
+/* The day this schedule lands on in the month `on` falls in. */
+function dayInMonth(on, dayOf) {
+  const last = Number(monthRange(on).end.slice(8));
+  return Math.min(Math.max(dayOf, 1), last);
 }
 
 export async function runReportSchedules({ on = today(), baseUrl = null } = {}) {

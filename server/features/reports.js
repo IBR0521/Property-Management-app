@@ -196,8 +196,9 @@ export function registerReports(router) {
                   </div>
                   <div class="field">
                     <label for="day_of">On</label>
-                    <input id="day_of" name="day_of" type="number" min="0" max="28" value="1" required />
-                    <span class="field__help">Day of the month, 1 to 28. For weekly, 0 is Sunday.</span>
+                    <input id="day_of" name="day_of" type="number" min="0" max="31" value="1" required />
+                    <span class="field__help">Monthly: day of the month, 1 to 31, where 31 means the
+                      last day. Weekly: 0 is Sunday, 6 is Saturday.</span>
                   </div>
                 </div>
                 <div class="field">
