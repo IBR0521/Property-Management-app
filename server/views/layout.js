@@ -83,6 +83,7 @@ export const PROPERTY_TABS = [
   { key: "rent", href: "/app/rent", label: "Rent" },
   { key: "deadlines", href: "/app/compliance", label: "Deadlines" },
   { key: "turns", href: "/app/turns", label: "Turns" },
+  { key: "inspections", href: "/app/inspections", label: "Inspections" },
   { key: "repairs", href: "/app/maintenance", label: "Repairs" },
 ];
 

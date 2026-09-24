@@ -235,6 +235,7 @@ const ROUTE_CAPABILITY = [
   ["/app/maintenance", "maintenance.work"],
   ["/app/turns", "maintenance.work"],
   ["/app/compliance", "property.view"],
+  ["/app/inspections", "property.view"],
   /* Signed in is enough to reach the section; which reports appear, and
      which may be opened, is decided per report.
 
@@ -280,6 +281,7 @@ const WRITE_CAPABILITY = [
   ["/app/payouts", "money.write"],
   ["/app/vendors/invoices", "money.write"],
   ["/app/portfolio", "property.edit"],
+  ["/app/inspections", "property.edit"],
 ];
 
 function longestMatch(table, path) {

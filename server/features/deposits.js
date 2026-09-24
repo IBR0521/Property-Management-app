@@ -23,8 +23,10 @@ import { navCounts } from "../lib/counts.js";
 import { insert } from "../lib/db.js";
 import {
   returnDetail, addDeduction, removeDeduction, settleReturn, renderItemisation,
-  heldFor, DepositRefused,
+  deductibleFrom, DepositRefused,
 } from "../lib/deposits.js";
+import { conditionLabel } from "../lib/inspections.js";
+import { fileUrl } from "../lib/files.js";
 
 export function registerDeposits(router) {
   router.get("/app/deposits", async (ctx) => {
@@ -132,6 +134,10 @@ export function registerDeposits(router) {
         WHERE w.company_id = ? AND w.unit_id = ? AND w.status = 'complete'
         ORDER BY w.closed_at DESC NULLS LAST LIMIT 20`, cid, detail.unit_id);
 
+    /* What the move-out inspection found worse than the move-in. This is the
+       join the inspection feature exists for: a deduction with the room, both
+       conditions and the photographs behind it survives being disputed. */
+    const found = await deductibleFrom({ companyId: cid, returnId: ctx.params.id });
     const preview = renderItemisation({ detail, company });
     const where = `${detail.line1}${detail.label ? `, unit ${detail.label}` : ""}`;
     const settled = detail.status === "settled";
@@ -185,7 +191,9 @@ export function registerDeposits(router) {
                 <tbody>${detail.deductions.map((d) => html`
                   <tr>
                     <td>${d.reason}
-                      ${d.reference ? html`<span class="cellsub">repair ${d.reference} — ${d.work_order_summary}</span>` : ""}</td>
+                      ${d.reference ? html`<span class="cellsub">repair ${d.reference} — ${d.work_order_summary}</span>` : ""}
+                      ${d.inspection_label ? html`<span class="cellsub">${conditionLabel(d.inspection_before)} at move-in,
+                        ${conditionLabel(d.inspection_condition)} at move-out</span>` : ""}</td>
                     <td class="num">${usd(d.amount_cents)}</td>
                     <td class="shrink">${settled ? "" : html`
                       <form method="post" action="/app/deposits/${detail.id}/deduction/${d.id}/delete">
@@ -228,6 +236,43 @@ export function registerDeposits(router) {
             </div>
           </div>
         </div>
+
+        ${!settled && found.items.some((i) => !i.taken) ? html`
+          <div class="panel">
+            <div class="panel__head"><h2>From the move-out inspection</h2>
+              <p>The lines that got worse — the only ones that can justify keeping any of it</p>
+            </div>
+            <div class="panel__body panel__body--flush">
+              <div class="tablewrap"><table class="data">
+                <thead><tr><th>Where</th><th class="shrink">At move-in</th>
+                  <th class="shrink">At move-out</th><th>Photos</th><th class="shrink"></th></tr></thead>
+                <tbody>${found.items.filter((i) => !i.taken).map((item) => html`
+                  <tr>
+                    <td>${item.room} — ${item.label}
+                      ${item.note ? html`<span class="cellsub">${item.note}</span>` : ""}</td>
+                    <td class="shrink"><span class="cellsub">${conditionLabel(item.before_condition)}</span></td>
+                    <td class="shrink"><span class="chip" data-tone="warn">${conditionLabel(item.condition)}</span></td>
+                    <td><span class="cellsub">${item.photos || 0}</span></td>
+                    <td class="shrink">
+                      <form method="post" action="/app/deposits/${detail.id}/deduction" class="formgrid" style="gap:0.35rem">
+                        <input type="hidden" name="_csrf" value="${ctx.csrf}" />
+                        <input type="hidden" name="inspection_item_id" value="${item.id}" />
+                        <input type="hidden" name="reason"
+                               value="${item.room} — ${item.label}${item.note ? `: ${item.note}` : ""}" />
+                        <input name="amount" type="text" inputmode="decimal" required
+                               placeholder="0.00" style="max-width:7rem" />
+                        <button class="pill outline sm" type="submit">Deduct</button>
+                      </form>
+                    </td>
+                  </tr>`)}</tbody>
+              </table></div>
+              <div class="panel__body">
+                <span class="cellsub">The reason is filled in for you from the inspection —
+                  a deduction that says which room, what it was and what it became survives
+                  being disputed. One that says "damages" does not.</span>
+              </div>
+            </div>
+          </div>` : ""}
 
         <div class="panel">
           <div class="panel__head"><h2>${settled ? "What was sent" : "What will be sent"}</h2>
@@ -276,6 +321,7 @@ export function registerDeposits(router) {
         companyId: cid, returnId: ctx.params.id,
         reason: ctx.fields.reason, amountCents: cents,
         workOrderId: String(ctx.fields.work_order_id || "") || null,
+        inspectionItemId: String(ctx.fields.inspection_item_id || "") || null,
         by: ctx.staff.name,
       });
     } catch (err) {

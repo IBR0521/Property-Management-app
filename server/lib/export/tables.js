@@ -88,6 +88,12 @@ export const TABLES = {
   owner_statement: { by: "company" },
   deposit_return: { by: "company" },
   deposit_deduction: { by: "company" },
+  /* The record a deposit dispute turns on, so it leaves with the company —
+     including the frozen text the tenant signed and the photographs, which
+     are carried in `files/` like every other upload. */
+  inspection: { by: "company" },
+  inspection_item: { by: "company" },
+  inspection_photo: { by: "company" },
   trust_reconciliation: { by: "company" },
   vendor_invoice: { by: "company" },
   vendor_payout: { by: "company" },
@@ -222,6 +228,7 @@ export const FILE_COLUMNS = [
   { table: "vendor", column: "coi_path", folder: "files/vendor-insurance" },
   { table: "vendor_invoice", column: "doc_path", folder: "files/vendor-invoices" },
   { table: "renters_insurance", column: "doc_path", folder: "files/renters-insurance" },
+  { table: "inspection_photo", column: "path", folder: "files/inspections" },
   { table: "company", column: "logo_path", folder: "files" },
 ];
 

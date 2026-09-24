@@ -135,7 +135,8 @@ export async function openReturn({
 }
 
 export async function addDeduction({
-  companyId, returnId, reason, amountCents, workOrderId = null, by, now = stamp,
+  companyId, returnId, reason, amountCents,
+  workOrderId = null, inspectionItemId = null, by, now = stamp,
 }) {
   const ret = await one(
     "SELECT * FROM deposit_return WHERE id = ? AND company_id = ?", returnId, companyId);
@@ -170,6 +171,7 @@ export async function addDeduction({
     id: deductionId, company_id: companyId, return_id: returnId,
     reason: words, amount_cents: cents,
     work_order_id: workOrderId || null,
+    inspection_item_id: inspectionItemId || null,
     created_by: by, created_at: now(),
   });
   return await one("SELECT * FROM deposit_deduction WHERE id = ?", deductionId);
@@ -195,10 +197,51 @@ export async function deductedFrom(returnId) {
 
 export async function deductionsFor(returnId) {
   return await all(
-    `SELECT d.*, w.reference, w.summary AS work_order_summary
+    `SELECT d.*, w.reference, w.summary AS work_order_summary,
+            i.room AS inspection_room, i.label AS inspection_label,
+            i.condition AS inspection_condition,
+            b.condition AS inspection_before
        FROM deposit_deduction d
        LEFT JOIN work_order w ON w.id = d.work_order_id
+       LEFT JOIN inspection_item i ON i.id = d.inspection_item_id
+       LEFT JOIN inspection_item b ON b.id = i.compares_to
       WHERE d.return_id = ? ORDER BY d.created_at`, returnId);
+}
+
+/* The lines a move-out inspection found worse than the move-in, that have not
+   been turned into a deduction yet.
+
+   This is the join the inspection feature exists for. A deduction that says
+   "carpet, second bedroom, good at move-in and damaged at move-out, with
+   photographs of both" is a deduction that survives being disputed; one that
+   says "damages" is not. */
+export async function deductibleFrom({ companyId, returnId }) {
+  const ret = await one(
+    "SELECT * FROM deposit_return WHERE id = ? AND company_id = ?", returnId, companyId);
+
+  const inspection = await get(
+    `SELECT * FROM inspection
+      WHERE company_id = ? AND lease_id = ? AND kind = 'moveout' AND status <> 'draft'
+      ORDER BY performed_on DESC LIMIT 1`, companyId, ret.lease_id);
+  if (!inspection) return { inspection: null, items: [] };
+
+  const rows = await all(
+    `SELECT i.*, b.condition AS before_condition, b.note AS before_note,
+            (SELECT COUNT(*) FROM inspection_photo p WHERE p.item_id = i.id)::int AS photos,
+            EXISTS (SELECT 1 FROM deposit_deduction d
+                     WHERE d.inspection_item_id = i.id AND d.return_id = ?) AS taken
+       FROM inspection_item i
+       LEFT JOIN inspection_item b ON b.id = i.compares_to
+      WHERE i.inspection_id = ?
+      ORDER BY i.position`, returnId, inspection.id);
+
+  const { worsened } = await import("./inspections.js");
+  return {
+    inspection,
+    items: rows
+      .filter((r) => worsened(r.before_condition, r.condition))
+      .map((r) => ({ ...r, taken: Boolean(r.taken) })),
+  };
 }
 
 /* Everything a return is, in one read, for the screen and for the
@@ -346,6 +389,14 @@ export function renderItemisation({ detail, company, date = today() }) {
     for (const d of detail.deductions) {
       lines.push(`  ${String(d.reason).slice(0, 44).padEnd(44)}${usd(d.amount_cents).padStart(12)}`);
       if (d.reference) lines.push(`    (repair ${d.reference})`);
+      /* What the inspections were for. A tenant reading this can see which
+         room, what it was when they moved in and what it was when they left,
+         which is a far better answer than "damages". */
+      if (d.inspection_label) {
+        lines.push(`    ${d.inspection_room} — ${d.inspection_label}: `
+          + `${conditionWord(d.inspection_before)} at move-in, `
+          + `${conditionWord(d.inspection_condition)} at move-out`);
+      }
     }
     lines.push(`  ${"".padEnd(44)}${"".padStart(12, "-")}`);
     lines.push(`  ${"Total deducted".padEnd(44)}${usd(detail.deducted).padStart(12)}`);
@@ -368,6 +419,15 @@ export function renderItemisation({ detail, company, date = today() }) {
   if (company.phone) lines.push(company.phone);
 
   return lines.join("\n");
+}
+
+/* Plain words for a condition, without importing the inspections module into
+   a rendering function that has no other reason to know about it. */
+function conditionWord(key) {
+  return ({
+    good: "good", fair: "fair", poor: "poor",
+    damaged: "damaged", not_present: "not there",
+  })[key] || "not recorded";
 }
 
 /* --- the conversion ------------------------------------------------------------ */

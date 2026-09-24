@@ -63,6 +63,7 @@ import { registerWebhooks } from "./features/hooks.js";
 import { registerScreening } from "./features/screening.js";
 import { registerScreeningSetup } from "./features/screeningsetup.js";
 import { registerDeposits } from "./features/deposits.js";
+import { registerInspections } from "./features/inspections.js";
 
 const router = createRouter();
 
@@ -109,6 +110,7 @@ registerWebhooks(router);
 registerScreening(router);
 registerScreeningSetup(router);
 registerDeposits(router);
+registerInspections(router);
 
 /* Routes that need a signed-in staff member. Everything under /app except the
    sign-in pages, which register themselves as public. */
