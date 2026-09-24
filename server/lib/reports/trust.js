@@ -50,11 +50,10 @@ async function journalTrustBalances(companyId, asOf) {
      date filter that silently did not filter. */
   const rows = await all(
     `SELECT a.code, a.name, a.type, a.normal_balance,
-            COALESCE(SUM(CASE WHEN j.date <= ? THEN s.debit_cents ELSE 0 END), 0)::bigint  AS debits,
-            COALESCE(SUM(CASE WHEN j.date <= ? THEN s.credit_cents ELSE 0 END), 0)::bigint AS credits
+            COALESCE(SUM(CASE WHEN s.date <= ? THEN s.debit_cents ELSE 0 END), 0)::bigint  AS debits,
+            COALESCE(SUM(CASE WHEN s.date <= ? THEN s.credit_cents ELSE 0 END), 0)::bigint AS credits
        FROM account a
        LEFT JOIN journal_split s ON s.account_id = a.id
-       LEFT JOIN journal j ON j.id = s.journal_id
       WHERE a.company_id = ? AND a.is_trust = 1
       GROUP BY a.code, a.name, a.type, a.normal_balance
       ORDER BY a.code`, asOf, asOf, companyId);

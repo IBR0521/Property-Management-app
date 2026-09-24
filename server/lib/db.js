@@ -21,6 +21,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DATABASE_URL, DATABASE_CA_CERT, PG_POOL_MAX, assertConfig } from "./config.js";
+import * as counting from "./dev/querycount.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(here, "..", "..");
@@ -167,7 +168,17 @@ export async function tx(fn, { isolation = null } = {}) {
 /* --- query helpers -------------------------------------------------------- */
 
 async function exec(sql, params) {
-  return conn().unsafe(toPg(sql), params.map(norm));
+  /* Counted only when a test has asked. While it is off this is one branch,
+     and the load test's whole value is being able to say how many queries a
+     screen issues rather than how fast this machine happens to be. */
+  if (!counting.enabled()) return conn().unsafe(toPg(sql), params.map(norm));
+
+  const began = Date.now();
+  try {
+    return await conn().unsafe(toPg(sql), params.map(norm));
+  } finally {
+    counting.record(sql, Date.now() - began);
+  }
 }
 
 export async function get(sql, ...params) {

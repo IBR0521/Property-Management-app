@@ -185,16 +185,27 @@ export async function postJournal({
 
   await assertPeriodOpen(companyId, date);
 
+  const on = date || today();
+
   return await tx(async () => {
     const jid = id();
     await insert("journal", {
-      id: jid, company_id: companyId, date: date || today(), memo: String(memo).trim(),
+      id: jid, company_id: companyId, date: on, memo: String(memo).trim(),
       source, source_type: sourceType, source_id: sourceId,
       posted_by: postedBy, created_at: stamp(),
     });
     for (const r of resolved) {
       await insert("journal_split", {
         id: id(), journal_id: jid, account_id: r.accountId,
+        /* The journal's date, on the split.
+
+           Every financial report groups by account and filters by date, and
+           joining 676,000 splits to their journals for that one column is
+           where the balance sheet spent ten of its ten and a half seconds at
+           2,000 units. A posted journal is append-only, so its date cannot
+           change and the copy cannot drift — and the database checks the two
+           match on the way in rather than trusting this line. */
+        date: on,
         debit_cents: r.d, credit_cents: r.c,
         owner_id: r.ownerId || null, property_id: r.propertyId || null,
         unit_id: r.unitId || null, lease_id: r.leaseId || null, vendor_id: r.vendorId || null,
@@ -221,10 +232,12 @@ export async function reverseJournal(journalId, { companyId, by = "system", memo
      open one. What is refused is dating the reversal itself behind the line. */
   await assertPeriodOpen(companyId, date || today());
 
+  const on = date || today();
+
   return await tx(async () => {
     const jid = id();
     await insert("journal", {
-      id: jid, company_id: companyId, date: date || today(),
+      id: jid, company_id: companyId, date: on,
       memo: memo || `Reversal of: ${original.memo}`,
       source: original.source, source_type: original.source_type, source_id: original.source_id,
       reverses_id: original.id, posted_by: by, created_at: stamp(),
@@ -233,6 +246,9 @@ export async function reverseJournal(journalId, { companyId, by = "system", memo
       // Sides swapped: every debit becomes a credit of the same size.
       await insert("journal_split", {
         id: id(), journal_id: jid, account_id: s.account_id,
+        /* The reversal's own date, not the original's — the same date the
+           journal above carries. */
+        date: on,
         debit_cents: s.credit_cents, credit_cents: s.debit_cents,
         owner_id: s.owner_id, property_id: s.property_id, unit_id: s.unit_id,
         lease_id: s.lease_id, vendor_id: s.vendor_id,
@@ -257,17 +273,20 @@ export async function trialBalance(companyId, { from, to } = {}) {
      the screen offered From and To, said "filtered" underneath them, and
      returned the all-time figure. Filtering to 1990 on seeded data returned
      every penny of 2026. */
+  /* And the journal is not joined at all any more. The date is on the split
+     (migration 046), which is what makes this an index-only scan — five
+     seconds at 2,000 units and five years, almost all of it primary-key
+     lookups for one column that was already known. */
   const rows = await all(
     `SELECT a.id, a.code, a.name, a.type, a.normal_balance, a.is_trust,
-            COALESCE(SUM(CASE WHEN (?::text IS NULL OR j.date >= ?)
-                               AND (?::text IS NULL OR j.date <= ?)
+            COALESCE(SUM(CASE WHEN (?::text IS NULL OR s.date >= ?)
+                               AND (?::text IS NULL OR s.date <= ?)
                               THEN s.debit_cents ELSE 0 END), 0)::bigint  AS debits,
-            COALESCE(SUM(CASE WHEN (?::text IS NULL OR j.date >= ?)
-                               AND (?::text IS NULL OR j.date <= ?)
+            COALESCE(SUM(CASE WHEN (?::text IS NULL OR s.date >= ?)
+                               AND (?::text IS NULL OR s.date <= ?)
                               THEN s.credit_cents ELSE 0 END), 0)::bigint AS credits
        FROM account a
        LEFT JOIN journal_split s ON s.account_id = a.id
-       LEFT JOIN journal j ON j.id = s.journal_id
       WHERE a.company_id = ?
       GROUP BY a.id, a.code, a.name, a.type, a.normal_balance, a.is_trust
       ORDER BY a.code`,

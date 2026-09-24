@@ -43,6 +43,13 @@ import { today } from "../dates.js";
    here because every report in this file would inherit it. */
 async function balances(companyId, { from = null, to = null, propertyId = null, ownerId = null,
                                      unallocatedOnly = false } = {}) {
+  /* No join to `journal`.
+
+     The date lives on the split (migration 046), which is what turns this
+     from 676,000 primary-key lookups into an index-only scan. At 2,000 units
+     and five years the balance sheet was ten and a half seconds, and four
+     hundred milliseconds of that was the splits — the rest was the join this
+     no longer does. */
   const rows = await all(
     `SELECT a.code, a.name, a.type, a.normal_balance, a.is_trust,
             COALESCE(SUM(CASE WHEN ${inRange} THEN s.debit_cents  ELSE 0 END), 0)::bigint AS debits,
@@ -52,7 +59,6 @@ async function balances(companyId, { from = null, to = null, propertyId = null, 
         AND (?::text IS NULL OR s.property_id = ?)
         AND (?::text IS NULL OR s.owner_id = ?)
         AND (? = 0 OR s.property_id IS NULL)
-       LEFT JOIN journal j ON j.id = s.journal_id
       WHERE a.company_id = ? AND a.active = 1
       GROUP BY a.code, a.name, a.type, a.normal_balance, a.is_trust
       ORDER BY a.code`,
@@ -70,8 +76,10 @@ async function balances(companyId, { from = null, to = null, propertyId = null, 
   }).filter((r) => r.debits !== 0 || r.credits !== 0);
 }
 
-/* Repeated twice in the SELECT, once for each side. */
-const inRange = "(?::text IS NULL OR j.date >= ?) AND (?::text IS NULL OR j.date <= ?)";
+/* Repeated twice in the SELECT, once for each side. Reads the split's own
+   date rather than its journal's — they are the same value, and the database
+   enforces that they are. */
+const inRange = "(?::text IS NULL OR s.date >= ?) AND (?::text IS NULL OR s.date <= ?)";
 
 const sumOf = (rows, type) => rows.filter((r) => r.type === type)
   .reduce((n, r) => n + r.balance, 0);
@@ -154,8 +162,21 @@ export async function balanceSheet(companyId, { asOf = today() } = {}) {
      equity side has to carry everything earned and spent since the book
      began — otherwise assets exceed liabilities plus equity by exactly that.
      Its own line rather than folded into retained earnings, because it is a
-     different thing. */
-  const earnings = await profitAndLoss(companyId, { from: null, to: asOf });
+     different thing.
+
+     Derived from the rows already read rather than by calling
+     `profitAndLoss`, which would run the same aggregate a second time: it
+     asks for the same period with the same filters, and at 2,000 units that
+     second pass was half the page. */
+  const income = rows.filter((r) => r.type === "income");
+  const expense = rows.filter((r) => r.type === "expense");
+  const incomeCents = income.reduce((n, r) => n + r.balance, 0);
+  const expenseCents = expense.reduce((n, r) => n + r.balance, 0);
+  const earnings = {
+    kind: "profit_and_loss", from: null, to: asOf, propertyId: null, ownerId: null,
+    income, expense, incomeCents, expenseCents,
+    netCents: incomeCents - expenseCents,
+  };
 
   const restricted = (rows) => rows.filter((r) => r.isTrust);
   const unrestricted = (rows) => rows.filter((r) => !r.isTrust);

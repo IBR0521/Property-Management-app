@@ -74,8 +74,8 @@ async function receivableLines(companyId, asOf) {
        JOIN journal j ON j.id = s.journal_id
       WHERE a.company_id = ? AND a.code = '1300'
         AND s.lease_id IS NOT NULL
-        AND j.date <= ?
-      ORDER BY s.lease_id, j.date, j.created_at`,
+        AND s.date <= ?
+      ORDER BY s.lease_id, s.date, j.created_at`,
     companyId, asOf);
 }
 
@@ -109,6 +109,7 @@ export async function agedReceivables(companyId, { asOf = today() } = {}) {
 
   const byLease = new Map(leases.map((l) => [l.id, l]));
   const lines = await receivableLines(companyId, asOf);
+  const prepaid = await prepaidByLease(companyId, asOf);
 
   /* Charges per lease, oldest first, each with what is still unpaid on it. */
   const charges = new Map();
@@ -166,13 +167,13 @@ export async function agedReceivables(companyId, { asOf = today() } = {}) {
     /* Held against this lease and not yet earned. Shown as a credit rather
        than as a negative bucket: a tenant in credit is not thirty days late
        by a negative amount, they are paid up and holding a balance. */
-    const prepaid = await prepaidFor(companyId, lease.id, asOf);
+    const prepaidCents = prepaid.get(lease.id) || 0;
 
     /* Not chased yet. The whole reason grace is a flag and not a bucket. */
     const graceEnds = oldestDue ? addDays(oldestDue, Number(lease.grace_days || 0)) : null;
     const inGrace = Boolean(overdueCents > 0 && graceEnds && asOf <= graceEnds);
 
-    if (owedCents === 0 && prepaid === 0) continue;
+    if (owedCents === 0 && prepaidCents === 0) continue;
 
     rows.push({
       leaseId: lease.id, status: lease.status,
@@ -180,8 +181,8 @@ export async function agedReceivables(companyId, { asOf = today() } = {}) {
       city: lease.city, propertyId: lease.property_id, ownerId: lease.owner_id,
       tenant: lease.tenant_name || "—",
       buckets, owedCents, overdueCents,
-      prepaidCents: prepaid,
-      netCents: owedCents - prepaid,
+      prepaidCents,
+      netCents: owedCents - prepaidCents,
       oldestDue, graceEnds, inGrace,
       open,
     });
@@ -207,15 +208,28 @@ export async function agedReceivables(companyId, { asOf = today() } = {}) {
   };
 }
 
-async function prepaidFor(companyId, leaseId, asOf) {
-  const row = await get(
-    `SELECT COALESCE(SUM(s.credit_cents - s.debit_cents), 0)::bigint AS cents
+/* Every lease's prepayment, in one query.
+
+   This was one query per lease, inside the loop below, which the load test
+   caught: at six hundred tenancies the aged receivables report issued 613
+   queries, 600 of them this. A report that costs a query per row costs a
+   query per row on a customer's portfolio too, and nothing at nine units
+   would ever have shown it.
+
+   No join to `journal` either — the date is on the split (migration 046). */
+async function prepaidByLease(companyId, asOf) {
+  const rows = await all(
+    `SELECT s.lease_id,
+            COALESCE(SUM(s.credit_cents - s.debit_cents), 0)::bigint AS cents
        FROM journal_split s
        JOIN account a ON a.id = s.account_id
-       JOIN journal j ON j.id = s.journal_id
-      WHERE a.company_id = ? AND a.code = '2300' AND s.lease_id = ? AND j.date <= ?`,
-    companyId, leaseId, asOf);
-  return Math.max(0, Number(row?.cents || 0));
+      WHERE a.company_id = ? AND a.code = '2300'
+        AND s.lease_id IS NOT NULL AND s.date <= ?
+      GROUP BY s.lease_id`, companyId, asOf);
+
+  const out = new Map();
+  for (const r of rows) out.set(r.lease_id, Math.max(0, Number(r.cents)));
+  return out;
 }
 
 /* The aged total has to equal the receivable control account, or one of them

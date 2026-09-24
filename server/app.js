@@ -15,6 +15,7 @@ import { newRequestId, forRequest } from "./lib/logger.js";
 import { captureError } from "./lib/errors.js";
 import { DATABASE_URL, DATABASE_CA_CERT, BLOB_READ_WRITE_TOKEN, configSummary } from "./lib/config.js";
 import { createRouter } from "./lib/router.js";
+import { withCounting } from "./lib/dev/querycount.js";
 import { serveFromRoot, serveUpload } from "./lib/static.js";
 import { currentPerson } from "./lib/magiclink.js";
 import { currentStaff, can, requiredCapability, roleLabel, secondFactorRedirect, landingFor } from "./lib/auth.js";
@@ -131,7 +132,18 @@ export function registeredRoutes() {
   return router.list();
 }
 
+/* Every request runs inside a counting context when a test has turned one on,
+   and returns straight through otherwise. See lib/dev/querycount.js for why
+   the load test measures queries rather than milliseconds. */
 export async function handle(req, res) {
+  /* The count cannot be a response header: by the time it is known the
+     response has gone. So the counting context keeps the last one, and a
+     load test running in the same process reads it after the fetch
+     resolves. Nothing is added to any response path for a dev-only number. */
+  return withCounting(() => handleRequest(req, res), { label: `${req.method} ${req.url}` });
+}
+
+async function handleRequest(req, res) {
 
   /* Scheme from the proxy, not assumed. This was hardcoded to http://, which
      meant ctx.url.protocol never read https and the session cookie never got
