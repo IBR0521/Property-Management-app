@@ -69,12 +69,12 @@ describe("what a charge has to say for itself", () => {
     await assert.rejects(() => petRent({ payee: "somebody" }), /whose income/i);
   });
 
-  test("a charge billed to the manager is refused, in words, with the reason", async () => {
-    /* Not silently, and not by posting something the reconciliation would
-       catch three months later. A tenant paying one would land money in the
-       trust account with nothing recording that it is the manager's. */
-    await assert.rejects(() => petRent({ payee: "manager" }),
-      /trust account|trust reconciliation/i);
+  test("a charge billed to the manager is accepted", async () => {
+    /* It was refused when this was built, because nothing credited `1200` and
+       a charge posted there could never be collected. Payments settle it now.
+       See "a charge that is the manager's income" below. */
+    const c = await petRent({ label: "Administration", payee: "manager" });
+    assert.equal(c.payee, "manager");
   });
 
   test("it needs a label the tenant will recognise", async () => {
@@ -527,5 +527,85 @@ describe("bringing recurring charges in from an import", () => {
     const res = await chargeRecurring(world.companyId, { period: "2026-03" });
     assert.equal(res.charged, 2);
     assert.equal(res.cents, 12500, "the $125 a month the import used to lose");
+  });
+});
+
+/* Charges that are the manager's own income.
+
+   Refused when this feature was built, because nothing credited `1200`: a fee
+   charged to the tenant could never be collected, and the money that paid it
+   fell through to `2300` and was recorded as rent held for the owner. Adding a
+   charge that produced that every month would have multiplied a defect.
+
+   `rentPaymentSplits` settles `1200` now — after the rent, never before — so
+   the account this posts to is one that clears. */
+describe("a charge that is the manager's income", () => {
+  const managerCharge = (over = {}) => addCharge({
+    companyId: world.companyId, leaseId: world.leaseId,
+    label: "Administration", category: "admin", amountCents: 1500,
+    payee: "manager", startDate: "2026-01-01", by: "test", ...over,
+  });
+
+  test("is accepted now", async () => {
+    const c = await managerCharge();
+    assert.equal(c.payee, "manager");
+  });
+
+  test("posts to the manager's receivable and income, like a late fee", async () => {
+    await managerCharge();
+    const res = await chargeRecurring(world.companyId, { period: "2026-03" });
+    assert.equal(res.charged, 1);
+
+    assert.equal(await balance("1200"), 1500, "the manager's claim on the tenant");
+    assert.equal(await balance("4100"), -1500, "recognised as the manager's income");
+    assert.equal(await balance("1300"), 0, "not the owner's receivable");
+    assert.equal(await balance("2400"), 0, "and nothing is owed to the owner for it");
+  });
+
+  test("and the tenant paying it settles it", async () => {
+    await managerCharge();
+    await chargeRecurring(world.companyId, { period: "2026-03" });
+
+    const { postMoney } = await import("../server/lib/ledger.js");
+    await postMoney({
+      companyId: world.companyId, ownerId: world.ownerId, propertyId: world.propertyId,
+      unitId: world.unitId, leaseId: world.leaseId, date: "2026-03-05",
+      kind: "rent_payment", amountCents: 1500, memo: "paid",
+      source: "manual", postedBy: "test",
+    });
+
+    assert.equal(await balance("1200"), 0, "the charge is collected");
+    assert.equal(await balance("2300"), 0, "and none of it became the owner's");
+  });
+
+  test("an owner charge and a manager charge on one lease go to different accounts", async () => {
+    await petRent();
+    await managerCharge();
+    const res = await chargeRecurring(world.companyId, { period: "2026-03" });
+    assert.equal(res.charged, 2);
+
+    assert.equal(await balance("1300"), 5000, "the pet rent is the owner's");
+    assert.equal(await balance("1200"), 1500, "the administration charge is not");
+  });
+
+  test("rent is settled before either of them", async () => {
+    const { chargeRent } = await import("../server/lib/rentcharge.js");
+    await managerCharge();
+    await chargeRecurring(world.companyId, { period: "2026-03" });
+    await chargeRent(world.companyId, { period: "2026-03" });
+
+    const { postMoney, outstandingReceivable, outstandingFees } =
+      await import("../server/lib/ledger.js");
+    await postMoney({
+      companyId: world.companyId, ownerId: world.ownerId, propertyId: world.propertyId,
+      unitId: world.unitId, leaseId: world.leaseId, date: "2026-03-05",
+      kind: "rent_payment", amountCents: 100000, memo: "rent",
+      source: "manual", postedBy: "test",
+    });
+
+    assert.equal(await outstandingReceivable(world.companyId, world.leaseId), 0,
+      "the rent is paid in full");
+    assert.equal(await outstandingFees(world.companyId, world.leaseId), 1500,
+      "and the manager's charge is what is left — never the other way round");
   });
 });

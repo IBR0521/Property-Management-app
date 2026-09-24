@@ -115,7 +115,20 @@ const POSTINGS = {
 async function rentPaymentSplits({ companyId, leaseId, amount }) {
   const outstanding = await outstandingReceivable(companyId, leaseId);
   const clearing = Math.min(amount, Math.max(0, outstanding));
-  const early = amount - clearing;
+
+  /* Rent first, then fees, and the order is not a matter of taste.
+
+     Applying a payment to fees before rent turns a tenant who paid their rent
+     in full into a tenant in arrears *on rent* — and arrears on rent is the
+     ground for eviction. Several states prohibit exactly that. A default that
+     can manufacture an eviction out of a fifty dollar late fee is the wrong
+     default, and "the software did it" is not a defence.
+
+     So `1300` is settled first, and only what is left goes against `1200`. */
+  const afterRent = amount - clearing;
+  const feesOutstanding = await outstandingFees(companyId, leaseId);
+  const feeClearing = Math.min(afterRent, Math.max(0, feesOutstanding));
+  const early = afterRent - feeClearing;
 
   /* The money is in the trust account either way. */
   const splits = [
@@ -129,6 +142,27 @@ async function rentPaymentSplits({ companyId, leaseId, amount }) {
       { code: "1300", credit: clearing, memo: "tenant receivable cleared" },
       { code: "2400", debit: clearing, memo: "uncollected rent now collected" },
       { code: "2200", credit: clearing, memo: "held for the owner" },
+    );
+  }
+
+  if (feeClearing > 0) {
+    /* A fee the tenant owed the manager, now paid.
+
+       Nothing credited `1200` before this. Late fees have been charged to it
+       since Phase 1 and no path ever cleared one, so a fee stayed outstanding
+       for ever — and worse, the money that paid it fell through to `2300` and
+       was recorded as prepaid rent **held for the owner**. The manager's
+       income inflated the owner's trust position, and `2300` is inside the
+       total the reconciliation checks.
+
+       The money is in the trust account, because that is where the tenant
+       sent it, and it is the manager's. That shows as a surplus in
+       `book_vs_clients` — "fees you have earned and not yet swept", which is
+       the reading that report already offers, and which a management fee has
+       always produced the same way. Moving it out is a bank transfer, and the
+       books say so until somebody makes it. */
+    splits.push(
+      { code: "1200", credit: feeClearing, memo: "fee paid by the tenant" },
     );
   }
 
@@ -147,6 +181,21 @@ async function rentPaymentSplits({ companyId, leaseId, amount }) {
   }
 
   return splits;
+}
+
+/* What this lease owes the manager: late fees and anything else charged to
+   `1200`, less whatever has been paid against them. The mirror of
+   `outstandingReceivable`, which asks the same question of the owner's half. */
+export async function outstandingFees(companyId, leaseId) {
+  if (!leaseId) return 0;
+  const { get: getOne } = await import("./db.js");
+  const row = await getOne(
+    `SELECT COALESCE(SUM(s.debit_cents - s.credit_cents), 0)::bigint AS cents
+       FROM journal_split s
+       JOIN account a ON a.id = s.account_id
+      WHERE a.company_id = ? AND a.code = '1200' AND s.lease_id = ?`,
+    companyId, leaseId);
+  return Number(row?.cents || 0);
 }
 
 /* What this lease has paid ahead, held and not yet earned. */

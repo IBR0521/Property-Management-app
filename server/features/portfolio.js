@@ -443,10 +443,11 @@ export function registerPortfolio(router) {
         label: String(ctx.fields.label || ""),
         category: String(ctx.fields.category || "other"),
         amountCents: cents,
-        /* The owner's, because these are the owner's property: the dog lives
-           in their home and the space is their space. A charge that is the
-           manager's own is a different posting and is not offered here. */
-        payee: "owner",
+        /* Whose income it is decides the posting, so it is asked rather than
+           assumed. Pet rent and parking are the owner's — the dog lives in
+           their home and the space is their space. A monthly administration
+           charge is the manager's own. */
+        payee: String(ctx.fields.payee || "owner"),
         by: ctx.staff.id,
       });
     } catch (err) {
@@ -610,7 +611,8 @@ export function registerPortfolio(router) {
                     <thead><tr><th>What</th><th class="num">Amount</th><th class="shrink"></th></tr></thead>
                     <tbody>${extras.map((c) => html`
                       <tr>
-                        <td>${c.label}<span class="cellsub">${CATEGORIES[c.category] || c.category}${
+                        <td>${c.label}<span class="cellsub">${CATEGORIES[c.category] || c.category}
+                          · ${c.payee === "manager" ? "your income" : "the owner's"}${
                           Number(c.prorate) ? "" : " · not prorated"}</span></td>
                         <td class="num">${usd(c.amount_cents)}</td>
                         <td class="shrink">
@@ -642,6 +644,12 @@ export function registerPortfolio(router) {
                     <div class="field" style="min-width:6rem">
                       <input name="amount" type="text" inputmode="decimal" placeholder="50.00"
                              aria-label="Amount each month" required />
+                    </div>
+                    <div class="field" style="min-width:8rem">
+                      <select name="payee" aria-label="Whose income this is">
+                        <option value="owner">The owner's</option>
+                        <option value="manager">Yours</option>
+                      </select>
                     </div>
                     <button class="pill outline sm" type="submit">Add</button>
                   </form>

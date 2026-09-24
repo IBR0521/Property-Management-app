@@ -10,7 +10,7 @@ The importer has said so since Phase 7a — `RECURRING_MONEY` is a curated list
 of thirty column names it warns it cannot read. This is the other half of that
 sentence.
 
-**38 tests. 1,985 in the suite, 0 failing.**
+**54 tests. 2,001 in the suite, 0 failing.**
 
 ---
 
@@ -80,7 +80,45 @@ than headings.
 
 ---
 
-## What I did not build, and why
+## The `1200` hole, closed
+
+Written up below as what was *not* built. It is built now, in the same
+session, so the section that follows is history rather than an open item.
+
+**Nothing had ever credited `1200 Rent receivable`.** Late fees were charged
+to it from Phase 1 and no path cleared one, so two things were wrong at once
+and both were silent: the fee stayed outstanding for ever, and the money that
+paid it fell through to `2300 Prepaid rent` — recorded as rent held **for the
+owner**. `2300` sits inside the `2200 + 2300` total the trust reconciliation
+measures the owners' ledgers against, so the manager's own income inflated
+what the owner appeared to be owed.
+
+`rentPaymentSplits` settles it now, **after the rent and never before it**.
+That order is the decision, not a detail: applying a payment to fees before
+rent turns a tenant who paid their rent in full into a tenant in arrears *on
+rent*, and arrears on rent is the ground for eviction. Several states prohibit
+it. There is a test for exactly that case — rent 1,000, a 50 fee, the tenant
+pays 1,000, and the rent must come out settled.
+
+The money is in the trust account, because that is where the tenant sent it,
+and it is the manager's. That shows as a surplus in `book_vs_clients`, which
+this report has always read as *"fees you have earned and not yet moved to
+your operating account… it should not grow month on month"* — a warning, not
+an error, and the same thing a management fee has produced since Phase 6. No
+new reporting was needed; the existing sentence was already the right one.
+
+**Manager-payee recurring charges are unlocked** as a result: they post
+`Dr 1200 / Cr 4100` exactly as a late fee does, on an account that now clears.
+The screen asks whose income a charge is instead of assuming.
+
+Still owed: **the sweep itself**. Moving earned fees out of trust to operating
+is a bank transfer, and nothing in the application records one. That gap is
+older than this work — management fees have sat in trust the same way — and
+the reconciliation names it every month until somebody does it.
+
+---
+
+## What I did not build, and why *(written before the section above)*
 
 **Manager-payee charges are refused, in words, at the boundary.**
 
@@ -112,8 +150,9 @@ and automatic rent escalation.
 
 ## What is left
 
-1. **Settle `1200`** — the trust-sweep liability, which unlocks manager-payee
-   charges and fixes late fee collection at the same time. The bigger half of
-   that work is a decision about where a tenant-paid fee should sit.
-2. **Owner statements do not send** (Phase 10), still one line.
-3. `aged_receivables` is now 629ms; nothing is over a second.
+1. **The sweep.** Earned fees sit in the trust account until moved to
+   operating, and nothing records that transfer. Older than this work — the
+   reconciliation reports it as a warning every month.
+2. **Aged receivables still reads `1300` only**, so fees owed on `1200` are
+   collectable and chaseable but do not appear in the aging report.
+3. **Owner statements do not send** (Phase 10), still one line.

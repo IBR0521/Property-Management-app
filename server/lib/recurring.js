@@ -71,26 +71,20 @@ export const PAYEES = {
   },
 };
 
-/* Manager-payee charges are refused, and this is the sentence that says why.
+/* Manager-payee charges were refused when this file was written, and are not
+   any more.
 
-   A tenant paying one lands money in trust cash against a non-trust
-   receivable: trust assets rise with no matching client liability, and the
-   three-way reconciliation fails by the amount, every month, for ever.
-   Settling it properly needs a liability for what the trust account owes the
-   manager and a sweep that moves it out — and nothing has ever credited 1200,
-   so late fees have the same hole and it predates this feature.
+   The reason they were is worth keeping: nothing credited `1200`, so a fee
+   charged to the tenant could never be collected, and the money that paid it
+   fell through to `2300` and was recorded as rent held for the owner. Adding
+   a charge that produced that every month would have multiplied a defect.
 
-   Refusing here is not the same as pretending the case does not exist: the
-   column allows it, the plan carries it, and lifting this is a code change
-   and a test rather than a migration. */
-function refuseManagerPayee(payee) {
-  if (payee !== "manager") return;
-  throw new ChargeRefused(
-    "A charge billed to you rather than to the owner cannot be posted yet: the "
-    + "money would land in the trust account with nothing saying it is yours, "
-    + "and the trust reconciliation would report the difference every month. "
-    + "Charge it to the owner, or raise it by hand until the trust sweep exists.");
-}
+   `rentPaymentSplits` settles `1200` now — after the rent, never before it —
+   so the account it posts to is one that clears. The money sits in the trust
+   account until it is swept out, which shows as a surplus in
+   `book_vs_clients`: "fees you have earned and not yet swept", the reading
+   that report already offers and the same thing a management fee has always
+   produced. */
 
 /* --- the records ------------------------------------------------------------- */
 
@@ -114,7 +108,6 @@ export async function addCharge({
   if (!PAYEES[payee]) {
     throw new ChargeRefused("Say whose income this is: the owner's, or yours.");
   }
-  refuseManagerPayee(payee);
 
   const from = startDate || lease.start_date;
   if (endDate && endDate < from) {
@@ -277,20 +270,32 @@ export async function chargeRecurring(companyId, {
       ? `${row.label} ${period} (${row.explain}, ${row.basis})`
       : `${row.label} ${period}`;
 
-    /* Owner-payee only, which `addCharge` already enforced. Asserted again
-       here because a row could have been written before that rule existed. */
-    if (row.payee !== "owner") { skipped += 1; continue; }
+    /* Whose income it is decides the posting, which is the whole reason the
+       column exists.
+
+         owner     Dr 1300 / Cr 2400, exactly as rent — the money becomes the
+                   owner's when it arrives, through the payment path.
+         manager   Dr 1200 / Cr 4100, exactly as a late fee — the manager's
+                   own income, on the receivable that payments now settle. */
+    const splits = row.payee === "manager"
+      ? [
+        { code: ACCT.RENT_RECEIVABLE, debit: row.cents, ...dims, memo: row.label },
+        { code: ACCT.LATE_FEE_INCOME, credit: row.cents, ...dims,
+          memo: `${row.label} — your charge` },
+      ]
+      : [
+        { code: ACCT.TENANT_RECEIVABLE, debit: row.cents, ...dims, memo: row.label },
+        { code: ACCT.RENT_DUE_OWNERS, credit: row.cents, ...dims,
+          memo: "owed to owner when collected" },
+      ];
 
     try {
       await postJournal({
         companyId, date: periodStart, memo,
-        source: "rent", sourceType: "recurring_charge",
+        source: row.payee === "manager" ? "late_fee" : "rent",
+        sourceType: "recurring_charge",
         sourceId: `${row.chargeId}:${period}`, postedBy,
-        splits: [
-          { code: ACCT.TENANT_RECEIVABLE, debit: row.cents, ...dims, memo: row.label },
-          { code: ACCT.RENT_DUE_OWNERS, credit: row.cents, ...dims,
-            memo: "owed to owner when collected" },
-        ],
+        splits,
       });
       charged += 1;
       cents += row.cents;
