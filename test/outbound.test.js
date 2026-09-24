@@ -189,6 +189,69 @@ describe("signing", () => {
       now: () => 1700000000_000 + 3600_000 }).ok, false, "an hour later is outside the tolerance");
   });
 
+  test("a replay is recognisable as the delivery it was, which is why the id is signed",
+    () => {
+      /* The attack the id defends against: capture one delivery, resend it
+         inside the timestamp window as though it were a different one. With
+         only the timestamp and the body signed there is nothing in the signed
+         material that says *which* delivery it is, so a receiver that
+         de-duplicates on the id would be told an id the signature never
+         covered. */
+      const now = () => 1700000000_000;
+      const captured = signedHeaders({
+        id: "del_1", timestamp: 1700000000, body: '{"type":"payment.recorded"}', secret });
+
+      /* Sent again, unchanged: still valid, and still the same delivery — a
+         receiver that has handled del_1 can ignore it. That is what makes a
+         retry safe. */
+      const again = verify({
+        id: captured["webhook-id"], timestamp: captured["webhook-timestamp"],
+        body: '{"type":"payment.recorded"}', secret,
+        header: captured["webhook-signature"], now });
+      assert.equal(again.ok, true);
+      assert.equal(captured["webhook-id"], "del_1");
+
+      /* Re-labelled as a different delivery: refused, because the id is in
+         what was signed. */
+      const relabelled = verify({
+        id: "del_2", timestamp: captured["webhook-timestamp"],
+        body: '{"type":"payment.recorded"}', secret,
+        header: captured["webhook-signature"], now });
+      assert.equal(relabelled.ok, false);
+    });
+
+  test("and an old capture is outside the window however well it is signed", () => {
+    const captured = signedHeaders({
+      id: "del_1", timestamp: 1700000000, body: "{}", secret });
+    const hours = verify({
+      id: "del_1", timestamp: 1700000000, body: "{}", secret,
+      header: captured["webhook-signature"],
+      now: () => 1700000000_000 + 6 * 3600_000 });
+    assert.equal(hours.ok, false);
+    assert.match(hours.reason, /tolerance/);
+  });
+
+  test("a retry carries the same id, so a receiver is not told it is new", async () => {
+    /* The delivery row is the id. Sending it again — by the scheduler or by
+       the button on the screen — must not mint a new one, or a receiver that
+       de-duplicates would process the same event twice. */
+    const e = await endpoint();
+    const d = await delivery(e.id);
+    const seen = [];
+    const send = async ({ headers }) => {
+      seen.push(headers["webhook-id"]);
+      return seen.length === 1 ? { status: 500, body: "" } : { status: 200, body: "ok" };
+    };
+    const lookup = answers("93.184.216.34");
+
+    const first = await attempt(d, { send, lookup });
+    assert.equal(first.status, "pending");
+    const second = await attempt(first, { send, lookup });
+    assert.equal(second.status, "delivered");
+
+    assert.deepEqual(seen, [d.id, d.id], "the same delivery, twice, saying so");
+  });
+
   test("a secret is generated per endpoint, so one can be rotated alone", () => {
     assert.notEqual(newSecret(), newSecret());
     assert.match(newSecret(), /^whsec_/);
