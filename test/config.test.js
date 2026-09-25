@@ -78,6 +78,94 @@ describe("config refuses to start on a broken environment", () => {
   });
 });
 
+/* --- the connection string as it arrives from a copy-and-paste ------------ */
+
+describe("config refuses a connection string that was never finished", () => {
+  /* This cost a working day.
+
+     Supabase's Connect panel renders the string with the password left as a
+     literal `[YOUR-PASSWORD]`, because it does not have it. Pasted verbatim
+     into a deployment, every check that existed passed — the variable was set,
+     the shape was a URL, the port was the pooler's — and the application
+     booted. Then every page that touched the database answered "Something
+     broke", the request log said only that a request had failed, and the one
+     place the real reason existed was /health, which nothing pointed at.
+
+     A placeholder is not a credential. It is refused here, at boot, by name. */
+  const DEPLOYED = {
+    VERCEL: "1",
+    CRON_SECRET: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  };
+  const POOLER = "aws-1-us-west-1.pooler.supabase.com:6543/postgres";
+
+  test("Supabase's placeholder password, pasted as it comes", () => {
+    const r = load({ ...DEPLOYED, DATABASE_URL: `postgresql://postgres.abc:[YOUR-PASSWORD]@${POOLER}` });
+    assert.equal(r.ok, false);
+    assert.match(r.message, /placeholder "\[YOUR-PASSWORD\]"/);
+    assert.match(r.message, /Reset database password/, "the message must carry the fix");
+  });
+
+  test("the same thing after a browser percent-encoded the brackets", () => {
+    const r = load({ ...DEPLOYED, DATABASE_URL: `postgresql://postgres.abc:%5BYOUR-PASSWORD%5D@${POOLER}` });
+    assert.equal(r.ok, false);
+    assert.match(r.message, /placeholder "\[YOUR-PASSWORD\]"/);
+  });
+
+  test("the password deleted but its colon left behind", () => {
+    const r = load({ ...DEPLOYED, DATABASE_URL: `postgresql://postgres.abc:@${POOLER}` });
+    assert.equal(r.ok, false);
+    assert.match(r.message, /no password in it/);
+  });
+
+  test("no credential at all against a remote database", () => {
+    const r = load({ ...DEPLOYED, DATABASE_URL: `postgresql://postgres.abc@${POOLER}` });
+    assert.equal(r.ok, false);
+    assert.match(r.message, /no password in it/);
+  });
+
+  test("a placeholder somewhere other than the password", () => {
+    /* Fails DNS rather than authentication, so it needs its own message. */
+    const r = load({ ...DEPLOYED, DATABASE_URL: `postgresql://postgres.[YOUR-PROJECT-REF]:realpw@${POOLER}` });
+    assert.equal(r.ok, false);
+    assert.match(r.message, /placeholder in it, outside the password/);
+  });
+
+  test("a placeholder word is refused without being echoed into the log", () => {
+    /* It matches the same pattern, and it could just conceivably be somebody's
+       real and terrible password. Refused, but not repeated back. */
+    const r = load({ ...DEPLOYED, DATABASE_URL: `postgresql://postgres.abc:password@${POOLER}` });
+    assert.equal(r.ok, false);
+    assert.match(r.message, /placeholder word, not a password/);
+    assert.ok(!/"password"/.test(r.message), "a credential must not be quoted into the message");
+  });
+
+  test("a string that is not a URL at all", () => {
+    const r = load({ ...DEPLOYED, DATABASE_URL: "paste failed" });
+    assert.equal(r.ok, false);
+    assert.match(r.message, /not a URL that can be parsed/);
+  });
+
+  test("a real credential is left alone", () => {
+    const r = load({ ...DEPLOYED, DATABASE_URL: `postgresql://postgres.abc:aReal-P4ssw0rd@${POOLER}` });
+    assert.equal(r.ok, true);
+  });
+
+  test("a local database with no password still starts", () => {
+    /* Peer and trust authentication carry no password, which is correct. The
+       requirement applies to a remote database only — breaking this would
+       break every laptop and the suite itself. */
+    for (const url of [
+      "postgresql://localhost:5432/dev",
+      "postgresql://localhost/dev",
+      "postgresql://127.0.0.1:5432/dev",
+      "postgresql://[::1]:5432/dev",
+    ]) {
+      const r = load({ DATABASE_URL: url });
+      assert.equal(r.ok, true, `${url} must be accepted`);
+    }
+  });
+});
+
 describe("config accepts a usable environment", () => {
   test("a local development setup", () => {
     const r = load({ DATABASE_URL: "postgresql://localhost:5432/dev" });

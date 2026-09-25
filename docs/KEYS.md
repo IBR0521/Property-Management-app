@@ -134,6 +134,37 @@ drop refuses to run unless the pool was built from it).
 
 ---
 
+## If every page says the database is not reachable
+
+Static pages (`/`, `/signup`, anything under `/assets/`) keep working, because
+they need no database. Everything else stops. The cause is almost always one
+character in `DATABASE_URL`.
+
+**Check it without deploying anything.** Put the production value in
+`.env.production.local` — gitignored, never committed — and run:
+
+```bash
+node --env-file=.env.production.local scripts/migrate.js --dry-run
+```
+
+That loads the real configuration, validates it, connects, and prints which
+database it reached and what is pending. It changes nothing. It names the
+problem directly if there is one:
+
+| What it says | What happened |
+|---|---|
+| `still contains the placeholder password "[YOUR-PASSWORD]"` | Supabase's Connect panel shows the string with the password left for you to fill in. It was pasted as it came. |
+| `has no password in it` | The password was deleted but the rest of the string kept. |
+| `still has a placeholder in it, outside the password` | The project reference or region was not substituted either. |
+| `password authentication failed` | The password is real but not current — the string predates a reset. |
+| `CONNECT_TIMEOUT` | Reached the network and not the database. The transaction pooler answers on **IPv6** by default; from an IPv4-only network you need Supabase's IPv4 add-on, or the Session pooler. |
+| `Tenant or user not found` | The user part is wrong. It is `postgres.<project-ref>`, not `postgres`. |
+
+`/health` reports the same thing from the deployed app, as JSON, and needs no
+sign-in — it is the first thing to open when a deployment misbehaves.
+
+---
+
 ## The shortest path to a working product
 
 1. **Rotate** the service-role key and the database password.

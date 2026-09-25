@@ -67,6 +67,81 @@ function resolveDatabaseUrl() {
       "    Supabase -> Project Settings -> Database -> Connection string -> Transaction pooler.");
     return null;
   }
+  /* The credential has to be a credential.
+
+     Supabase's Connect panel hands you the string with the password left as a
+     literal `[YOUR-PASSWORD]`, because it does not know it. Pasted as it comes,
+     everything here passes: the variable is set, the shape is right, the port
+     is the pooler's. The application then boots, and every page that touches
+     the database answers "Something broke" while /health quietly reports
+     `(ENOTFOUND) tenant/user ... not found`. Hours, to find a pair of square
+     brackets.
+
+     That is precisely the failure this file exists to prevent, so it is
+     checked here: a placeholder is not a password, and an unparseable URL is
+     not a URL. Both are boot failures with the remedy in them. */
+  let parsed = null;
+  try {
+    parsed = new URL(url);
+  } catch {
+    problems.push(
+      "DATABASE_URL is not a URL that can be parsed.\n" +
+      "    Expected postgresql://user:password@host:6543/postgres");
+    return null;
+  }
+
+  /* decodeURIComponent because the brackets arrive percent-encoded. */
+  let password = parsed.password;
+  try { password = decodeURIComponent(password); } catch { /* leave it as-is */ }
+
+  const PLACEHOLDER = /^[[<{(]?\s*(your[-_ ]?)?(password|db[-_ ]?password|pass|pwd|project[-_ ]?ref|region)\s*[\]>})]?$/i;
+
+  /* A local Postgres authenticates by peer or trust and has no password in the
+     string at all, which is correct and must keep working. Only a remote
+     database needs a credential. */
+  const localHost = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(parsed.hostname);
+
+  if (!password && !localHost) {
+    problems.push(
+      "DATABASE_URL has no password in it.\n" +
+      "    Supabase -> Connect -> Transaction pooler, and replace [YOUR-PASSWORD]\n" +
+      "    with the database password. Reset it there if you no longer have it.");
+    return null;
+  }
+  if (PLACEHOLDER.test(password)) {
+    /* Quoted back only when it is bracketed, which is what a template looks
+       like and what makes it findable in a long string. An unbracketed match
+       ("password", "pwd") is refused for the same reason but not echoed: it
+       could conceivably be somebody's real, terrible password, and this file
+       goes to lengths elsewhere not to put a credential in a log. */
+    const headline = /[[<{(]/.test(password)
+      ? `DATABASE_URL still contains the placeholder "${password}" where the password goes.`
+      : "DATABASE_URL's password is a placeholder word, not a password.";
+    problems.push(
+      `${headline}\n` +
+      "    Supabase shows the connection string with the password left blank for\n" +
+      "    you to fill in. Replace it with the real one — Supabase -> Database ->\n" +
+      "    Settings -> Reset database password if you no longer have it.");
+    return null;
+  }
+
+  /* The host is handed over with placeholders too, and a project reference
+     left unsubstituted fails DNS rather than authentication — a different
+     message for the same mistake. */
+  const stillTemplated = /[[<{]|your[-_]?project|project[-_]?ref/i;
+  const user = (() => {
+    try { return decodeURIComponent(parsed.username); } catch { return parsed.username; }
+  })();
+  /* `[::1]` is a bracketed hostname that is not a placeholder, so a local
+     connection over IPv6 is exempt rather than refused. */
+  if (!localHost && (stillTemplated.test(parsed.hostname) || stillTemplated.test(user))) {
+    problems.push(
+      "DATABASE_URL still has a placeholder in it, outside the password:\n" +
+      `    user ${user || "(none)"} at host ${parsed.hostname}\n` +
+      "    Copy the whole string from Supabase -> Connect -> Transaction pooler.");
+    return null;
+  }
+
   /* Port 5432 is the direct connection. It works locally and exhausts its
      connection limit within minutes of a serverless deploy, by which time the
      cause is hours behind you. A warning rather than an error, because a local
