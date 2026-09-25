@@ -52,7 +52,8 @@ export function registerOwners(router) {
                 <td>${usd(o.approval_threshold_cents)}</td>
                 <td>${o.last_statement ? human(o.last_statement) : html`<span style="color:var(--ink-soft)">never</span>`}</td>
                 <td class="shrink">${o.pending ? html`<span class="chip" data-tone="warn">${o.pending} waiting</span>` : ""}</td>
-                <td class="shrink"><a class="pill outline sm" href="/app/owners/${o.id}">Open</a></td>
+                <td class="shrink"><a class="pill outline sm" href="/app/owners/${o.id}"
+                  ${attr("aria-label", `Open ${o.name}`)}>Open</a></td>
               </tr>`)}</tbody>
           </table></div>` : empty("No owners yet", "Add an owner first — a building has to belong to somebody.")}
         </div></div>`,
@@ -187,7 +188,8 @@ export function registerOwners(router) {
                         <span class="cellsub">${s.sent_at ? `sent ${humanStamp(s.sent_at)}` : "not sent"}</span></td>
                       <td class="num">${usd(t.net)}</td>
                       <td class="shrink">
-                        <a class="pill outline sm" href="/o/s/${s.token}" target="_blank">View</a>
+                        <a class="pill outline sm" href="/o/s/${s.token}" target="_blank"
+                          ${attr("aria-label", `View the statement for ${human(s.period_start)} to ${human(s.period_end)}`)}>View</a>
                         <a class="pill outline sm" href="/app/owners/${owner.id}/statements/${s.id}/pdf">PDF</a>
                       </td>
                     </tr>`;

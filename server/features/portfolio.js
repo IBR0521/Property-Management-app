@@ -564,7 +564,8 @@ export function registerPortfolio(router) {
       title: `${u.line1}${u.label ? ` · unit ${u.label}` : ""}`,
       subtitle: `${u.city}, ${u.state} ${u.zip} · owned by ${u.owner_name}`,
       actions: html`
-        <a class="pill outline sm" href="/app/portfolio/u/${u.id}/edit">Edit</a>
+        <a class="pill outline sm" href="/app/portfolio/u/${u.id}/edit"
+          ${attr("aria-label", `Edit unit ${u.label || ""}`)}>Edit</a>
         ${lease ? "" : html`<a class="pill outline sm" href="/app/portfolio/u/${u.id}/movein">Move someone in</a>`}
         <a class="pill outline sm" href="/app/portfolio/labels?property=${u.property_id}">QR label</a>
         <a class="pill solid sm" href="/app/maintenance/new">Log a repair</a>`,
@@ -724,7 +725,8 @@ export function registerPortfolio(router) {
             <div class="panel">
               <div class="panel__head">
                 <h2>Building</h2>
-                <a class="pill outline sm" href="/app/portfolio/p/${u.property_id}/edit">Edit</a>
+                <a class="pill outline sm" href="/app/portfolio/p/${u.property_id}/edit"
+                  ${attr("aria-label", `Edit the building ${u.line1 || ""}`)}>Edit</a>
               </div>
               <div class="panel__body">
                 <dl class="dl">

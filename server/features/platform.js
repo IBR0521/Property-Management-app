@@ -126,7 +126,8 @@ export function registerPlatform(router) {
                 <td><span class="chip"${attr("data-tone", status.tone)}>${c.sub_status || "none"}</span>
                   ${plan ? html`<span class="cellsub">${plan.name} · ${usd(plan.monthlyCents)}</span>` : ""}</td>
                 <td class="shrink">
-                  <a class="pill outline sm" href="/app/platform/c/${c.id}">Open</a>
+                  <a class="pill outline sm" href="/app/platform/c/${c.id}"
+                  ${attr("aria-label", `Open ${c.name}`)}>Open</a>
                 </td>
               </tr>`;
             })}</tbody>

@@ -91,7 +91,8 @@ export function registerDeposits(router) {
                       : html`<span class="cellsub">no rule set</span>`}</td>
                     <td class="num">${usd(r.held_cents)}</td>
                     <td class="num">${Number(r.deducted) ? usd(r.deducted) : "—"}</td>
-                    <td class="shrink"><a class="pill outline sm" href="/app/deposits/${r.id}">Open</a></td>
+                    <td class="shrink"><a class="pill outline sm" href="/app/deposits/${r.id}"
+                  ${attr("aria-label", `Open the deposit return for ${r.line1 || "this home"}`)}>Open</a></td>
                   </tr>`;
               })}</tbody>
             </table></div>` : empty("Nothing open",

@@ -1,5 +1,11 @@
 # What is hard to understand, and why
 
+> **Fixed.** Everything below was measured before the work and has been acted
+> on. The audits re-run on demand: the navigation pass went from 15 findings
+> to 7, the full-surface pass from 30 to 9, and the residue is listed at the
+> end. What changed, with the numbers, is in "What was done" below.
+
+
 Measured, not felt. Every number below came from walking the running
 application against a real portfolio — 2,000 units, 2,200 open items — and
 every finding names the route it came from so none of it has to be taken on
@@ -332,3 +338,92 @@ against the 2,000-unit portfolio. Re-run it with:
     createdb propops_ux_test
     sed 's/propops_test/propops_ux_test/' .env.test > .env.ux
     node --env-file=.env.ux scripts/uxaudit.js
+
+
+---
+
+# What was done
+
+Measured before and after, on the same 2,000-unit portfolio.
+
+## The phone
+
+| | before | after |
+|---|---:|---:|
+| Navigation height (375×812) | 1,118px | **305px** |
+| Content starts at | 1,279px | **472px** |
+| Screens of menu first | 1.6 | **0.57** |
+
+Folded behind one "Menu" row below 60rem, always open above it, with a badge
+carrying the counts it is hiding. A checkbox rather than a script — and
+rather than `<details>`, which was tried first and cannot work: a browser
+hides a closed disclosure's content itself, so there is no way to force it
+open on a desktop, and the sidebar vanished. A checkbox can be overridden by
+a media query and is operated by the keyboard for nothing.
+
+## The queue
+
+| | before | after |
+|---|---:|---:|
+| Rows rendered | 2,200 | **50** |
+| HTML | 1.85 MB | **55 KB** |
+| Page height | 192,165px | **10,129px** |
+
+Twenty-five per section, in the order the work should be done in, with a foot
+that says how many are below and that the list shortens from the top.
+
+## Names
+
+Two menu items called "People" became **Owners** and **Your team**. Six
+menu-versus-page mismatches gone, on one rule: **the page's name is its
+heading, and its state goes in the subtitle**. So Queue is "Queue" with "2200
+things need you · 25 Sep 2026" beneath, Accounting is "Accounting" with the
+trial balance as a tab, Banking is "Banking", Vacancies is "Vacancies", and
+"Your jobs" keeps its name when it is empty.
+
+The five settings pages moved under a **Settings** heading; the longest
+unnamed run went from eight items to three.
+
+And "1 thing need you" — the noun pluralised and the verb not — is fixed.
+
+## Words
+
+- **Every 403 said "Expired"**, so somebody refused a page was told their
+  session had run out and signed in again to no effect. The heading now
+  follows the cause: a stale form, a lost session, or no access.
+- **Seventeen verb-only controls** — "Open", "Edit", "View" — now name what
+  they act on. The visible word stays short because in a table row the object
+  is the row; what was missing was the object anywhere at all.
+- **Empty states** on Messages, Sent and Failed said an absence and stopped.
+  They say what puts something there.
+- **The journal form** — 22 fields, the most consequential screen in the
+  product, and not one field explained — now says what the date is for, that
+  amounts are always positive, which way a debit moves, and that a posted
+  journal can only be mirrored, never edited.
+- **Three irreversible actions** — void a lease, revoke access, cancel a
+  request — say what they do and whether it can be undone.
+
+## The tenant
+
+Their home screen showed the figures and put every action behind a button
+labelled "Open". It now offers the two things a tenant ever needs — **Pay
+rent** and **Report a repair** — with "Everything else" leading to the rest.
+
+## Smaller
+
+A rent roll of $2,399,550.00 no longer overflows its tile. Rendered documents
+start their headings at `h2`, so a lease no longer gives its page a second
+`h1`.
+
+## What is left, and why
+
+Nine findings, all threshold artefacts or deliberate:
+
+- `/app/maintenance` has a control labelled "Open" — it is the **filter**
+  (open jobs versus closed), which is the correct word.
+- Four empty states on `/o/s/:tok`, `/app/compliance`, `/app/vendors/1099`
+  and `/portal/sent` are terse but not silent.
+- `/app/portfolio/u/:id` has five fields without help, in an inline edit
+  panel where the labels are the whole story.
+
+Nothing about colour, spacing or typography was changed.

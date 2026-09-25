@@ -317,7 +317,8 @@ export function registerLeases(router) {
                 <td><span class="chip"${attr("data-tone",
                   d.status === "signed" ? "ok" : d.status === "void" ? null : "warn")}>${d.status.replace(/_/g, " ")}</span></td>
                 <td class="num">${d.signatures}</td>
-                <td class="shrink"><a class="pill outline sm" href="/app/leases/d/${d.id}">Open</a></td>
+                <td class="shrink"><a class="pill outline sm" href="/app/leases/d/${d.id}"
+                  ${attr("aria-label", `Open the document ${d.title}`)}>Open</a></td>
               </tr>`)}</tbody></table></div>`
             : empty("No documents yet", "Create a template first, then build a document from it.")}
         </div></div>`,
@@ -460,6 +461,9 @@ export function registerLeases(router) {
                     <div class="field">
                       <label for="reason">Reason</label>
                       <input id="reason" name="reason" type="text" required maxlength="200" />
+                      <span class="field__help">Voiding cannot be undone. The document and
+                        any signatures on it stay on the record, marked void with this
+                        reason — send a fresh one to replace it.</span>
                     </div>
                     <button class="pill outline" type="submit">Void</button>
                   </form>
@@ -525,7 +529,8 @@ export function registerLeases(router) {
                 <td><a href="/app/leases/templates/${t.id}">${t.name}</a></td>
                 <td>${t.kind}</td>
                 <td><span class="cellsub">${tokensUsed(t.body_md).length} fields</span></td>
-                <td class="shrink"><a class="pill outline sm" href="/app/leases/templates/${t.id}">Edit</a></td>
+                <td class="shrink"><a class="pill outline sm" href="/app/leases/templates/${t.id}"
+                  ${attr("aria-label", `Edit the template ${t.name}`)}>Edit</a></td>
               </tr>`)}</tbody></table></div>`
             : empty("No templates yet", "A template is the lease text with {{fields}} where the details go.")}
         </div></div>`,

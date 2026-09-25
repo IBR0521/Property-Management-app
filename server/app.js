@@ -443,6 +443,24 @@ async function handleRequest(req, res) {
   }
 }
 
+/* What actually went wrong, rather than one word for every 403.
+
+   Every refusal used to be headed "Expired". That is right for a form whose
+   token has gone stale and wrong for everything else — and the everything
+   else is the common case. Somebody who may not open a page was told their
+   session had run out, so they signed in again and got the same page: the
+   cause was wrong and the remedy it implied did not work.
+
+   The message already says which it is; this only has to agree with it. */
+function headingFor(status, message) {
+  if (status === 404) return "Not found";
+  if (status !== 403) return "Something broke";
+  const m = String(message || "").toLowerCase();
+  if (/expired|reload|go back/.test(m)) return "This form expired";
+  if (/sign in|signed in|session/.test(m)) return "Please sign in again";
+  return "You do not have access to this";
+}
+
 function errorPage(status, message, requestId, staff = null) {
   const esc = (v) => String(v).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
   const safe = esc(message);
@@ -451,5 +469,5 @@ function errorPage(status, message, requestId, staff = null) {
   const ref = status >= 500 && requestId
     ? `<p style="margin-top:1rem;font-size:0.75rem;color:var(--ink-soft)">Reference <code>${esc(requestId)}</code> — quote this if you contact us.</p>`
     : "";
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${status}</title><link rel="stylesheet" href="/assets/css/styles.css"><link rel="stylesheet" href="/app-assets/app.css"></head><body><div class="pub" style="max-width:30rem"><h1>${status === 404 ? "Not found" : status === 403 ? "Expired" : "Something broke"}</h1><p class="lede">${safe}</p>${ref}<p style="margin-top:1.5rem"><a class="pill solid" href="${staff ? landingFor(staff) : "/app"}">Back to the app</a></p></div></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${status}</title><link rel="stylesheet" href="/assets/css/styles.css"><link rel="stylesheet" href="/app-assets/app.css"></head><body><div class="pub" style="max-width:30rem"><h1>${headingFor(status, message)}</h1><p class="lede">${safe}</p>${ref}<p style="margin-top:1.5rem"><a class="pill solid" href="${staff ? landingFor(staff) : "/app"}">Back to the app</a></p></div></body></html>`;
 }

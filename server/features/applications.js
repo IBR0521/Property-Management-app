@@ -310,7 +310,8 @@ export function registerApplications(router) {
                 <td class="shrink"><span class="chip"${attr("data-tone", STATUS_TONE[a.status])}>${a.status}</span>
                   ${a.notice_due ? html`<span class="cellsub" style="color:var(--danger)">adverse
                     action notice due</span>` : ""}</td>
-                <td class="shrink"><a class="pill outline sm" href="/app/applications/${a.id}">Open</a></td>
+                <td class="shrink"><a class="pill outline sm" href="/app/applications/${a.id}"
+                  ${attr("aria-label", `Open ${a.applicant_name}’s application`)}>Open</a></td>
               </tr>`)}</tbody>
           </table></div>` : empty("No applications", "The public form is at /apply.")}
         </div></div>`,

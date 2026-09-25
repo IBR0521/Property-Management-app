@@ -103,7 +103,7 @@ export function registerStaff(router) {
 
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "staff", counts: await navCounts(cid),
-      title: "People", subtitle: `${people.filter((p) => p.active).length} active`,
+      title: "Your team", subtitle: `${people.filter((p) => p.active).length} active`,
       body: html`
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
 
@@ -165,7 +165,9 @@ export function registerStaff(router) {
                         </form>
                         <form method="post" action="/app/staff/invite/${i.id}/revoke">
                           <input type="hidden" name="_csrf" value="${ctx.csrf}" />
-                          <button class="pill outline sm" type="submit">Revoke</button>
+                          <button class="pill outline sm" type="submit"
+                                  aria-label="Revoke the invitation to ${i.email}"
+                                  title="The link stops working. You can invite them again.">Revoke</button>
                         </form>
                       </div>
                     </td>
@@ -184,6 +186,8 @@ export function registerStaff(router) {
                 <div class="field">
                   <label for="email">Their email</label>
                   <input id="email" name="email" type="email" required maxlength="160" />
+                  <span class="field__help">The invitation goes here, and it is what they
+                    will sign in with. It expires if nobody uses it.</span>
                 </div>
                 <div class="field">
                   <label for="name">Their name <span style="color:var(--ink-soft);font-weight:400">(optional)</span></label>

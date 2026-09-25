@@ -369,7 +369,8 @@ export function registerVendors(router) {
                 <td>${s.canDispatch && s.canBePaid
                   ? html`<span class="chip" data-tone="ok">clear</span>`
                   : html`<span class="chip" data-tone="danger">${s.canDispatch ? "no payouts" : "blocked"}</span>`}</td>
-                <td class="shrink"><a class="pill outline sm" href="/app/vendors/${v.id}">Open</a></td>
+                <td class="shrink"><a class="pill outline sm" href="/app/vendors/${v.id}"
+                  ${attr("aria-label", `Open ${v.name}`)}>Open</a></td>
               </tr>`)}</tbody></table></div>`
             : empty("No contractors yet", "Add the trades you actually call.")}
         </div></div>`,

@@ -99,7 +99,8 @@ export function registerPortalTenant(router) {
                         <td>${human(l.start_date)}</td>
                         <td>${l.end_date ? human(l.end_date) : "—"}</td>
                         <td class="shrink">
-                          <a class="pill outline sm" href="/portal/renting/${l.id}">Open</a>
+                          <a class="pill outline sm" href="/portal/renting/${l.id}"
+                             ${attr("aria-label", `Open ${l.line1 || "this tenancy"}`)}>Open</a>
                         </td>
                       </tr>`)}
                   </tbody>
@@ -218,10 +219,17 @@ function tenancyCard({ lease, balance, company }) {
         : ""}
       <div class="panel__foot">
         <div class="btnrow">
-          <a class="pill solid sm" href="/portal/renting/${lease.id}">Open</a>
+          <!-- The two things a tenant ever needs are paying rent and saying
+               something is broken. Both used to be one click behind a button
+               labelled "Open", on a screen that showed the figures and
+               offered no way to act on them. Paying leads, because it is the
+               one with a date on it. -->
           ${Number(lease.payments_blocked)
             ? ""
-            : html`<a class="pill outline sm" href="/pay/${lease.pay_token}">Pay rent</a>`}
+            : html`<a class="pill solid sm" href="/pay/${lease.pay_token}">Pay rent</a>`}
+          <a class="pill outline sm" href="/report">Report a repair</a>
+          <a class="pill outline sm" href="/portal/renting/${lease.id}"
+             aria-label="Everything about ${lease.line1}${lease.label ? `, unit ${lease.label}` : ""}">Everything else</a>
         </div>
       </div>
     </div>`;

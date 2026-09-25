@@ -52,6 +52,45 @@ body{ background:var(--surface); }
 }
 @media (max-width:60rem){ .shell__nav{ position:static; height:auto; } }
 
+/* The menu, folded on a phone and open everywhere else.
+
+   Above 60rem the toggle and its button are not rendered at all and the links
+   are always shown, so a desktop sees exactly the sidebar it always had.
+   Below it they fold behind one row, because stacked they put the page 1.6
+   screens down.
+
+   The checkbox is visually hidden rather than removed: a keyboard has to be
+   able to reach it, and `display:none` would take it out of the tab order. */
+.shell__toggle, .shell__menubtn{ display:none; }
+
+@media (max-width:60rem){
+  .shell__toggle{
+    display:block; position:absolute; width:1px; height:1px;
+    margin:-1px; padding:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap;
+  }
+  .shell__menubtn{
+    display:flex; align-items:center; gap:0.625rem; cursor:pointer;
+    padding:0.75rem 0.875rem; margin:0 0.5rem 0.5rem;
+    border-radius:var(--radius-xl); color:#fff; font-size:0.9375rem;
+    background:rgba(255,255,255,.08);
+  }
+  .shell__menubtn svg{ width:1.125rem; height:1.125rem; flex:none; }
+  /* The disclosure mark, drawn with the type so it turns with the state and
+     needs nothing loaded. */
+  .shell__menubtn::after{ content:"⌄"; margin-left:0.5rem; font-size:1.125rem; line-height:1; }
+  .shell__toggle:checked ~ .shell__menubtn::after{ content:"⌃"; }
+  .shell__toggle:focus-visible ~ .shell__menubtn{ outline:2px solid #fff; outline-offset:2px; }
+  .shell__menucount{
+    margin-left:auto; font-size:0.75rem; font-weight:500;
+    background:var(--danger); color:#fff; border-radius:var(--radius-pill);
+    padding:0.0625rem 0.4375rem; min-width:1.25rem; text-align:center;
+  }
+  .shell__menucount:empty{ display:none; }
+
+  .shell__toggle:not(:checked) ~ .shell__links{ display:none; }
+}
+}
+
 .shell__brand{
   display:flex; align-items:center; gap:0.625rem;
   padding:0 0.5rem 1.25rem;
@@ -138,7 +177,15 @@ body{ background:var(--surface); }
   font-size:0.6875rem; font-weight:500; text-transform:uppercase; letter-spacing:0.12em;
   color:var(--ink-soft);
 }
-.tile__value{ display:block; font-size:1.875rem; font-weight:500; letter-spacing:-0.02em; margin-top:0.375rem; line-height:1.1; }
+.tile__value{
+  display:block; font-size:1.875rem; font-weight:500; letter-spacing:-0.02em;
+  margin-top:0.375rem; line-height:1.1;
+  /* A rent roll of $2,399,550.00 overflowed its tile and was cut off at the
+     edge. Money is the one thing on these tiles nobody can guess from the
+     part they can see, so it shrinks to fit rather than being clipped. */
+  overflow-wrap:anywhere;
+  font-size:clamp(1.25rem, 4.2vw, 1.875rem);
+}
 .tile__note{ display:block; font-size:0.8125rem; color:var(--ink-soft); margin-top:0.25rem; }
 .tile[data-tone="danger"]{ border-color:var(--danger-line); background:var(--danger-wash); }
 .tile[data-tone="danger"] .tile__value{ color:var(--danger); }

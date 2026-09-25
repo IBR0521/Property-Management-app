@@ -67,7 +67,16 @@ export function markdownToHtml(md) {
     const heading = line.match(/^(#{1,4})\s+(.*)$/);
     if (heading) {
       closeParagraph(); closeList();
-      const level = heading[1].length;
+      /* One level down from what was written.
+
+         This output is always placed inside a page that already has its own
+         `h1` — the document's title, or the screen's. A lease template that
+         opens with `# Lease` produced a second top-level heading, so neither
+         was the name of the page and a screen reader offered two.
+
+         Demoting here rather than asking template authors to start at `##`
+         keeps the markdown they write ordinary. */
+      const level = Math.min(heading[1].length + 1, 6);
       out.push(`<h${level}>${inline(heading[2])}</h${level}>`);
       continue;
     }

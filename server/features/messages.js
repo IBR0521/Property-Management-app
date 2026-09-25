@@ -197,8 +197,19 @@ async function renderList(ctx, view) {
               </td>
             </tr>`)}</tbody>
         </table></div>` : empty(
-          view === "queued" ? "Nothing queued" : view === "dead" ? "Nothing failed" : "Nothing sent yet",
-          view === "dead" ? "Every message either went out or is still waiting." : null)}
+          view === "queued" ? "Nothing waiting to go out"
+            : view === "dead" ? "Nothing failed" : "Nothing sent yet",
+          /* Each of these says what would put something here. An empty state
+             that only reports an absence leaves somebody wondering whether
+             the feature is broken or they have not found the button. */
+          view === "dead"
+            ? "Nothing has given up. Anything that fails appears here with the reason, "
+              + "so you can fix the address and send it again."
+            : view === "queued"
+              ? "Rent notices, repair updates and anything you send by hand wait here "
+                + "until the next send. They usually leave within a few minutes."
+              : "Messages appear here once they go out, with exactly what was sent — "
+                + "which is the record that matters if anybody asks later.")}
       </div></div>`,
   }));
 }

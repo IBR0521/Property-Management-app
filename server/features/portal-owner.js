@@ -238,7 +238,8 @@ function propertiesPanel(properties) {
                       <td>${p.units}</td>
                       <td>${p.occupied}${Number(p.units) && Number(p.occupied) === Number(p.units)
                         ? html` <span class="chip" data-tone="ok">full</span>` : ""}</td>
-                      <td class="shrink"><a class="pill outline sm" href="/portal/owning/${p.id}">Open</a></td>
+                      <td class="shrink"><a class="pill outline sm" href="/portal/owning/${p.id}"
+                  ${attr("aria-label", `Open ${p.line1 || "this property"}`)}>Open</a></td>
                     </tr>`)}
                 </tbody>
               </table>

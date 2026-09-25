@@ -101,7 +101,8 @@ export function registerRent(router) {
                         : html`<span class="chip">in grace</span>`}</td>
                     <td class="shrink">
                       ${l.delinquency_id
-                        ? html`<a class="pill outline sm" href="/app/rent/${l.delinquency_id}">Open</a>`
+                        ? html`<a class="pill outline sm" href="/app/rent/${l.delinquency_id}"
+                            ${attr("aria-label", `Open the arrears case for ${l.line1 || "this home"}`)}>Open</a>`
                         : html`<a class="pill outline sm" href="/app/rent/record?lease=${l.id}&period=${period}">Record payment</a>`}
                     </td>
                   </tr>`;

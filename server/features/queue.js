@@ -19,6 +19,30 @@ const ICON = {
   blocked: "alert", rent: "cash", turn: "loop", application: "inbox",
 };
 
+/* How many of a section to draw.
+
+   The queue rendered everything it had. At 2,200 open items that was 2,200
+   rows, 1.85MB of HTML and a page 192,000 pixels tall — and more to the
+   point, "2,200 things need you" is not an instruction, it is a wall. There
+   is no first thing to do on a page that long.
+
+   The list is already in the order the work should be done in, so the top of
+   it is the answer and the rest is a number. */
+const SHOWN = 25;
+
+const shownOf = (list) => list.length > SHOWN
+  ? `the ${SHOWN} most urgent of ${list.length}`
+  : String(list.length);
+
+const moreFoot = (list, which) => list.length <= SHOWN ? "" : html`
+  <div class="panel__foot">
+    ${list.length - SHOWN} more, in the same order. The oldest and the most
+    serious are above — work down and this list shortens from the top.
+    ${which === "now"
+      ? html` Everything here is an emergency, past a deadline, or somebody waiting on an answer.`
+      : ""}
+  </div>`;
+
 export function registerQueue(router) {
   router.get("/app", async (ctx) => {
     const cid = ctx.staff.company_id;
@@ -48,8 +72,17 @@ export function registerQueue(router) {
 
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "queue", counts: await navCounts(cid),
-      title: items.length ? `${items.length} thing${items.length === 1 ? "" : "s"} need you` : "Nothing needs you",
-      subtitle: human(today()),
+      /* The page is called Queue, because that is what the menu calls it and
+         a screen whose name changes with its contents has no name. What is on
+         it goes in the subtitle, where a count belongs.
+
+         The old heading also read "1 thing need you": the noun was pluralised
+         and the verb was not. */
+      title: "Queue",
+      subtitle: items.length
+        ? `${items.length} thing${items.length === 1 ? "" : "s"} ${
+          items.length === 1 ? "needs" : "need"} you · ${human(today())}`
+        : `Nothing needs you · ${human(today())}`,
       actions: html`
         <a class="pill outline" href="/report" target="_blank">Tenant form</a>
         <a class="pill solid" href="/app/maintenance/new">Log a repair</a>`,
@@ -106,14 +139,22 @@ export function registerQueue(router) {
 
         ${now.length ? html`
           <div class="panel">
-            <div class="panel__head"><h2>Needs you now</h2><p>${now.length}</p></div>
-            <ul class="qlist">${now.map(row)}</ul>
+            <div class="panel__head">
+              <h2>Needs you now</h2>
+              <p>${shownOf(now)}</p>
+            </div>
+            <ul class="qlist">${now.slice(0, SHOWN).map(row)}</ul>
+            ${moreFoot(now, "now")}
           </div>` : ""}
 
         ${later.length ? html`
           <div class="panel">
-            <div class="panel__head"><h2>Then</h2><p>${later.length}</p></div>
-            <ul class="qlist">${later.map(row)}</ul>
+            <div class="panel__head">
+              <h2>Then</h2>
+              <p>${shownOf(later)}</p>
+            </div>
+            <ul class="qlist">${later.slice(0, SHOWN).map(row)}</ul>
+            ${moreFoot(later, "then")}
           </div>` : ""}`,
     }));
   });

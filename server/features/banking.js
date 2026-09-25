@@ -555,7 +555,7 @@ export function registerBanking(router) {
 
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "banking", counts: await navCounts(cid),
-      title: "Reconcile",
+      title: "Banking",
       subtitle: `${txns.length} bank line${txns.length === 1 ? "" : "s"} not yet matched`,
       body: html`
         ${tabs(BANK_TABS, "reconcile")}

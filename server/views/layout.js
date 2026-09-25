@@ -54,7 +54,7 @@ export const NAV = [
     { href: "/app", key: "queue", icon: "inbox", label: "Queue", badge: "queue" },
     { href: "/app/portfolio", key: "properties", icon: "home", label: "Properties", badge: "properties" },
     { href: "/app/inbox", key: "inbox", icon: "send", label: "Inbox", badge: "inbox" },
-    { href: "/app/owners", key: "people", icon: "users", label: "People", badge: "people", need: "money.view" },
+    { href: "/app/owners", key: "people", icon: "users", label: "Owners", badge: "people", need: "money.view" },
   ] },
   { group: "Money", items: [
     { href: "/app/accounting", key: "accounting", icon: "cash", label: "Accounting", need: "money.view" },
@@ -72,7 +72,12 @@ export const NAV = [
     { href: "/app/reports", key: "reports", icon: "doc", label: "Reports", when: hasAnyReport },
     { href: "/app/jobs", key: "jobs", icon: "wrench", label: "Your jobs", need: "maintenance.own" },
     { href: "/app/messages", key: "messages", icon: "send", label: "Messages" },
-    { href: "/app/staff", key: "staff", icon: "users", label: "People", need: "staff.manage" },
+  ] },
+  /* The five settings pages, which were loose in the list above. "Where do I
+     change the company address" was answered by reading all twenty items,
+     because nothing said which of them were settings. */
+  { group: "Settings", items: [
+    { href: "/app/staff", key: "staff", icon: "users", label: "Your team", need: "staff.manage" },
     { href: "/app/company", key: "company", icon: "home", label: "Company", need: "settings.manage" },
     { href: "/app/billing", key: "billing", icon: "cash", label: "Billing", need: "settings.manage" },
     { href: "/app/company/access", key: "access", icon: "shield", label: "Support access", need: "settings.manage" },
@@ -102,6 +107,20 @@ export const tabs = (items, current) => html`
       <a class="tab" href="${t.href}"${attr("aria-current", t.key === current ? "page" : null)}>${t.label}</a>`)}
   </nav>`;
 
+/* What the folded menu is hiding. Without it a phone shows a closed "Menu"
+   and no sign that four things are waiting inside it. */
+function navTotal(staff, counts) {
+  let n = 0;
+  for (const group of NAV) {
+    for (const item of group.items) {
+      if (!item.badge) continue;
+      const c = counts && counts[item.badge];
+      if (c && c.n) n += Number(c.n);
+    }
+  }
+  return n || "";
+}
+
 function navBadge(counts, key) {
   const c = counts && counts[key];
   if (!c || !c.n) return "";
@@ -129,6 +148,25 @@ ${impersonation ? html`
       ${icons.logo}
       <span><b>${staff.company_name}</b><span>Property operations</span></span>
     </div>
+
+    <!-- On a phone this column stacks above the page, so an administrator's
+         twenty-one links pushed the content 1.6 screens down and every visit
+         began with a scroll past sections they had not come for. Folded below
+         60rem, always open above it.
+
+         A checkbox rather than <details>, and rather than a script. <details>
+         was tried first and cannot work here: the browser hides a closed
+         disclosure's content itself, so there is no way to force it open on a
+         desktop — the sidebar vanished. A checkbox can be overridden by a
+         media query, needs no JavaScript, and is operated by the keyboard for
+         nothing. It is visually hidden rather than display:none so that it
+         stays focusable. -->
+    <input type="checkbox" id="shellmenu" class="shell__toggle" />
+    <label class="shell__menubtn" for="shellmenu">
+      ${icons.inbox}<span>Menu</span>
+      <span class="shell__menucount">${navTotal(staff, counts)}</span>
+    </label>
+    <div class="shell__links">
 
     ${NAV.map((group) => {
       // Hidden, not disabled: the routing gate is the enforcement, this just
@@ -160,6 +198,7 @@ ${impersonation ? html`
         )}
       </div>`;
     })}
+    </div>
 
     <div class="shell__foot">
       <a class="shell__who" href="/app/account" style="display:block;text-decoration:none">

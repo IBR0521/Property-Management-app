@@ -68,6 +68,8 @@ export function registerCompany(router) {
                 <div class="field">
                   <label for="phone">Phone</label>
                   <input id="phone" name="phone" type="tel" value="${company.phone || ""}" />
+                  <span class="field__help">Your ordinary number, on statements and the
+                    foot of every page a tenant or owner sees.</span>
                 </div>
                 <div class="field">
                   <label for="emergency_phone">Emergency number</label>
@@ -80,10 +82,13 @@ export function registerCompany(router) {
               <div class="field">
                 <label for="address">Address</label>
                 <input id="address" name="address" type="text" maxlength="240" value="${company.address || ""}" />
+                <span class="field__help">Where post reaches you. It goes on leases and on
+                  notices, so it wants to be the address you would accept mail at.</span>
               </div>
               <div class="field">
                 <label for="website">Website</label>
                 <input id="website" name="website" type="url" maxlength="240" value="${company.website || ""}" />
+                <span class="field__help">Optional. Linked from your public listings page.</span>
               </div>
             </div>
           </div>

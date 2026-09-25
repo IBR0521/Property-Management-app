@@ -97,7 +97,7 @@ export function registerListings(router) {
 
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "listings", counts: await navCounts(cid),
-      title: "Vacancy marketing",
+      title: "Vacancies",
       subtitle: `${rows.length} listing${rows.length === 1 ? "" : "s"} · ${live} syndicated`,
       actions: html`<a class="pill outline sm" href="${publicPath(company, "/listings")}"
         target="_blank">Your public page</a>`,
@@ -175,7 +175,8 @@ export function registerListings(router) {
                   <td>${l.syndicate
                     ? html`<span class="chip" data-tone="brand">live</span>`
                     : html`<span class="chip">private</span>`}</td>
-                  <td class="shrink"><a class="pill outline sm" href="/app/listings/${l.id}">Edit</a></td>
+                  <td class="shrink"><a class="pill outline sm" href="/app/listings/${l.id}"
+                  ${attr("aria-label", `Edit the listing ${l.headline || ""}`)}>Edit</a></td>
                 </tr>`)}</tbody></table></div>`
               : empty("No listings yet", "Advertise an empty unit to start.")}
           </div>

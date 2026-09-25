@@ -15,7 +15,7 @@ const say = (severity, area, what, where, detail) =>
   findings.push({ severity, area, what, where, detail });
 
 /* Words that tell somebody what to do next rather than only what is absent. */
-const GUIDES = /add your first|get started|begin by|create one|set one up|nothing yet|none yet|no .{1,24} yet|invite|import/i;
+const GUIDES = /\b(add|create|send|invite|import|advertise|upload|connect|set up|link|record|raise|start)\b[^.]{0,60}\b(here|below|in setup|first|one|a |an |them|it)\b|appear here|show up here|fills itself|will be kept here|wait here/i;
 
 function checkPage({ surface, route, at, body, status, contentType }) {
   if (status !== 200 || !body) return null;
@@ -58,16 +58,23 @@ function checkPage({ surface, route, at, body, status, contentType }) {
       "It says there is nothing here. It does not say what puts something here.");
   }
 
-  /* Buttons whose text is a verb with no object. */
+  /* Buttons whose text is a verb with no object anywhere.
+
+     The visible word may stay short — inside a table row the object is in the
+     row, and widening that column costs more than it returns. What matters is
+     that the object is named *somewhere*, so the control still means
+     something read aloud or out of context. An aria-label or a title that
+     says more than the visible text counts. */
   for (const el of elements(body, ["a", "button"])) {
     const label = textOf(body, el).trim();
     if (!label) continue;
-    if (/^(open|view|go|edit|manage|details?|more|here|click)$/i.test(label)) {
-      say("medium", "labels", `A control labelled only "${label}"`, route,
-        "The word is a verb with nothing after it. What it opens has to be "
-        + "guessed from where it sits.");
-      break;
-    }
+    if (!/^(open|view|go|edit|manage|details?|more|here|click)$/i.test(label)) continue;
+    const named = (el.attrs["aria-label"] || el.attrs.title || "").trim();
+    if (named.length > label.length) continue;
+    say("medium", "labels", `A control labelled only "${label}", with no object anywhere`,
+      route, "The word is a verb with nothing after it, and nothing else names "
+      + "what it acts on.");
+    break;
   }
 
   /* Forms asking for things with no explanation. */
@@ -91,8 +98,12 @@ function checkPage({ surface, route, at, body, status, contentType }) {
     /* Irreversible, or outward-facing and irreversible. "Send" alone is not
        — a test email is not a thing anybody regrets — so it is not here. */
     if (!/\b(delete|remove|revoke|void|discard|wipe|cancel this)\b/.test(label)) continue;
-    const form = body.slice(Math.max(0, el.start - 2500), el.end);
-    if (!/confirm|are you sure|type .{1,30} to|cannot be undone|onsubmit/i.test(form)) {
+    /* Friction, or a plain statement of what it does. Either is enough; what
+       is not enough is a bare button. */
+    const form = body.slice(Math.max(0, el.start - 2500), el.end + 400);
+    const explains = (el.attrs.title || "").length > 20;
+    if (!explains
+      && !/confirm|are you sure|type .{1,30} to|cannot be undone|stays on the record|onsubmit/i.test(form)) {
       say("medium", "destructive", `"${textOf(body, el).trim()}" acts with nothing in between`, route,
         "No confirmation, and nothing saying whether it can be undone.");
       break;

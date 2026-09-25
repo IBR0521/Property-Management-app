@@ -382,7 +382,8 @@ export function registerMaintenance(router) {
                       <td class="shrink"><span class="chip"${attr("data-tone", SEVERITY_TONE[w.severity])}>${w.severity}</span></td>
                       <td class="shrink"><span class="chip"${attr("data-tone", STATUS_TONE[w.status])}>${w.status.replace(/_/g, " ")}</span></td>
                       <td class="num">${w.actual_cents != null ? usd(w.actual_cents) : w.estimate_cents != null ? html`<span style="color:var(--ink-soft)">est ${usd(w.estimate_cents)}</span>` : "—"}</td>
-                      <td class="shrink"><a class="pill outline sm" href="/app/maintenance/${w.id}">Open</a></td>
+                      <td class="shrink"><a class="pill outline sm" href="/app/maintenance/${w.id}"
+                  ${attr("aria-label", `Open ${w.reference} — ${w.summary}`)}>Open</a></td>
                     </tr>`)}</tbody>
                 </table></div>`
               : empty("Nothing here", "No requests match this filter.")}
@@ -1173,6 +1174,8 @@ function actionPanels({ wo, vendors, csrf, outlook = null }) {
 
     <form method="post" action="/app/maintenance/${wo.id}/cancel">
       <input type="hidden" name="_csrf" value="${csrf}" />
-      <button class="pill outline sm" type="submit">Cancel this request</button>
+      <button class="pill outline sm" type="submit"
+              aria-label="Cancel ${wo.reference}"
+              title="Closes the job without work being done. The record stays; the tenant is not told automatically.">Cancel this request</button>
     </form>`;
 }

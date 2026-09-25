@@ -428,7 +428,7 @@ export function registerAccounting(router) {
 
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "accounting", counts: await navCounts(cid),
-      title: "Trial balance",
+      title: "Accounting",
       subtitle: totalDr === totalCr
         ? `${usd(totalDr)} on each side — in balance`
         : `OUT OF BALANCE by ${usd(Math.abs(totalDr - totalCr))}`,
@@ -499,7 +499,8 @@ export function registerAccounting(router) {
                   ${r.reversed_by ? html`<span class="cellsub">reversed</span>` : ""}</td>
                 <td>${r.source}</td>
                 <td class="num">${usd(Number(r.amount))}<span class="cellsub">${r.lines} lines</span></td>
-                <td class="shrink"><a class="pill outline sm" href="/app/accounting/j/${r.id}">Open</a></td>
+                <td class="shrink"><a class="pill outline sm" href="/app/accounting/j/${r.id}"
+                  ${attr("aria-label", `Open the journal ${r.memo || r.id}`)}>Open</a></td>
               </tr>`)}</tbody></table></div>` : empty("No journals yet.")}
         </div></div>`,
     }));
@@ -676,6 +677,8 @@ function journalForm({ csrf, accounts, error }) {
         <div class="field">
           <label for="amount_${i}">Amount</label>
           <input id="amount_${i}" name="amount_${i}" type="text" inputmode="decimal" placeholder="0.00" />
+          ${i === 0 ? html`<span class="field__help">Always positive. Which way it moves is
+            the side below, not a minus sign.</span>` : ""}
         </div>
       </div>
       <div class="formgrid formgrid--2">
@@ -685,10 +688,14 @@ function journalForm({ csrf, accounts, error }) {
             <label class="radiotile"><input type="radio" name="side_${i}" value="debit" checked /><span>Debit</span></label>
             <label class="radiotile"><input type="radio" name="side_${i}" value="credit" /><span>Credit</span></label>
           </div>
+          ${i === 0 ? html`<span class="field__help">Debit puts money into an asset or a
+            cost. Credit takes it out, or records income or something owed.</span>` : ""}
         </div>
         <div class="field">
           <label for="memo_${i}">Line memo</label>
           <input id="memo_${i}" name="memo_${i}" type="text" maxlength="200" />
+          ${i === 0 ? html`<span class="field__help">Optional, and only for this line.
+            Leave it and the entry\u2019s own memo is used.</span>` : ""}
         </div>
       </div>
     </div>`;
@@ -698,20 +705,31 @@ function journalForm({ csrf, accounts, error }) {
     <form method="post" action="/app/accounting/new">
       <input type="hidden" name="_csrf" value="${csrf}" />
       <div class="panel">
-        <div class="panel__head"><h2>Journal</h2></div>
+        <div class="panel__head">
+          <h2>Journal</h2>
+          <p>A journal posted here cannot be edited or deleted afterwards — the book is
+            append-only. A mistake is corrected by posting its mirror, which leaves both
+            entries visible for ever. Most money is better recorded on the screen it
+            belongs to: rent on Tenant payments, a bill on Contractors.</p>
+        </div>
         <div class="panel__body">
           <div class="formgrid formgrid--2">
             <div class="field"><label for="date">Date</label>
-              <input id="date" name="date" type="date" required value="${today()}" /></div>
+              <input id="date" name="date" type="date" required value="${today()}" />
+              <span class="field__help">The day the money moved, not today. Reports are
+                built from this date and a closed period will refuse it.</span></div>
             <div class="field"><label for="memo">Memo</label>
               <input id="memo" name="memo" type="text" required maxlength="200"
-                     placeholder="What this entry is for" /></div>
+                     placeholder="What this entry is for" />
+              <span class="field__help">What this is for, in a few words. It is what you
+                will read in a year when you are asked why this entry exists.</span></div>
           </div>
         </div>
         ${[0, 1, 2, 3].map(row)}
         <div class="panel__foot">
-          Debits must equal credits. If they do not, the database refuses the entry
-          and nothing is written.
+          Use as many lines as you need and leave the rest blank. Debits must equal
+          credits — if they do not, the database refuses the entry and nothing is
+          written, so there is nothing to undo.
         </div>
       </div>
       <div class="btnrow">

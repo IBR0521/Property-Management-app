@@ -100,7 +100,8 @@ export function registerInspections(router) {
                   <td class="shrink"><span class="chip"${attr("data-tone",
                     r.status === "signed" ? "ok" : r.status === "complete" ? null : "warn")}>${r.status}</span></td>
                   <td class="num">${r.unmarked || ""}</td>
-                  <td class="shrink"><a class="pill outline sm" href="/app/inspections/${r.id}">Open</a></td>
+                  <td class="shrink"><a class="pill outline sm" href="/app/inspections/${r.id}"
+                  ${attr("aria-label", `Open the inspection at ${r.line1 || "this home"}`)}>Open</a></td>
                 </tr>`)}</tbody>
             </table></div>` : empty("None yet",
               "Start one above. A move-in is the record a deposit dispute turns on.")}

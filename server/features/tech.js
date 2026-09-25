@@ -75,8 +75,10 @@ export function registerTech(router) {
 
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "jobs", counts: {},
-      title: now.length ? `${now.length} job${now.length === 1 ? "" : "s"} today` : "Nothing today",
-      subtitle: human(today()),
+      title: "Your jobs",
+      subtitle: now.length
+        ? `${now.length} job${now.length === 1 ? "" : "s"} today · ${human(today())}`
+        : `Nothing today · ${human(today())}`,
       body: html`
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
 
