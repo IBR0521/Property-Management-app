@@ -141,6 +141,45 @@ describe("the payment itself", () => {
   });
 });
 
+describe("a company's own secret key", () => {
+  test("checkout uses that key and does not name a connected account", async () => {
+    stub(() => ({ status: 200, json: { id: "cs_1", url: "https://checkout.stripe.com/c/pay/cs_1" } }));
+    await connect.createCheckoutSession({
+      secret: "sk_test_companykey",
+      accountId: null,
+      amountCents: 145000,
+      successUrl: "https://app.example.com/ok",
+      cancelUrl: "https://app.example.com/no",
+    });
+    assert.equal(calls[0].opts.headers.authorization, "Bearer sk_test_companykey");
+    assert.equal(calls[0].opts.headers["stripe-account"], undefined,
+      "a Stripe-Account header here would require the platform key");
+    assert.equal(form().has("application_fee_amount"), false);
+  });
+
+  test("the platform key is refused, so a pasted key cannot charge us", async () => {
+    stub();
+    await assert.rejects(
+      () => connect.createCheckoutSession({
+        secret: "sk_test_connect",
+        amountCents: 145000,
+        successUrl: "https://app.example.com/ok",
+        cancelUrl: "https://app.example.com/no",
+      }),
+      /company's own Stripe key/);
+    assert.equal(calls.length, 0);
+  });
+
+  test("autopay with a pasted key is charged on that key", async () => {
+    stub(() => ({ status: 200, json: { id: "pi_own" } }));
+    await connect.createPaymentIntent({
+      secret: "rk_live_companykey", amountCents: 145000, offSession: true,
+    });
+    assert.equal(calls[0].opts.headers.authorization, "Bearer rk_live_companykey");
+    assert.equal(calls[0].opts.headers["stripe-account"], undefined);
+  });
+});
+
 describe("connecting an account", () => {
   test("the authorize URL carries state, so a link cannot attach somebody else's account", () => {
     const url = connect.authorizeUrl({ state: "abc123", email: "manager@firm.test" });

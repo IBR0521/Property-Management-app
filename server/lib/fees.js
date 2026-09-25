@@ -21,6 +21,10 @@ export function processorFee(company, method, amountCents) {
   const amount = Math.max(0, Math.round(Number(amountCents) || 0));
   if (!amount) return 0;
 
+  /* PayPal charges the company's PayPal account its own fee. We do not
+     add another one, and we do not pretend Stripe's card rate applies. */
+  if (method === "paypal") return 0;
+
   if (method === "ach") {
     const bps = Number(company?.ach_fee_bps ?? 80);
     const cap = Number(company?.ach_fee_cap_cents ?? 500);
@@ -116,6 +120,7 @@ function formatMoney(cents, currency) {
 /* Whether a company may offer this method at all. Kept here so the tenant
    page, the autopay enrolment and the API all agree. */
 export function methodAvailable(company, method) {
+  if (method === "paypal") return Boolean(company?.paypal_client_id && company?.paypal_secret_sealed);
   if (!company?.stripe_account_id) return false;
   if (!company.stripe_charges_enabled) return false;
   if (method === "ach") return Boolean(company.accept_ach);
@@ -124,5 +129,5 @@ export function methodAvailable(company, method) {
 }
 
 export function availableMethods(company) {
-  return ["ach", "card"].filter((m) => methodAvailable(company, m));
+  return ["ach", "card", "paypal"].filter((m) => methodAvailable(company, m));
 }

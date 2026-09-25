@@ -77,7 +77,7 @@ export function registerCompliance(router) {
 
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
-      title: "Compliance",
+      title: "Deadlines",
       subtitle: `${overdue.length} overdue · ${dueSoon.length} inside two weeks`,
       actions: html`
         <a class="pill outline sm" href="/app/compliance/rules">Rules</a>

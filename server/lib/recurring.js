@@ -134,8 +134,15 @@ export async function addCharge({
 export async function endCharge({ companyId, chargeId, endDate = null, by = "system" }) {
   const charge = await one(
     "SELECT * FROM recurring_charge WHERE id = ? AND company_id = ?", chargeId, companyId);
+  /* Ending a charge that has not started yet cannot stamp today's date:
+     end_date has to fall on or after start_date, or the row is rejected and
+     the charge stays live. The run only bills active charges, so marking it
+     inactive is what stops it; the end date is the start date, the earliest
+     day that is still a legal end. */
+  let ended = endDate || today();
+  if (ended < charge.start_date) ended = charge.start_date;
   await update("recurring_charge", charge.id, {
-    active: 0, end_date: endDate || today(),
+    active: 0, end_date: ended,
   });
   log.info("recurring charge ended", { chargeId: charge.id, by });
   return await one("SELECT * FROM recurring_charge WHERE id = ?", charge.id);

@@ -63,7 +63,7 @@ export function registerSetup(router) {
         <!-- Delivery -->
         <div class="panel">
           <div class="panel__head"><h2>Delivery</h2>
-            <span class="chip"${attr("data-tone", describeDelivery(DELIVERY.mode, 0).tone)}>${DELIVERY.mode}</span>
+            <span class="chip"${attr("data-tone", describeDelivery(DELIVERY.mode, 0).tone)}>${{ live: "On", sandbox: "Sandbox", log: "Log only", off: "Off" }[DELIVERY.mode] || "Off"}</span>
           </div>
           <div class="panel__body">
             ${(() => {

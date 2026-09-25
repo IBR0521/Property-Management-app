@@ -57,6 +57,44 @@ export function registerPublicListings(router) {
     ctx.res.end(JSON.stringify(manifest, null, 2));
   });
 
+  router.get("/robots.txt", async (ctx) => {
+    ctx.res.setHeader("content-type", "text/plain; charset=utf-8");
+    ctx.res.end(
+      "User-agent: *\n"
+      + "Allow: /c/\n"
+      + "Allow: /listings\n"
+      + "Disallow: /app\n"
+      + "Disallow: /portal\n"
+      + "Disallow: /api\n"
+      + "Disallow: /feeds/\n"
+      + "Disallow: /pay/\n"
+      + "Disallow: /signup\n"
+      + "\n"
+      + "# Each company's vacancies are listed at /c/<company>/sitemap.xml.\n"
+      + "# A single sitemap here would name every company on the platform.\n"
+    );
+  });
+
+  router.get("/c/:slug/sitemap.xml", async (ctx) => {
+    const company = await resolvePublicCompany(ctx);
+    if (!company.company) {
+      ctx.res.statusCode = 404;
+      ctx.res.setHeader("content-type", "text/plain; charset=utf-8");
+      return ctx.res.end("Not found");
+    }
+    const rows = await all(
+      `SELECT id FROM listing
+        WHERE company_id = ? AND status = 'active' ORDER BY rent_cents`, company.company.id);
+    const urls = [absolute(ctx, publicPath(company.company, "/listings")),
+      ...rows.map((l) => absolute(ctx, publicPath(company.company, `/listings/${l.id}`)))];
+    const body = `<?xml version="1.0" encoding="UTF-8"?>\n`
+      + `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`
+      + urls.map((loc) => `  <url><loc>${xml(loc)}</loc></url>`).join("\n")
+      + `\n</urlset>\n`;
+    ctx.res.setHeader("content-type", "application/xml; charset=utf-8");
+    ctx.res.end(body);
+  });
+
   router.get("/c/:slug/listings", async (ctx) => renderIndex(ctx));
   router.get("/listings", async (ctx) => renderIndex(ctx));
 
@@ -83,12 +121,18 @@ export function registerPublicListings(router) {
         WHERE l.company_id = ? AND l.status = 'active'
         ORDER BY l.rent_cents, p.line1, u.label`, company.id);
 
+    const lede = rows.length
+      ? `${rows.length} ${rows.length === 1 ? "place" : "places"} to rent right now.`
+      : "Nothing is available at the moment.";
+    const canonical = absolute(ctx, publicPath(company, "/listings"));
+
     sendHtml(ctx.res, publicPage({
-      company, title: "Places to rent",
+      company, title: `Places to rent · ${company.name}`,
       heading: `Available from ${company.name}`,
-      lede: rows.length
-        ? `${rows.length} ${rows.length === 1 ? "place" : "places"} to rent right now.`
-        : "Nothing is available at the moment.",
+      lede,
+      index: true,
+      description: `${lede} Homes from ${company.name}.`,
+      canonical,
       body: html`
         ${rows.length ? html`
           <div class="grid grid--2">
@@ -149,11 +193,21 @@ export function registerPublicListings(router) {
     const photos = await all(
       "SELECT * FROM listing_photo WHERE listing_id = ? ORDER BY rank", listing.id);
 
+    const where = `${listing.line1}${listing.label ? `, unit ${listing.label}` : ""} — `
+      + `${listing.city}, ${listing.state} ${listing.zip}`;
+    const canonical = absolute(ctx, publicPath(company, `/listings/${listing.id}`));
+    const photo = photos[0] ? absolute(ctx, fileUrl(photos[0].path)) : null;
+    const description = listingBlurb(listing, where, company.name);
+
     sendHtml(ctx.res, publicPage({
-      company, title: listing.headline,
+      company, title: `${listing.headline} · ${company.name}`,
       heading: listing.headline,
-      lede: `${listing.line1}${listing.label ? `, unit ${listing.label}` : ""} — `
-        + `${listing.city}, ${listing.state} ${listing.zip}`,
+      lede: where,
+      index: true,
+      description,
+      canonical,
+      image: photo,
+      jsonLd: listingJson(listing, { where, canonical, photo, company }),
       body: html`
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
 
@@ -322,6 +376,49 @@ export function registerPublicListings(router) {
 
 /* Names no company: listing every company on the platform so a visitor can
    pick is the portfolio-enumeration mistake one level up. */
+function absolute(ctx, path) {
+  if (/^https?:\/\//.test(path)) return path;
+  return `${ctx.url.origin}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+function xml(value) {
+  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function listingBlurb(listing, where, companyName) {
+  const rent = usd(listing.rent_cents);
+  const extra = listing.description ? ` ${String(listing.description).replace(/\s+/g, " ").trim()}` : "";
+  const text = `${where}. ${rent} a month, from ${companyName}.${extra}`;
+  return text.length > 160 ? `${text.slice(0, 157)}…` : text;
+}
+
+function listingJson(listing, { where, canonical, photo, company }) {
+  const data = {
+    "@context": "https://schema.org",
+    "@type": "Apartment",
+    name: listing.headline,
+    url: canonical,
+    address: {
+      "@type": "PostalAddress",
+      streetAddress: `${listing.line1}${listing.label ? `, unit ${listing.label}` : ""}`,
+      addressLocality: listing.city,
+      addressRegion: listing.state,
+      postalCode: listing.zip,
+    },
+    offers: {
+      "@type": "Offer",
+      price: (Number(listing.rent_cents) / 100).toFixed(2),
+      priceCurrency: company.currency || "USD",
+      availability: "https://schema.org/InStock",
+    },
+  };
+  if (listing.description) data.description = String(listing.description);
+  else data.description = where;
+  if (listing.unit_beds != null) data.numberOfRooms = Number(listing.unit_beds);
+  if (photo) data.image = photo;
+  return JSON.stringify(data).replace(/</g, "\\u003c");
+}
+
 function whichCompany(reason) {
   const message = reason === "none"
     ? "This installation has no company set up yet."
@@ -329,7 +426,8 @@ function whichCompany(reason) {
     ? "That web address does not match a company we know."
     : "This link is missing the company it belongs to.";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">`
-    + `<meta name="viewport" content="width=device-width,initial-scale=1"><title>Not found</title>`
+    + `<meta name="viewport" content="width=device-width,initial-scale=1">`
+    + `<meta name="robots" content="noindex, nofollow"><title>Not found</title>`
     + `<link rel="stylesheet" href="/assets/css/styles.css"><link rel="stylesheet" href="/app-assets/app.css">`
     + `</head><body><div class="pub" style="max-width:32rem"><h1>We need a little more</h1>`
     + `<p class="lede">${message}</p></div></body></html>`;

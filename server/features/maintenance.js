@@ -351,10 +351,10 @@ export function registerMaintenance(router) {
 
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "properties", counts: await navCounts(cid),
-      title: "Maintenance",
+      title: "Repairs",
       subtitle: `${rows.length} ${show === "open" ? "open" : show} request${rows.length === 1 ? "" : "s"}`,
       actions: html`
-        <a class="pill outline" href="/report" target="_blank">Tenant form</a>
+        <a class="pill outline" href="${publicPath({ slug: ctx.staff.company_slug }, "/report")}" target="_blank">Tenant form</a>
         <a class="pill solid" href="/app/maintenance/new">Log a request</a>`,
       body: html`
         ${tabs(PROPERTY_TABS, "repairs")}
@@ -404,7 +404,7 @@ export function registerMaintenance(router) {
       body: html`
         ${notice(null, "This is the fallback, not the main route",
           html`When a tenant reports it themselves at
-               <a href="/report" target="_blank">the tenant form</a> you get their photo and access
+               <a href="${publicPath({ slug: ctx.staff.company_slug }, "/report")}" target="_blank">the tenant form</a> you get their photo and access
                details first-hand, and they get a status link so they stop ringing to ask.
                Use this screen for the ones who phone anyway.`)}
         <div class="panel" style="max-width:44rem">
@@ -952,7 +952,7 @@ function intakeAddress({ company, typed, error }) {
     <div class="panel">
       <div class="panel__head"><h2>Where are you?</h2></div>
       <div class="panel__body">
-        <form method="get" action="/report" class="formgrid">
+        <form method="get" action="${publicPath(company, "/report")}" class="formgrid">
           <div class="field">
             <label for="addr">Your street address</label>
             <input id="addr" name="addr" type="text" required autocomplete="street-address"
@@ -975,10 +975,10 @@ function intakePickUnit({ company, matches, typed }) {
     <div class="panel">
       <div class="panel__head">
         <h2>Which unit?</h2>
-        <a class="pill outline sm" href="/report">Change address</a>
+        <a class="pill outline sm" href="${publicPath(company, "/report")}">Change address</a>
       </div>
       <div class="panel__body">
-        <form method="get" action="/report" class="formgrid">
+        <form method="get" action="${publicPath(company, "/report")}" class="formgrid">
           <div class="field">
             <div class="radioset">
               ${matches.map((u) => html`
@@ -1001,10 +1001,10 @@ function intakeCategory({ company, unit, error }) {
     <div class="panel">
       <div class="panel__head">
         <h2>What kind of problem is it?</h2>
-        <a class="pill outline sm" href="/report">Not your address?</a>
+        <a class="pill outline sm" href="${publicPath(company, "/report")}">Not your address?</a>
       </div>
       <div class="panel__body">
-        <form method="get" action="/report" class="formgrid">
+        <form method="get" action="${publicPath(company, "/report")}" class="formgrid">
           <input type="hidden" name="u" value="${unit.report_token}" />
           <div class="field">
             <div class="radioset">
@@ -1031,7 +1031,7 @@ function intakeStepTwo({ company, unit, cat, csrf, error }) {
         <a class="pill outline sm" href="/report?u=${unit.report_token}">Change</a>
       </div>
       <div class="panel__body">
-        <form method="post" action="/report" enctype="multipart/form-data" class="formgrid">
+        <form method="post" action="${publicPath(company, "/report")}" enctype="multipart/form-data" class="formgrid">
           <input type="hidden" name="_csrf" value="${csrf}" />
           <input type="hidden" name="unit_token" value="${unit.report_token}" />
           <input type="hidden" name="category" value="${cat.key}" />

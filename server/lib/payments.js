@@ -28,6 +28,8 @@ import { quote, methodAvailable } from "./fees.js";
 import { usd } from "./money.js";
 import { postMoney } from "./ledger.js";
 import * as defaultStripe from "./connect.js";
+import * as paypal from "./paypal.js";
+import { open as openSeal } from "./crypto.js";
 
 /* Return codes that mean stop trying. A closed or frozen account will not
    accept the next attempt either, and a company will usually want the lease on
@@ -200,9 +202,22 @@ export async function startCheckout({
 
   const { paymentId, quote: q, company, lease } = opened;
 
+  if (kind === "paypal") {
+    return startPayPal({ paymentId, quote: q, company, opened, successUrl, cancelUrl });
+  }
+
+  let secret = null;
+  if (company.stripe_secret_sealed) {
+    secret = openSeal(company.stripe_secret_sealed);
+    if (!secret) {
+      return { ok: false, reason: "The saved Stripe key could not be read.", paymentId };
+    }
+  }
+
   try {
     const session = await stripe.createCheckoutSession({
-      accountId: company.stripe_account_id,
+      accountId: secret ? null : company.stripe_account_id,
+      secret,
       amountCents: q.tenantPaysCents,
       methods: kind === "ach" ? ["us_bank_account"] : ["card"],
       description: `Rent ${opened.period}`,
@@ -233,6 +248,54 @@ export async function startCheckout({
   }
 }
 
+async function startPayPal({ paymentId, quote: q, company, opened, successUrl, cancelUrl }) {
+  let secret;
+  try {
+    secret = openSeal(company.paypal_secret_sealed);
+  } catch {
+    secret = null;
+  }
+  if (!secret || !company.paypal_client_id) {
+    await update("tenant_payment", paymentId, {
+      status: "failed", failed_at: stamp(), failure_reason: "PayPal is not connected.",
+    });
+    return { ok: false, reason: "PayPal is not connected.", paymentId };
+  }
+  try {
+    const order = await paypal.createOrder({
+      clientId: company.paypal_client_id,
+      secret,
+      live: Number(company.paypal_live) === 1,
+      amountCents: q.tenantPaysCents,
+      description: `Rent ${opened.period}`,
+      customId: paymentId,
+      returnUrl: successUrl,
+      cancelUrl,
+    });
+    await update("tenant_payment", paymentId, {
+      paypal_order_id: order.id,
+      submitted_at: stamp(),
+    });
+    return { ok: true, paymentId, quote: q, url: order.url };
+  } catch (err) {
+    await update("tenant_payment", paymentId, {
+      status: "failed", failed_at: stamp(),
+      failure_reason: String(err.message || "").slice(0, 300),
+    });
+    return { ok: false, reason: err.message, paymentId };
+  }
+}
+
+export async function capturePayPal({ company, orderId }) {
+  const secret = openSeal(company.paypal_secret_sealed);
+  return paypal.captureOrder({
+    clientId: company.paypal_client_id,
+    secret,
+    live: Number(company.paypal_live) === 1,
+    orderId,
+  });
+}
+
 export async function createPayment({
   companyId, leaseId, amountCents, kind = "ach",
   paymentMethodId = null, initiatedBy = "tenant", period = null,
@@ -246,9 +309,15 @@ export async function createPayment({
   const { paymentId, quote: q, company, lease } = opened;
   const forPeriod = opened.period;
 
+  let secret = null;
+  if (company.stripe_secret_sealed) {
+    secret = openSeal(company.stripe_secret_sealed);
+  }
+
   try {
     const intent = await stripe.createPaymentIntent({
-      accountId: company.stripe_account_id,
+      accountId: secret ? null : company.stripe_account_id,
+      secret,
       amountCents: q.tenantPaysCents,
       description: `Rent ${forPeriod}`,
       paymentMethodId,

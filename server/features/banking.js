@@ -39,7 +39,7 @@ const BANK_TABS = [
 export async function storeItem({ companyId, publicToken, institutionName, institutionId, createdBy }) {
   if (!sealingAvailable()) {
     throw new BadRequest(
-      "Encryption is not configured, so a bank token cannot be stored safely. Set APP_ENCRYPTION_KEY first.");
+      "Encryption is not configured, so a bank token cannot be stored safely.");
   }
   const exchanged = await plaid.exchangePublicToken(publicToken);
   const itemId = id();
@@ -561,7 +561,7 @@ export function registerBanking(router) {
         ${tabs(BANK_TABS, "reconcile")}
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
         ${sealingAvailable() ? "" : notice("danger", "Encryption is not configured",
-          "APP_ENCRYPTION_KEY is unset, so bank credentials cannot be stored. Linking is disabled until it is.")}
+          "Bank credentials cannot be stored until encryption is set up. Linking is disabled until then.")}
         ${withProposals.length === 0 ? html`
           <div class="panel">
             <div class="panel__head"><h2>Nothing to reconcile</h2></div>
@@ -695,7 +695,7 @@ export function registerBanking(router) {
         ${tabs(BANK_TABS, "accounts")}
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
         ${plaid.plaidConfigured() ? "" : notice("warn", "No aggregator configured",
-          "PLAID_CLIENT_ID and PLAID_SECRET are unset, so no account can be linked yet. Everything else on this page works.")}
+          "Bank linking has not been turned on for this installation yet. Importing a statement still works.")}
         ${items.filter((i) => i.status === "needs_reauth").map((i) => notice("warn",
           `${i.institution_name || "A bank"} needs signing in again`,
           "The connection expired or the credentials changed. Relink it to resume syncing."))}

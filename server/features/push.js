@@ -108,7 +108,7 @@ export async function notificationsPanel({
         <div class="panel__head"><h2>Notifications</h2></div>
         <div class="panel__body">
           ${notice("warn", "Not switched on yet",
-            "This application has not been given the keys it needs to send notifications, so there is nothing to turn on here yet.")}
+            "Notifications have not been turned on for this installation yet, so there is nothing to switch on here.")}
         </div>
       </div>`;
   }

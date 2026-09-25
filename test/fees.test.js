@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import {
   processorFee, quote, describeQuote, methodAvailable, availableMethods,
 } from "../server/lib/fees.js";
+import { acceptableStripeKey } from "../server/lib/connect.js";
 
 /* Stripe's published rates, which are the defaults. */
 const COMPANY = {
@@ -181,6 +182,27 @@ describe("which methods are offered", () => {
     assert.deepEqual(availableMethods({ ...COMPANY, accept_card: 0 }), ["ach"]);
     assert.deepEqual(availableMethods({ ...COMPANY, accept_ach: 0 }), ["card"]);
     assert.deepEqual(availableMethods(COMPANY), ["ach", "card"]);
+  });
+
+  test("PayPal stands on its own key, not on Stripe", () => {
+    const paypal = {
+      paypal_client_id: "client", paypal_secret_sealed: "sealed",
+    };
+    assert.equal(methodAvailable({ ...COMPANY, stripe_account_id: null, ...paypal }, "paypal"), true);
+    assert.equal(methodAvailable({ ...paypal, paypal_secret_sealed: null }, "paypal"), false);
+    assert.deepEqual(
+      availableMethods({ stripe_account_id: null, ...paypal }),
+      ["paypal"]);
+    assert.deepEqual(availableMethods({ ...COMPANY, stripe_account_id: null }), []);
+    assert.equal(processorFee(COMPANY, "paypal", 145000), 0,
+      "we do not add Stripe's card rate on top of PayPal");
+  });
+
+  test("a pasted Stripe key has the shape Stripe actually issues", () => {
+    assert.equal(acceptableStripeKey("sk_test_abc"), true);
+    assert.equal(acceptableStripeKey("rk_live_abc"), true);
+    assert.equal(acceptableStripeKey("pk_live_abc"), false);
+    assert.equal(acceptableStripeKey("whsec_abc"), false);
   });
 
   test("card is off by default, because the fee is proportional", () => {

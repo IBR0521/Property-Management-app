@@ -129,7 +129,8 @@ describe("the list", () => {
        rather than quietly being worse. */
     const res = await page(staff, "/app/inbox");
     assert.match(res.body, /will not thread yet/i);
-    assert.match(res.body, /PORTAL_REPLY_DOMAIN/);
+    assert.match(res.body, /starts a new conversation/);
+    assert.doesNotMatch(res.body, /PORTAL_REPLY_DOMAIN/);
   });
 });
 

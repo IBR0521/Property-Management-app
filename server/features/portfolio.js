@@ -75,6 +75,7 @@ export function registerPortfolio(router) {
           </div>
         </div>
 
+        ${units.some((u) => u.lease_id) ? html`
         <div class="panel" style="max-width:44rem">
           <div class="panel__head"><h2>Record a move-out</h2><p>This is what starts the deposit-return clock</p></div>
           <div class="panel__body">
@@ -97,7 +98,7 @@ export function registerPortfolio(router) {
               <button class="pill solid" type="submit">Record move-out</button>
             </form>
           </div>
-        </div>`,
+        </div>` : ""}`,
     }));
   });
 

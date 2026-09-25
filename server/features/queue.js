@@ -11,6 +11,7 @@ import { buildQueue } from "../lib/queue.js";
 import { outboxPending, DELIVERY, lastTickAt, tickIsStale, STALE_AFTER_HOURS } from "../lib/scheduler.js";
 import { describe as describeDelivery } from "../lib/delivery/mode.js";
 import { onboardingState } from "./signup.js";
+import { publicPath } from "../lib/tenancy.js";
 import { humanStamp } from "../lib/dates.js";
 import { human, today } from "../lib/dates.js";
 
@@ -84,7 +85,7 @@ export function registerQueue(router) {
           items.length === 1 ? "needs" : "need"} you · ${human(today())}`
         : `Nothing needs you · ${human(today())}`,
       actions: html`
-        <a class="pill outline" href="/report" target="_blank">Tenant form</a>
+        <a class="pill outline" href="${publicPath({ slug: ctx.staff.company_slug }, "/report")}" target="_blank">Tenant form</a>
         <a class="pill solid" href="/app/maintenance/new">Log a repair</a>`,
       body: html`
         ${onboarding.complete ? "" : html`

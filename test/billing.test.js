@@ -19,8 +19,10 @@ const { startApp, client } = await import("./helpers/http.js");
 const f = await import("./helpers/factories.js");
 const { verifyWebhookSignature, signWebhook, encode, SIGNATURE_TOLERANCE_SECONDS } =
   await import("../server/lib/stripe.js");
-const { applyStripeEvent, subscriptionFor, companyIsReadOnly, readOnlyExempt } =
+const { applyStripeEvent, applyDodoEvent, subscriptionFor, companyIsReadOnly, readOnlyExempt } =
   await import("../server/features/billing.js");
+const { verifyWebhookSignature: verifyDodo, signWebhook: signDodo } =
+  await import("../server/lib/dodo.js");
 const { isWorking, planForUnits, outgrown, PLANS, describeStatus } =
   await import("../server/lib/plans.js");
 
@@ -256,6 +258,61 @@ describe("what the events do", () => {
       data: { object: { customer: "cus_unknown" } },
     });
     assert.match(result.outcome, /no company/);
+  });
+});
+
+describe("what a Dodo event does", () => {
+  const secret = Buffer.from("dodo-webhook-secret").toString("base64");
+
+  test("a signature matches the raw body and rejects a changed one", () => {
+    const rawBody = JSON.stringify({ type: "subscription.active" });
+    const signed = signDodo({ rawBody, secret, id: "msg_1", timestamp: "1710000000" });
+    assert.equal(verifyDodo({
+      rawBody, id: signed.id, timestamp: signed.timestamp, signature: signed.signature, secret,
+      now: 1710000000 * 1000,
+    }).ok, true);
+    assert.equal(verifyDodo({
+      rawBody: rawBody + " ", id: signed.id, timestamp: signed.timestamp, signature: signed.signature, secret,
+      now: 1710000000 * 1000,
+    }).ok, false);
+  });
+
+  test("an active subscription is recorded and a hold does not lock the company out", async () => {
+    await applyDodoEvent({
+      type: "subscription.active",
+      data: {
+        subscription_id: "sub_d1",
+        status: "active",
+        customer: { customer_id: "cus_d1" },
+        metadata: { company_id: world.companyId, plan_key: "starter" },
+        next_billing_date: "2026-10-25T00:00:00.000Z",
+      },
+    });
+    const sub = await subscriptionFor(world.companyId);
+    assert.equal(sub.dodo_customer_id, "cus_d1");
+    assert.equal(sub.dodo_subscription_id, "sub_d1");
+    assert.equal(sub.plan_key, "starter");
+    assert.equal(sub.status, "active");
+    assert.equal(await companyIsReadOnly(world.companyId), false);
+
+    await applyDodoEvent({
+      type: "subscription.on_hold",
+      data: { subscription_id: "sub_d1", customer: { customer_id: "cus_d1" } },
+    });
+    assert.equal((await subscriptionFor(world.companyId)).status, "past_due");
+    assert.equal(await companyIsReadOnly(world.companyId), false);
+  });
+
+  test("a cancellation makes the company read-only", async () => {
+    await applyDodoEvent({
+      type: "subscription.cancelled",
+      data: {
+        subscription_id: "sub_d2",
+        customer: { customer_id: "cus_d2" },
+        metadata: { company_id: world.companyId },
+      },
+    });
+    assert.equal(await companyIsReadOnly(world.companyId), true);
   });
 });
 

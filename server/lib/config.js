@@ -328,12 +328,48 @@ if (!PUSH_CONFIGURED && (VAPID_PUBLIC_KEY || VAPID_PRIVATE_KEY || VAPID_SUBJECT)
     "    or none of them. Generate a pair with: npm run vapid");
 }
 
-/* A price id per band, read by name so a missing one identifies itself. */
+/* A price id per band, read by name so a missing one identifies itself.
+   Tenant rent still uses Stripe. The platform's own subscription does not. */
 export const STRIPE_PRICES = {
   starter: raw("STRIPE_PRICE_STARTER"),
   growth: raw("STRIPE_PRICE_GROWTH"),
   professional: raw("STRIPE_PRICE_PROFESSIONAL"),
   scale: raw("STRIPE_PRICE_SCALE"),
+};
+
+/* --- the platform's own subscription: Dodo Payments ----------------------- */
+
+export const DODO_PAYMENTS_API_KEY = raw("DODO_PAYMENTS_API_KEY");
+export const DODO_PAYMENTS_WEBHOOK_KEY = raw("DODO_PAYMENTS_WEBHOOK_KEY");
+
+/* test talks to the sandbox host. live charges real cards, so it is refused
+   outside production the same way a live Stripe key is. */
+export const DODO_ENVIRONMENT = (() => {
+  const v = raw("DODO_ENVIRONMENT") || (APP_ENV === "production" ? "live" : "test");
+  if (!["test", "live"].includes(v)) {
+    problems.push(
+      `DODO_ENVIRONMENT is "${v}", which is not a mode.\n` +
+      "    Use test or live.");
+    return "test";
+  }
+  if (v === "live" && APP_ENV !== "production") {
+    problems.push(
+      `DODO_ENVIRONMENT is live but APP_ENV is "${APP_ENV}".\n` +
+      "    Use test outside production, or a local run will charge real cards.");
+  }
+  return v;
+})();
+
+export const DODO_API_BASE = DODO_ENVIRONMENT === "live"
+  ? "https://live.dodopayments.com"
+  : "https://test.dodopayments.com";
+
+/* One product per plan band, created in the Dodo dashboard as a subscription. */
+export const DODO_PRODUCTS = {
+  starter: raw("DODO_PRODUCT_STARTER"),
+  growth: raw("DODO_PRODUCT_GROWTH"),
+  professional: raw("DODO_PRODUCT_PROFESSIONAL"),
+  scale: raw("DODO_PRODUCT_SCALE"),
 };
 
 /* A live secret key in a non-production environment is how a test run charges
@@ -391,8 +427,6 @@ export function configSummary() {
     errorReporting: SENTRY_DSN ? "configured" : "unset",
     platformAdmin: PLATFORM_OPERATOR_EMAIL ? "configured" : "unset",
     connect: STRIPE_CONNECT_CLIENT_ID ? "configured" : "unset",
-    billing: STRIPE_SECRET_KEY
-      ? (STRIPE_SECRET_KEY.startsWith("sk_live_") ? "live" : "test")
-      : "unset",
+    billing: DODO_PAYMENTS_API_KEY ? DODO_ENVIRONMENT : "unset",
   };
 }

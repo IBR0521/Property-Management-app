@@ -25,7 +25,7 @@ import { appPage, publicPage, notice, empty, tabs, PEOPLE_TABS } from "../views/
 import { navCounts } from "../lib/counts.js";
 import { storeMany, DOC_TYPES, fileUrl } from "../lib/files.js";
 import { check, clientIp } from "../lib/ratelimit.js";
-import { resolvePublicCompany, companyForToken } from "../lib/tenancy.js";
+import { resolvePublicCompany, companyForToken, publicPath } from "../lib/tenancy.js";
 
 const STATUS_TONE = {
   received: "warn", incomplete: "warn", screening: "brand",
@@ -75,7 +75,7 @@ export function registerApplications(router) {
         <div class="panel">
           <div class="panel__head"><h2>Your application</h2></div>
           <div class="panel__body">
-            <form method="post" action="/apply" class="formgrid">
+            <form method="post" action="${publicPath(company, "/apply")}" class="formgrid">
               <input type="hidden" name="_csrf" value="${ctx.csrf}" />
               <div class="field">
                 <label for="unit_id">Which home</label>
@@ -289,7 +289,7 @@ export function registerApplications(router) {
       staff: ctx.staff, csrf: ctx.csrf, active: "people", counts: await navCounts(cid),
       title: "Applications",
       subtitle: "In the order received",
-      actions: html`<a class="pill outline" href="/apply" target="_blank">Public form</a>`,
+      actions: html`<a class="pill outline" href="${publicPath({ slug: ctx.staff.company_slug }, "/apply")}" target="_blank">Public form</a>`,
       body: html`
         ${tabs(PEOPLE_TABS, "applicants")}
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}

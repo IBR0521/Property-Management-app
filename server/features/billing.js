@@ -26,8 +26,8 @@ import { log } from "../lib/logger.js";
 import {
   PLANS, TRIAL_DAYS, planByKey, planForUnits, outgrown, isWorking, describeStatus,
 } from "../lib/plans.js";
-import { STRIPE_PRICES, STRIPE_SECRET_KEY, APP_BASE_URL } from "../lib/config.js";
-import * as stripe from "../lib/stripe.js";
+import { DODO_PAYMENTS_API_KEY, DODO_PRODUCTS, APP_BASE_URL } from "../lib/config.js";
+import * as dodo from "../lib/dodo.js";
 
 /* Paths a read-only company may still write to. Paying is the whole point, so
    the billing routes cannot themselves be blocked by not having paid — and
@@ -79,7 +79,7 @@ export function registerBilling(router) {
     const status = describeStatus(sub);
     const suggested = planForUnits(units);
     const over = sub.plan_key ? outgrown(sub.plan_key, units) : null;
-    const configured = Boolean(STRIPE_SECRET_KEY);
+    const configured = Boolean(DODO_PAYMENTS_API_KEY);
 
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "billing", counts: await navCounts(cid),
@@ -93,7 +93,7 @@ export function registerBilling(router) {
                Nothing stops working — move to ${over.suggested.name} when it suits you.`) : ""}
 
         ${configured ? "" : notice("warn", "Billing is not connected yet",
-          "No Stripe keys are configured, so plans cannot be started from here. Everything else on this page is real.")}
+          "Plans cannot be started from here yet. The prices below are what this installation would charge once billing is turned on.")}
 
         <div class="panel">
           <div class="panel__head"><h2>What you pay</h2></div>
@@ -110,6 +110,7 @@ export function registerBilling(router) {
               <tbody>${PLANS.map((plan) => {
                 const current = sub.plan_key === plan.key;
                 const fits = plan.maxUnits === null || units <= plan.maxUnits;
+                const productReady = Boolean(DODO_PRODUCTS[plan.key]);
                 return html`
                 <tr>
                   <td><b>${plan.name}</b>${current ? html` <span class="chip" data-tone="ok">current</span>` : ""}
@@ -118,13 +119,13 @@ export function registerBilling(router) {
                     ${suggested.key === plan.key ? html`<span class="cellsub">your size</span>` : ""}</td>
                   <td class="num">${usd(plan.monthlyCents)}</td>
                   <td class="shrink">
-                    ${current ? "" : html`
+                    ${current ? "" : productReady ? html`
                       <form method="post" action="/app/billing/choose">
                         <input type="hidden" name="_csrf" value="${ctx.csrf}" />
                         <input type="hidden" name="plan" value="${plan.key}" />
                         <button class="pill ${fits ? "solid" : "outline"} sm" type="submit"
                                 ${attr("disabled", !configured)}>Choose</button>
-                      </form>`}
+                      </form>` : html`<span class="cellsub">Not set up yet</span>`}
                   </td>
                 </tr>`;
               })}</tbody>
@@ -135,12 +136,12 @@ export function registerBilling(router) {
           </div>
         </div>
 
-        ${sub.stripe_customer_id ? html`
+        ${sub.dodo_customer_id ? html`
           <div class="panel">
             <div class="panel__head"><h2>Invoices and payment method</h2></div>
             <div class="panel__body">
               <p class="lede" style="margin:0 0 0.875rem">
-                Card details, invoices and cancellation are handled on Stripe's own pages.
+                Card details, invoices and cancellation are handled on Dodo Payments' own pages.
                 We never see or store a card number.
               </p>
               ${sub.current_period_end ? html`
@@ -176,10 +177,12 @@ export function registerBilling(router) {
     const plan = planByKey(String(ctx.fields.plan || ""));
     if (!plan) throw new BadRequest("That is not a plan.");
 
-    const priceId = STRIPE_PRICES[plan.key];
-    if (!STRIPE_SECRET_KEY || !priceId) {
+    const productId = DODO_PRODUCTS[plan.key];
+    if (!DODO_PAYMENTS_API_KEY || !productId) {
       return redirect(ctx.res, `/app/billing?m=${encodeURIComponent(
-        `Billing is not connected yet — ${priceId ? "no Stripe key" : `no price configured for ${plan.name}`}.`)}`);
+        DODO_PAYMENTS_API_KEY
+          ? `${plan.name} is not set up for checkout yet.`
+          : "Billing is not connected yet.")}`);
     }
 
     const company = await one("SELECT * FROM company WHERE id = ?", cid);
@@ -187,24 +190,15 @@ export function registerBilling(router) {
     const base = APP_BASE_URL || `${ctx.url.protocol}//${ctx.url.host}`;
 
     try {
-      let customerId = sub.stripe_customer_id;
-      if (!customerId) {
-        const customer = await stripe.createCustomer({
-          companyId: cid, name: company.legal_name || company.name, email: ctx.staff.email,
-        });
-        customerId = customer.id;
-        await update("subscription", sub.id, { stripe_customer_id: customerId, updated_at: stamp() });
-      }
-
-      const session = await stripe.createCheckoutSession({
-        customerId, priceId, companyId: cid, planKey: plan.key,
-        successUrl: `${base}/app/billing?m=${encodeURIComponent("Thank you. Your subscription is starting.")}`,
-        cancelUrl: `${base}/app/billing`,
-        /* Carry the remaining trial across, so choosing a plan early does not
-           cost somebody the days they had left. */
-        trialEndsAt: sub.status === "trialing" ? sub.trial_ends_at : null,
+      const session = await dodo.createCheckout({
+        productId,
+        email: ctx.staff.email,
+        name: company.legal_name || company.name,
+        companyId: cid,
+        planKey: plan.key,
+        returnUrl: `${base}/app/billing?m=${encodeURIComponent("Thank you. Your subscription is starting.")}`,
+        trialDays: remainingTrialDays(sub),
       });
-
       return redirect(ctx.res, session.url);
     } catch (err) {
       log.error("checkout session failed", { err, companyId: cid, plan: plan.key });
@@ -216,13 +210,13 @@ export function registerBilling(router) {
   router.post("/app/billing/portal", async (ctx) => {
     const cid = ctx.staff.company_id;
     const sub = await subscriptionFor(cid);
-    if (!sub.stripe_customer_id) {
+    if (!sub.dodo_customer_id) {
       return redirect(ctx.res, `/app/billing?m=${encodeURIComponent("There is no subscription to manage yet.")}`);
     }
     const base = APP_BASE_URL || `${ctx.url.protocol}//${ctx.url.host}`;
     try {
-      const session = await stripe.createPortalSession({
-        customerId: sub.stripe_customer_id, returnUrl: `${base}/app/billing`,
+      const session = await dodo.createPortalSession({
+        customerId: sub.dodo_customer_id, returnUrl: `${base}/app/billing`,
       });
       redirect(ctx.res, session.url);
     } catch (err) {
@@ -232,9 +226,90 @@ export function registerBilling(router) {
   });
 }
 
-/* --- what the webhook does ------------------------------------------------
+function remainingTrialDays(sub) {
+  if (sub.status !== "trialing" || !sub.trial_ends_at) return 0;
+  const ms = new Date(sub.trial_ends_at).getTime() - Date.now();
+  if (ms <= 0) return 0;
+  return Math.min(365, Math.ceil(ms / 86400000));
+}
 
-   Exported for api/webhooks/stripe.js, which is transport only.
+/* --- what a Dodo webhook does ---------------------------------------------
+
+   Exported for api/webhooks/dodo.js, which is transport only.
+
+   Subscription state is a copy of Dodo's, never computed locally from dates. */
+export async function applyDodoEvent(event) {
+  const kind = String(event?.type || "");
+  const data = event?.data || {};
+  const customerId = data?.customer?.customer_id || data?.customer_id || null;
+  const subscriptionId = data?.subscription_id || null;
+
+  const companyId =
+    data?.metadata?.company_id ||
+    (await companyForDodoCustomer(customerId)) ||
+    (await companyForDodoSubscription(subscriptionId));
+
+  if (!companyId) return { outcome: `${kind}: no company` };
+
+  const sub = await subscriptionFor(companyId);
+  const status = statusFromDodo(kind, data.status);
+  if (!status) return { companyId, outcome: `${kind}: ignored` };
+
+  const planKey = data?.metadata?.plan_key || planKeyForProduct(data?.product_id) || sub.plan_key;
+  await update("subscription", sub.id, {
+    dodo_customer_id: customerId || sub.dodo_customer_id,
+    dodo_subscription_id: subscriptionId || sub.dodo_subscription_id,
+    plan_key: planKey,
+    status,
+    current_period_end: data.next_billing_date || sub.current_period_end,
+    cancel_at_period_end: data.cancel_at_next_billing_date == null
+      ? sub.cancel_at_period_end
+      : (data.cancel_at_next_billing_date ? 1 : 0),
+    updated_at: stamp(),
+  });
+  return { companyId, outcome: `${kind} ${status}` };
+}
+
+function statusFromDodo(kind, status) {
+  if (kind === "subscription.on_hold" || kind === "payment.failed") return "past_due";
+  if (kind === "subscription.cancelled" || kind === "subscription.canceled" || kind === "subscription.expired") {
+    return "canceled";
+  }
+  if (kind === "subscription.failed") return "incomplete";
+  if (kind === "subscription.active" || kind === "subscription.renewed" || kind === "payment.succeeded") {
+    return "active";
+  }
+  if (kind !== "subscription.updated") return null;
+  const known = {
+    active: "active", on_hold: "past_due", cancelled: "canceled", canceled: "canceled",
+    expired: "canceled", failed: "incomplete", pending: "incomplete",
+  };
+  /* An unrecognised status is more likely a new Dodo state than a customer
+     who stopped paying, so it stays working. */
+  return known[status] || "active";
+}
+
+function planKeyForProduct(productId) {
+  if (!productId) return null;
+  return Object.entries(DODO_PRODUCTS).find(([, id]) => id && id === productId)?.[0] || null;
+}
+
+async function companyForDodoCustomer(customerId) {
+  if (!customerId) return null;
+  const row = await get("SELECT company_id FROM subscription WHERE dodo_customer_id = ?", customerId);
+  return row?.company_id || null;
+}
+
+async function companyForDodoSubscription(subscriptionId) {
+  if (!subscriptionId) return null;
+  const row = await get("SELECT company_id FROM subscription WHERE dodo_subscription_id = ?", subscriptionId);
+  return row?.company_id || null;
+}
+
+/* --- what the Stripe webhook does -----------------------------------------
+
+   Still applied if a subscription that was started on Stripe sends an event.
+   New plans are started on Dodo. Exported for api/webhooks/stripe.js.
 
    Subscription state is a copy of Stripe's, never computed locally from dates.
    A local guess about whether somebody has paid eventually disagrees with the

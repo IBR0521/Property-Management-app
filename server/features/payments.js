@@ -28,7 +28,10 @@ import { log } from "../lib/logger.js";
 import { token } from "../lib/ids.js";
 import {
   connectConfigured, authorizeUrl, exchangeCode, accountStatus,
+  accountForKey, acceptableStripeKey,
 } from "../lib/connect.js";
+import { seal, open as openSeal, sealingAvailable } from "../lib/crypto.js";
+import { accessToken as paypalToken } from "../lib/paypal.js";
 import { check, clientIp } from "../lib/ratelimit.js";
 import { APP_BASE_URL } from "../lib/config.js";
 import { quote, describeQuote, availableMethods } from "../lib/fees.js";
@@ -36,9 +39,10 @@ import { id } from "../lib/ids.js";
 import {
   balanceFor, blockedReason, startCheckout, enrolAutopay, cancelAutopay,
   autopayDueToday, settlePayment, failPayment, returnPayment, recordStripePayout,
+  capturePayPal,
 } from "../lib/payments.js";
 
-const METHOD_LABEL = { ach: "Bank account", card: "Debit or credit card" };
+const METHOD_LABEL = { ach: "Bank account", card: "Debit or credit card", paypal: "PayPal" };
 const STATUS_LABEL = {
   pending: "Not finished", processing: "On its way", succeeded: "Paid",
   failed: "Did not go through", returned: "Returned by the bank", refunded: "Refunded",
@@ -87,14 +91,15 @@ export function registerPayments(router) {
                   ? html`, or call <a href="tel:${company.phone}">${company.phone}</a>` : ""}.`)
             : payForm({ company, lease, balance, methods, csrf: ctx.csrf, tok: ctx.params.tok })}
 
-        ${blocked || methods.length === 0 ? "" : autopayPanel({
+        ${blocked || !(methods.some((m) => m === "ach" || m === "card")
+            || (autopay && Number(autopay.active) === 1)) ? "" : autopayPanel({
           company, lease, autopay, method, csrf: ctx.csrf, tok: ctx.params.tok,
         })}
 
         ${historyPanel(history)}`,
       foot: html`${company.name}${company.phone
         ? html` · <a href="tel:${company.phone}">${company.phone}</a>` : ""}
-        · Payments are handled by Stripe on ${company.name}'s account.`,
+        · Payments are taken on ${company.name}'s own account. We never hold the money.`,
     }));
   });
 
@@ -131,17 +136,52 @@ export function registerPayments(router) {
     }
 
     const base = APP_BASE_URL || `${ctx.url.protocol}//${ctx.url.host}`;
+    const cancelled = `${base}/pay/${ctx.params.tok}?e=${encodeURIComponent("Payment cancelled. Nothing was charged.")}`;
     const res = await startCheckout({
       companyId: company.id, leaseId: lease.id, amountCents: amount, kind,
       saveForFuture: String(ctx.fields.save_method || "") === "on",
-      successUrl: `${base}/pay/${ctx.params.tok}/back?s={CHECKOUT_SESSION_ID}`,
-      cancelUrl: `${base}/pay/${ctx.params.tok}?e=${encodeURIComponent("Payment cancelled. Nothing was charged.")}`,
+      successUrl: kind === "paypal"
+        ? `${base}/pay/${ctx.params.tok}/paypal`
+        : `${base}/pay/${ctx.params.tok}/back?s={CHECKOUT_SESSION_ID}`,
+      cancelUrl: cancelled,
     });
 
     if (!res.ok) return back(res.reason || "We could not start that payment.");
     /* 303 so the browser follows with GET and a refresh on Stripe's page does
        not repost this form. */
     return redirect(ctx.res, res.url, 303);
+  });
+
+  /* PayPal sends the tenant back with ?token= the order id. Capturing that
+     order is what moves the money into the company's PayPal account and
+     writes the payment on the lease. */
+  router.get("/pay/:tok/paypal", async (ctx) => {
+    const { company, lease } = await resolve(ctx.params.tok);
+    const orderId = String(ctx.query.token || "");
+    const payment = orderId
+      ? await get(
+        "SELECT * FROM tenant_payment WHERE paypal_order_id = ? AND lease_id = ?",
+        orderId, lease.id)
+      : null;
+    if (!payment) {
+      return redirect(ctx.res, `/pay/${ctx.params.tok}?e=${encodeURIComponent(
+        "We could not match that PayPal payment. If you finished it, call the office.")}`);
+    }
+    if (payment.status === "succeeded") {
+      return redirect(ctx.res, `/pay/${ctx.params.tok}?m=${encodeURIComponent("Payment received.")}`);
+    }
+    try {
+      const captured = await capturePayPal({ company, orderId });
+      if (captured.status !== "COMPLETED") {
+        return redirect(ctx.res, `/pay/${ctx.params.tok}?e=${encodeURIComponent(
+          "PayPal has not finished that payment yet.")}`);
+      }
+      await settlePayment({ paymentId: payment.id });
+    } catch (err) {
+      return redirect(ctx.res, `/pay/${ctx.params.tok}?e=${encodeURIComponent(
+        err.message || "PayPal could not finish the payment.")}`);
+    }
+    return redirect(ctx.res, `/pay/${ctx.params.tok}?m=${encodeURIComponent("Payment received.")}`);
   });
 
   /* --- coming back from Stripe --------------------------------------------- */
@@ -262,6 +302,7 @@ async function resolve(tok) {
             c.accept_ach, c.accept_card, c.ach_fee_model, c.card_fee_model,
             c.ach_fee_split_percent, c.card_fee_split_percent,
             c.ach_fee_bps, c.ach_fee_cap_cents, c.card_fee_bps, c.card_fee_fixed_cents,
+            c.paypal_client_id, c.paypal_secret_sealed,
             u.label, u.id AS uid, p.line1, p.city, p.state
        FROM lease l
        JOIN company c ON c.id = l.company_id
@@ -281,6 +322,8 @@ async function resolve(tok) {
       card_fee_split_percent: row.card_fee_split_percent,
       ach_fee_bps: row.ach_fee_bps, ach_fee_cap_cents: row.ach_fee_cap_cents,
       card_fee_bps: row.card_fee_bps, card_fee_fixed_cents: row.card_fee_fixed_cents,
+      paypal_client_id: row.paypal_client_id,
+      paypal_secret_sealed: row.paypal_secret_sealed,
     },
     lease: row,
     unit: { id: row.uid, label: row.label, line1: row.line1, city: row.city, state: row.state },
@@ -315,7 +358,7 @@ function payForm({ company, lease, balance, methods, csrf, tok }) {
     <div class="panel">
       <div class="panel__head">
         <h2>Make a payment</h2>
-        <p>You will finish on Stripe's secure page. We never see your bank or card details.</p>
+        <p>You will finish on a secure payment page. We never see your bank, card, or PayPal password.</p>
       </div>
       <div class="panel__body">
         <form method="post" action="/pay/${tok}" class="formgrid">
@@ -352,17 +395,18 @@ function payForm({ company, lease, balance, methods, csrf, tok }) {
                 </span>` : ""}
           </div>
 
+          ${methods.some((m) => m === "ach" || m === "card") ? html`
           <div class="field">
             <div class="radioset">
               <label class="radiotile">
                 <input type="checkbox" name="save_method" />
                 <span>Save this account for automatic payments
                   <small>Saving it does not switch anything on. You choose the limit and the
-                  date afterwards, and you can remove it whenever you like.</small>
+                  date afterwards, and you can remove it whenever you like. This is for a bank account or a card.</small>
                 </span>
               </label>
             </div>
-          </div>
+          </div>` : ""}
 
           <div class="btnrow">
             <button class="pill solid" type="submit">Continue to pay</button>
@@ -535,14 +579,16 @@ function nextCharge(lease, autopay) {
    failure. That is correct whichever event carries the news, and it is why a
    name I have not anticipated degrades into a recorded unknown rather than
    into money silently staying on the books. */
-export async function applyConnectEvent(event) {
+export async function applyConnectEvent(event, { companyId = null } = {}) {
   const kind = String(event?.type || "");
   const object = event?.data?.object || {};
   const accountId = String(event?.account || "");
 
   const company = accountId
     ? await get("SELECT * FROM company WHERE stripe_account_id = ?", accountId)
-    : null;
+    : companyId
+      ? await get("SELECT * FROM company WHERE id = ?", companyId)
+      : null;
   if (!company) return { outcome: `${kind}: no connected company` };
 
   const payment = await paymentForEvent(company.id, object);
@@ -772,21 +818,24 @@ function registerPaymentSettings(router) {
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "payments", counts: await navCounts(cid),
       title: "Tenant payments",
-      subtitle: company.stripe_account_id
+      subtitle: company.stripe_account_id || company.paypal_client_id
         ? "Rent paid online, into your own account"
         : "Not connected yet",
       body: html`
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
         ${ctx.query.e ? notice("danger", null, ctx.query.e) : ""}
 
-        ${connectPanel({ company, csrf: ctx.csrf, connectReady: connectConfigured() })}
+        ${connectConfigured() || company.stripe_account_id
+          ? connectPanel({ company, csrf: ctx.csrf, connectReady: connectConfigured() })
+          : ""}
+        ${keysPanel({ company, csrf: ctx.csrf })}
 
+        ${company.stripe_account_id || company.paypal_client_id ? totalsPanel(totals) : ""}
         ${company.stripe_account_id ? html`
-          ${totalsPanel(totals)}
           ${payoutsPanel({ payouts, inTransitCents: Number(inTransit?.c || 0) })}
           ${feesPanel({ company, csrf: ctx.csrf })}
-          ${linksPanel({ company, origin })}
         ` : ""}
+        ${company.stripe_account_id || company.paypal_client_id ? linksPanel({ company, origin }) : ""}
 
         ${blockPanel({ blocked, csrf: ctx.csrf })}
         ${recentPanel(recent)}`,
@@ -892,10 +941,97 @@ function registerPaymentSettings(router) {
     await update("company", cid, {
       stripe_account_id: null, stripe_charges_enabled: 0, stripe_payouts_enabled: 0,
       stripe_requirements: null, stripe_checked_at: null,
+      stripe_secret_sealed: null, stripe_webhook_sealed: null,
     });
     log.warn("stripe account disconnected", { company: cid, by: ctx.staff.id });
     return redirect(ctx.res, `/app/payments?m=${encodeURIComponent(
       "Disconnected. Tenants can no longer pay online.")}`);
+  });
+
+  /* The company's own Stripe secret. Checkout uses this key directly, so the
+     charge is on their account and no platform Stripe application is involved. */
+  router.post("/app/payments/stripe-key", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const secret = String(ctx.fields.secret || "").trim();
+    const webhook = String(ctx.fields.webhook || "").trim();
+    const fail = (m) => redirect(ctx.res, `/app/payments?e=${encodeURIComponent(m)}`);
+
+    if (!acceptableStripeKey(secret)) {
+      return fail("Paste a Stripe secret key or restricted key. It starts with sk_ or rk_.");
+    }
+    if (!webhook.startsWith("whsec_")) {
+      return fail("Paste the webhook signing secret. It starts with whsec_.");
+    }
+    if (!sealingAvailable()) {
+      return fail("This installation cannot store a key yet.");
+    }
+
+    let account;
+    try {
+      account = await accountForKey(secret);
+    } catch {
+      /* Stripe's own message repeats part of the key. The address bar is the
+         wrong place for that. */
+      return fail("Stripe refused that key. Use a secret or restricted key from the account that should receive the rent.");
+    }
+    if (!account?.id) return fail("Stripe did not say which account that key belongs to.");
+
+    const taken = await get(
+      "SELECT id FROM company WHERE stripe_account_id = ? AND id <> ?", account.id, cid);
+    if (taken) return fail("That Stripe account is already connected to another company on this platform.");
+
+    await update("company", cid, {
+      stripe_account_id: account.id,
+      stripe_secret_sealed: seal(secret),
+      stripe_webhook_sealed: seal(webhook),
+      stripe_charges_enabled: account.chargesEnabled ? 1 : 0,
+      stripe_payouts_enabled: account.payoutsEnabled ? 1 : 0,
+      stripe_requirements: JSON.stringify(account.requirements || []).slice(0, 900),
+      stripe_checked_at: stamp(),
+    });
+    return redirect(ctx.res, `/app/payments?m=${encodeURIComponent(
+      "Stripe key saved. Add the webhook address Stripe shows on this page.")}`);
+  });
+
+  router.post("/app/payments/paypal", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const clientId = String(ctx.fields.client_id || "").trim();
+    const secret = String(ctx.fields.secret || "").trim();
+    const live = ctx.fields.live ? 1 : 0;
+    const fail = (m) => redirect(ctx.res, `/app/payments?e=${encodeURIComponent(m)}`);
+
+    if (clientId.length < 8 || secret.length < 8) {
+      return fail("Paste the PayPal client id and secret from that company's app.");
+    }
+    if (!sealingAvailable()) return fail("This installation cannot store a key yet.");
+
+    try {
+      await paypalToken({ clientId, secret, live: live === 1 });
+    } catch (err) {
+      return fail(err.message || "PayPal refused those keys.");
+    }
+
+    await update("company", cid, {
+      paypal_client_id: clientId,
+      paypal_secret_sealed: seal(secret),
+      paypal_live: live,
+    });
+    return redirect(ctx.res, `/app/payments?m=${encodeURIComponent("PayPal is connected.")}`);
+  });
+
+  router.post("/app/payments/paypal/remove", async (ctx) => {
+    const cid = ctx.staff.company_id;
+    const inFlight = await get(
+      `SELECT COUNT(*)::int AS n FROM tenant_payment
+        WHERE company_id = ? AND kind = 'paypal' AND status IN ('pending', 'processing')`, cid);
+    if (Number(inFlight.n) > 0) {
+      return redirect(ctx.res, `/app/payments?e=${encodeURIComponent(
+        "A PayPal payment is still unfinished. Remove the key after it has settled.")}`);
+    }
+    await update("company", cid, {
+      paypal_client_id: null, paypal_secret_sealed: null, paypal_live: 0,
+    });
+    return redirect(ctx.res, `/app/payments?m=${encodeURIComponent("PayPal disconnected.")}`);
   });
 
   /* --- what it costs, and who bears it ------------------------------------- */
@@ -966,7 +1102,10 @@ function registerPaymentSettings(router) {
 /* --- reading the account back from Stripe ---------------------------------- */
 
 async function refreshAccount(companyId, accountId) {
-  const status = await accountStatus(accountId);
+  const company = await one("SELECT stripe_secret_sealed FROM company WHERE id = ?", companyId);
+  const status = company?.stripe_secret_sealed
+    ? await accountForKey(openSeal(company.stripe_secret_sealed))
+    : await accountStatus(accountId);
   await update("company", companyId, {
     stripe_charges_enabled: status.chargesEnabled ? 1 : 0,
     stripe_payouts_enabled: status.payoutsEnabled ? 1 : 0,
@@ -1002,6 +1141,74 @@ function minutesSince(iso) {
 
 /* --- staff views ----------------------------------------------------------- */
 
+function keysPanel({ company, csrf }) {
+  const base = APP_BASE_URL || "";
+  const hook = base
+    ? `${base}/api/webhooks/stripe-rent?company=${company.id}`
+    : `/api/webhooks/stripe-rent?company=${company.id}`;
+  const stripeOn = Boolean(company.stripe_secret_sealed);
+  const paypalOn = Boolean(company.paypal_secret_sealed);
+
+  return html`
+    <div class="panel">
+      <div class="panel__head">
+        <h2>Your own payment keys</h2>
+        <p>Rent is charged with the key you paste. The money settles in that account, not in ours.</p>
+      </div>
+      <div class="panel__body">
+        ${stripeOn ? html`
+          ${notice("ok", "Stripe key saved",
+            html`In that Stripe account, add a webhook endpoint pointing at
+                 <span style="display:block;margin-top:0.5rem;word-break:break-all">${hook}</span>
+                 Listen for checkout.session.completed, checkout.session.async_payment_succeeded,
+                 checkout.session.async_payment_failed, charge.refunded, and payout.paid.`)}` : company.stripe_account_id ? "" : html`
+          <form method="post" action="/app/payments/stripe-key" class="formgrid">
+            <input type="hidden" name="_csrf" value="${csrf}" />
+            <div class="field">
+              <label for="stripe-secret">Stripe secret key</label>
+              <input id="stripe-secret" name="secret" type="password" autocomplete="off"
+                     placeholder="sk_live_… or rk_live_…" required />
+            </div>
+            <div class="field">
+              <label for="stripe-webhook">Webhook signing secret</label>
+              <input id="stripe-webhook" name="webhook" type="password" autocomplete="off"
+                     placeholder="whsec_…" required />
+            </div>
+            <button class="pill solid" type="submit">Save Stripe key</button>
+          </form>`}
+
+        ${stripeOn || !company.stripe_account_id ? html`
+          <hr style="margin:1.25rem 0;border:0;border-top:1px solid var(--hairline)" />` : ""}
+
+        ${paypalOn ? html`
+          ${notice("ok", "PayPal connected",
+            Number(company.paypal_live) === 1
+              ? "Live payments. A tenant who clicks Pay finishes on PayPal."
+              : "Sandbox payments. Switch to live when you are ready to take real rent.")}
+          <form method="post" action="/app/payments/paypal/remove">
+            <input type="hidden" name="_csrf" value="${csrf}" />
+            <button class="pill outline" type="submit">Remove PayPal</button>
+          </form>` : html`
+          <form method="post" action="/app/payments/paypal" class="formgrid">
+            <input type="hidden" name="_csrf" value="${csrf}" />
+            <div class="field">
+              <label for="paypal-id">PayPal client id</label>
+              <input id="paypal-id" name="client_id" type="text" autocomplete="off" required />
+            </div>
+            <div class="field">
+              <label for="paypal-secret">PayPal secret</label>
+              <input id="paypal-secret" name="secret" type="password" autocomplete="off" required />
+            </div>
+            <label class="check">
+              <input type="checkbox" name="live" value="1" />
+              <span>These are live keys, not sandbox</span>
+            </label>
+            <button class="pill solid" type="submit">Save PayPal</button>
+          </form>`}
+      </div>
+    </div>`;
+}
+
 function connectPanel({ company, csrf, connectReady }) {
   if (!company.stripe_account_id) {
     return html`
@@ -1012,11 +1219,11 @@ function connectPanel({ company, csrf, connectReady }) {
         </div>
         <div class="panel__body">
           ${empty("Not connected",
-            html`Tenants cannot pay online until this is done. You will complete Stripe's own
-                 onboarding and hold the account yourself, which is what keeps your money out
-                 of our hands and your chargebacks in yours.`)}
+            html`You can connect the Stripe account you already have, or paste that account's
+                 secret key below. Either way the charge is on your account and the money
+                 settles there.`)}
           ${connectReady ? "" : notice("warn", "Not available on this deployment",
-            "Stripe Connect needs STRIPE_SECRET_KEY and STRIPE_CONNECT_CLIENT_ID to be set.")}
+            "Online payments have not been turned on for this installation yet.")}
         </div>
         <div class="panel__foot">
           <form method="post" action="/app/payments/connect">

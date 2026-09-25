@@ -65,6 +65,9 @@ const PUBLIC = {
   "/feeds/listings.xml": "A pointer at the per-company feeds. Carries no listings.",
   "/feeds/:slug/listings.xml": "One company's syndication feed. An aggregator holds no account.",
 
+  "/robots.txt": "Tells a crawler which of these addresses are vacancies and which are private.",
+  "/c/:slug/sitemap.xml": "One company's published vacancies. A platform-wide list would name every company.",
+
   "/listings": "Places to rent. Meant to be found.",
   "/listings/:id": "One of those places, with an enquiry form on it.",
   "/c/:slug/listings": "A named company's vacancies, on its own address.",

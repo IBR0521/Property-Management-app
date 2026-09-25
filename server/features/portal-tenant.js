@@ -28,6 +28,7 @@ import { id } from "../lib/ids.js";
 import { storeUpload } from "../lib/files.js";
 import { DOC_TYPES } from "../lib/http.js";
 import { stateFor, record } from "../lib/delivery/consent.js";
+import { publicPath } from "../lib/tenancy.js";
 
 /* The real status values, from the CHECK constraint on work_order. */
 const JOB_TONE = {
@@ -227,7 +228,7 @@ function tenancyCard({ lease, balance, company }) {
           ${Number(lease.payments_blocked)
             ? ""
             : html`<a class="pill solid sm" href="/pay/${lease.pay_token}">Pay rent</a>`}
-          <a class="pill outline sm" href="/report">Report a repair</a>
+          <a class="pill outline sm" href="${publicPath(company, "/report")}">Report a repair</a>
           <a class="pill outline sm" href="/portal/renting/${lease.id}"
              aria-label="Everything about ${lease.line1}${lease.label ? `, unit ${lease.label}` : ""}">Everything else</a>
         </div>

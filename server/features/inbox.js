@@ -60,9 +60,9 @@ export function registerInbox(router) {
         ${ctx.query.e ? notice("danger", null, ctx.query.e) : ""}
 
         ${PORTAL_REPLY_DOMAIN ? "" : notice("warn", "Replies by email will not thread yet",
-          html`No reply domain is configured, so a tenant replying to one of your emails
+          html`A reply address has not been set up, so a tenant replying to one of your emails
                starts a new conversation instead of continuing this one. Texts and the
-               portal are unaffected. See <code>PORTAL_REPLY_DOMAIN</code>.`)}
+               portal are unaffected.`)}
 
         <div class="panel">
           <div class="panel__head">

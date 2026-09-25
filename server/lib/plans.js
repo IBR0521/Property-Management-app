@@ -13,9 +13,8 @@
    last month.
 
    The prices here are the source of truth for what is *displayed*. What is
-   charged is whatever the corresponding Stripe price says, and the billing
-   page shows both when they disagree rather than hiding it — a mismatch is a
-   configuration error somebody needs to see, not something to paper over. */
+   charged is the matching product in Dodo Payments. A missing product is a
+   configuration error the billing page names, rather than something to hide. */
 
 export const PLANS = [
   {
@@ -73,10 +72,15 @@ export function outgrown(planKey, units) {
   return { plan, units: n, suggested: planForUnits(n) };
 }
 
-/* The Stripe price id for a band. Each is its own environment variable rather
-   than a single JSON blob, so a missing one names itself in the error. */
+/* The Stripe price id for a band. Kept for anything still reading the old name. */
 export function stripePriceEnvKey(planKey) {
   return `STRIPE_PRICE_${String(planKey).toUpperCase()}`;
+}
+
+/* The Dodo Payments product for a band. One variable each, so a missing one
+   names itself. */
+export function dodoProductEnvKey(planKey) {
+  return `DODO_PRODUCT_${String(planKey).toUpperCase()}`;
 }
 
 /* States in which the company may keep working. Anything else is read-only.

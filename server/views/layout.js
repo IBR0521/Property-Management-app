@@ -24,11 +24,18 @@ export const PORTAL_MANIFEST = "/app-assets/portal.webmanifest";
    belong together: the worker exists to make an installed copy open offline,
    and a one-off tokenised page has no business leaving one behind on a
    device. */
-const HEAD = (title, { install = null } = {}) => html`
+const HEAD = (title, { install = null, index = false, description = null, canonical = null, image = null } = {}) => html`
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${title}</title>
-<meta name="robots" content="noindex, nofollow" />
+<meta name="robots" content="${index ? "index, follow" : "noindex, nofollow"}" />
+${description ? html`<meta name="description" content="${description}" />` : ""}
+${canonical ? html`<link rel="canonical" href="${canonical}" />` : ""}
+${index ? html`<meta property="og:title" content="${title}" />
+<meta property="og:type" content="website" />
+${description ? html`<meta property="og:description" content="${description}" />` : ""}
+${canonical ? html`<meta property="og:url" content="${canonical}" />` : ""}
+${image ? html`<meta property="og:image" content="${image}" />` : ""}` : ""}
 <meta name="theme-color" content="#1b184e" />
 <link rel="icon" href="/app-assets/icons/icon-192.png" sizes="192x192" type="image/png" />
 <link rel="apple-touch-icon" href="/app-assets/icons/icon-192.png" />
@@ -278,10 +285,11 @@ export function portalPage({ title, heading, lede, body, person, company, tabs: 
    followed a one-off link to report a leak should not come away with a
    service worker on their phone. The portal's own sign-in pages pass it,
    because that is where a tenant would install from. */
-export function publicPage({ title, heading, lede, body, company, foot, install = null }) {
+export function publicPage({ title, heading, lede, body, company, foot, install = null, index = false, description = null, canonical = null, image = null, jsonLd = null }) {
   return doc(html`
 <html lang="en">
-<head>${HEAD(title, { install })}</head>
+<head>${HEAD(title, { install, index, description, canonical, image })}
+${jsonLd ? html`<script type="application/ld+json">${raw(jsonLd)}</script>` : ""}</head>
 <body class="antialiased">
 <div class="pub" role="main">
   <div class="pub__brand">${icons.logo}<b>${company?.name || "Property operations"}</b></div>

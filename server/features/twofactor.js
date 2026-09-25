@@ -109,7 +109,7 @@ export function registerTwoFactor(router) {
         ${ctx.query.required && !enrolled ? notice("warn", "Your company requires this",
           "Set it up to carry on. It takes a minute and needs an authenticator app on your phone.") : ""}
         ${sealingAvailable() ? "" : notice("danger", "Encryption is not configured",
-          "APP_ENCRYPTION_KEY is unset, so an authenticator secret cannot be stored safely. Two-factor authentication is unavailable until it is.")}
+          "An authenticator secret cannot be stored safely until encryption is set up. Two-factor authentication is unavailable until then.")}
 
         ${enrolled
           ? enrolledPanel({ csrf: ctx.csrf, staff: ctx.staff, left })

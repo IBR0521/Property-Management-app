@@ -54,6 +54,22 @@ async function listing(fields = {}) {
 const at = (path) => `/c/${company.slug}${path}`;
 
 describe("the index", () => {
+  test("a live listing can be found, and the staff app cannot", async () => {
+    const l = await listing();
+    const { body } = await visitor.text(at("/listings"));
+    assert.match(body, /name="robots" content="index, follow"/);
+    assert.match(body, new RegExp(`rel="canonical" href="[^"]+/c/${company.slug}/listings"`));
+    const one = await visitor.text(at(`/listings/${l.id}`));
+    assert.match(one.body, /application\/ld\+json/);
+    assert.match(one.body, /Bright two-bed near the park/);
+    const map = await visitor.get(at("/sitemap.xml"));
+    assert.equal(map.status, 200);
+    assert.match(await map.text(), new RegExp(`/listings/${l.id}`));
+    const robots = await (await visitor.get("/robots.txt")).text();
+    assert.match(robots, /Disallow: \/app/);
+    assert.match(robots, /Allow: \/c\//);
+  });
+
   test("it shows what is live, with the rent", async () => {
     await listing();
     const { body } = await visitor.text(at("/listings"));

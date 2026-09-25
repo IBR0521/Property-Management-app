@@ -19,6 +19,7 @@
   --danger:#b42318;  --danger-wash:#fef3f2;  --danger-line:#fecdca;
   --warn:#b54708;    --warn-wash:#fffaeb;    --warn-line:#fedf89;
   --ok:#067647;      --ok-wash:#ecfdf3;      --ok-line:#abefc6;
+  --ink-faint:#8b919a;
 
   --shell-nav:17rem;
   --panel-pad:1.25rem;
@@ -46,11 +47,11 @@ body{ background:var(--surface); }
 
 .shell__nav{
   background:var(--brand-deep); color:#fff;
-  display:flex; flex-direction:column; gap:1.5rem;
-  padding:1.5rem 1rem;
-  position:sticky; top:0; height:100vh; overflow-y:auto;
+  display:flex; flex-direction:column; gap:1rem;
+  padding:1.25rem 0.75rem 1rem;
+  position:sticky; top:0; height:100vh; overflow:hidden;
 }
-@media (max-width:60rem){ .shell__nav{ position:static; height:auto; } }
+@media (max-width:60rem){ .shell__nav{ position:static; height:auto; overflow:visible; } }
 
 /* The menu, folded on a phone and open everywhere else.
 
@@ -87,33 +88,50 @@ body{ background:var(--surface); }
   }
   .shell__menucount:empty{ display:none; }
 
-  .shell__toggle:not(:checked) ~ .shell__links{ display:none; }
-}
+  .shell__toggle:not(:checked) ~ .shell__links,
+  .shell__toggle:not(:checked) ~ .shell__foot{ display:none; }
+  .shell__links{ overflow:visible; flex:none; min-height:0; }
 }
 
 .shell__brand{
-  display:flex; align-items:center; gap:0.625rem;
-  padding:0 0.5rem 1.25rem;
+  display:flex; align-items:center; gap:0.75rem;
+  padding:0.25rem 0.75rem 1rem;
   border-bottom:1px solid rgba(255,255,255,.14);
+  flex:none;
 }
-.shell__brand svg{ width:1.375rem; height:1.375rem; flex:none; color:#fff; }
-.shell__brand b{ font-size:0.9375rem; font-weight:500; letter-spacing:0.02em; display:block; }
-.shell__brand span{ font-size:0.6875rem; color:rgba(255,255,255,.55); display:block; }
+.shell__brand svg{ width:1.5rem; height:1.5rem; flex:none; color:#fff; }
+.shell__brand b{ font-size:1rem; font-weight:500; letter-spacing:0.01em; display:block; line-height:1.2; }
+.shell__brand span{ font-size:0.75rem; color:rgba(255,255,255,.62); display:block; }
+
+.shell__links{
+  display:flex; flex-direction:column; gap:1.25rem;
+  flex:1; min-height:0; overflow-y:auto;
+  padding:0.25rem 0.25rem 0.75rem;
+  scrollbar-width:thin;
+  scrollbar-color:rgba(255,255,255,.28) transparent;
+}
+.shell__links::-webkit-scrollbar{ width:8px; }
+.shell__links::-webkit-scrollbar-thumb{
+  background:rgba(255,255,255,.28); border-radius:99px; border:2px solid transparent; background-clip:padding-box;
+}
 
 .navgroup{ display:flex; flex-direction:column; gap:0.125rem; }
 .navgroup h3{
-  font-size:0.625rem; font-weight:500; text-transform:uppercase; letter-spacing:0.16em;
-  color:rgba(255,255,255,.42); padding:0 0.5rem; margin-bottom:0.5rem;
+  font-size:0.6875rem; font-weight:500; text-transform:uppercase; letter-spacing:0.14em;
+  color:rgba(255,255,255,.62); padding:0.25rem 0.75rem 0.375rem;
 }
 .navlink{
   display:flex; align-items:center; gap:0.625rem;
-  padding:0.5rem 0.625rem; border-radius:var(--radius-xl);
-  font-size:0.875rem; color:rgba(255,255,255,.78);
+  padding:0.5rem 0.75rem; border-radius:0.5rem;
+  font-size:0.875rem; color:rgba(255,255,255,.82);
   transition:background .15s ease, color .15s ease;
 }
-.navlink svg{ width:1.0625rem; height:1.0625rem; flex:none; opacity:.85; }
+.navlink svg{ width:1.0625rem; height:1.0625rem; flex:none; opacity:.9; }
 .navlink:hover{ background:rgba(255,255,255,.08); color:#fff; }
-.navlink[aria-current="page"]{ background:var(--brand); color:#fff; }
+.navlink[aria-current="page"]{
+  background:rgba(255,255,255,.14); color:#fff;
+  box-shadow:inset 3px 0 0 #c7c4ff;
+}
 .navlink__count{
   margin-left:auto; font-size:0.6875rem; font-weight:500;
   padding:0.0625rem 0.4375rem; border-radius:var(--radius-pill);
@@ -122,7 +140,11 @@ body{ background:var(--surface); }
 .navlink__count[data-tone="danger"]{ background:var(--danger); }
 .navlink__count[data-tone="warn"]{ background:var(--warn); }
 
-.shell__foot{ margin-top:auto; padding-top:1rem; border-top:1px solid rgba(255,255,255,.14); }
+.shell__foot{
+  flex:none; margin-top:0;
+  padding:0.875rem 0.25rem 0.25rem;
+  border-top:1px solid rgba(255,255,255,.14);
+}
 .shell__who{ font-size:0.8125rem; color:rgba(255,255,255,.7); padding:0 0.5rem 0.625rem; }
 .shell__who b{ display:block; color:#fff; font-weight:500; }
 
@@ -242,6 +264,21 @@ table.data a:hover{ text-decoration:underline; }
   font-family:inherit; color:var(--ink);
 }
 .field select:focus{ outline:none; border-color:var(--brand-light); box-shadow:0 0 0 2px var(--brand-light); }
+/* The marketing stylesheet sets every label in small capitals. That suits a
+   landing-page modal and makes a back-office form harder to scan. */
+.field > label{
+  font-size:0.8125rem; font-weight:500; text-transform:none; letter-spacing:0.01em;
+  color:var(--ink); margin-bottom:0.375rem;
+}
+/* The marketing stylesheet sets every label in small capitals with wide
+   tracking. That is a caption on a landing-page form. On an operations
+   screen it makes a legal name look like a section heading. Sentence case,
+   at body size, and only the label itself — radio tiles reset themselves
+   further down. */
+.field > label{
+  font-size:0.8125rem; font-weight:500; text-transform:none; letter-spacing:0.01em;
+  color:var(--ink); margin-bottom:0.375rem;
+}
 .field__help{ font-size:0.75rem; color:var(--ink-soft); margin-top:0.375rem; }
 .field__err{ font-size:0.8125rem; font-weight:500; color:var(--danger); margin-top:0.375rem; display:block; }
 .field__err:empty{ display:none; }
@@ -270,8 +307,16 @@ table.data a:hover{ text-decoration:underline; }
 
 .btnrow{ display:flex; gap:0.625rem; flex-wrap:wrap; align-items:center; }
 
+/* The marketing pill is a landing-page button: capitals, wide tracking, and an
+   icon that slides on hover. In the back office that reads as shouting, and
+   the slide makes a Save button feel like a carousel control. */
+.pill{
+  text-transform:none; letter-spacing:0.01em;
+  padding:0.625rem 1.125rem;
+}
+.pill:hover svg{ transform:none; }
 /* Compact button in the existing .pill idiom, for table rows and toolbars. */
-.pill.sm{ padding:0.5rem 1rem; font-size:0.75rem; }
+.pill.sm{ padding:0.5rem 1rem; font-size:0.8125rem; }
 .pill.danger{ background:var(--danger); color:#fff; }
 .pill.danger:hover{ background:#8f1d13; }
 

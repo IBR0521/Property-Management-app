@@ -33,6 +33,29 @@ export function connectConfigured() {
    would be made as the platform, which for a charge means the platform
    receiving the money. Making it a required first argument means that mistake
    cannot be made by omission. */
+/* A call made with the property company's own secret key.
+
+   There is no Stripe-Account header and no platform key. The key is already
+   that company's account, so the charge cannot land on us. Passing the
+   platform key here would do the opposite, so that key is refused. */
+async function callDirect(secret, path, { method = "POST", body = null, idempotencyKey = null } = {}) {
+  if (!secret || secret === STRIPE_SECRET_KEY) {
+    throw new Error("A company's own Stripe key is required.");
+  }
+  const res = await fetch(`${API}${path}`, {
+    method,
+    headers: {
+      authorization: `Bearer ${secret}`,
+      "content-type": "application/x-www-form-urlencoded",
+      "stripe-version": "2024-06-20",
+      ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}),
+    },
+    body: body ? encode(body) : undefined,
+    signal: AbortSignal.timeout(20_000),
+  });
+  return readStripe(res, path);
+}
+
 async function callAs(accountId, path, { method = "POST", body = null, idempotencyKey = null } = {}) {
   if (!STRIPE_SECRET_KEY) {
     const err = new Error("Stripe is not configured — STRIPE_SECRET_KEY is unset.");
@@ -55,6 +78,10 @@ async function callAs(accountId, path, { method = "POST", body = null, idempoten
     body: body ? encode(body) : undefined,
     signal: AbortSignal.timeout(20_000),
   });
+  return readStripe(res, path);
+}
+
+async function readStripe(res, path) {
 
   const payload = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -66,6 +93,27 @@ async function callAs(accountId, path, { method = "POST", body = null, idempoten
     throw err;
   }
   return payload;
+}
+
+/* The account that owns this secret key. Used when a company pastes its own
+   key, so we learn the account id and whether it can take payments without
+   a platform Connect application. */
+export async function accountForKey(secret) {
+  const account = await callDirect(secret, "/account", { method: "GET" });
+  return {
+    id: account.id,
+    chargesEnabled: Boolean(account.charges_enabled),
+    payoutsEnabled: Boolean(account.payouts_enabled),
+    requirements: [
+      ...(account?.requirements?.currently_due || []),
+      ...(account?.requirements?.past_due || []),
+    ],
+  };
+}
+
+export function acceptableStripeKey(value) {
+  return /^sk_(test|live)_[A-Za-z0-9]+$/.test(String(value || "").trim())
+    || /^rk_(test|live)_[A-Za-z0-9]+$/.test(String(value || "").trim());
 }
 
 /* --- connecting ----------------------------------------------------------- */
@@ -136,7 +184,7 @@ export async function accountStatus(accountId) {
    belong to the destination-charge model, where funds land on the platform
    first — which is the model this design refuses. */
 export async function createPaymentIntent({
-  accountId, amountCents, currency = "usd", paymentMethodId, customerId,
+  accountId, secret = null, amountCents, currency = "usd", paymentMethodId, customerId,
   description, metadata = {}, confirm = true, offSession = false, mandateId = null,
   idempotencyKey = null,
 }) {
@@ -156,7 +204,8 @@ export async function createPaymentIntent({
   if (mandateId) body.mandate = mandateId;
   if (confirm) body.payment_method_types = ["us_bank_account", "card"];
 
-  return await callAs(accountId, "/payment_intents", { body, idempotencyKey });
+  if (secret) return callDirect(secret, "/payment_intents", { body, idempotencyKey });
+  return callAs(accountId, "/payment_intents", { body, idempotencyKey });
 }
 
 export async function getPaymentIntent(accountId, intentId) {
@@ -201,7 +250,7 @@ export async function createSetupIntent({ accountId, customerId, kinds = ["us_ba
    Autopay uses `createPaymentIntent` instead, because nobody is present to
    complete a hosted page at two in the morning. */
 export async function createCheckoutSession({
-  accountId, amountCents, currency = "usd", methods = ["us_bank_account"],
+  accountId, secret = null, amountCents, currency = "usd", methods = ["us_bank_account"],
   description, successUrl, cancelUrl, customerId = null,
   saveForFuture = false, metadata = {}, idempotencyKey = null,
 }) {
@@ -227,7 +276,11 @@ export async function createCheckoutSession({
     if (!customerId) body.customer_creation = "always";
   }
 
-  return await callAs(accountId, "/checkout/sessions", { body, idempotencyKey });
+  /* A pasted key is already the company's account. Using the platform key
+     and a Stripe-Account header here would require an application we do
+     not have, and falling back to it would charge us. */
+  if (secret) return callDirect(secret, "/checkout/sessions", { body, idempotencyKey });
+  return callAs(accountId, "/checkout/sessions", { body, idempotencyKey });
 }
 
 export async function getCheckoutSession(accountId, sessionId) {
