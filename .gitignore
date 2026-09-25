@@ -8,3 +8,7 @@ node_modules/
 .vercel
 .env
 .env.local
+.env*.local
+
+# Generated secrets, never committed. See docs/WHERE-TO-GET-KEYS.md.
+secrets-*.txt
