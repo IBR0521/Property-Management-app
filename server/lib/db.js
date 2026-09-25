@@ -254,7 +254,21 @@ function norm(v) {
 
 let migrated = null;
 export function ready() {
-  if (!migrated) migrated = migrate();
+  if (!migrated) {
+    /* The rejection is deliberately not cached.
+
+       This used to hold the promise whatever became of it, so a single
+       transient failure — a pooler recycling a connection, a lock wait, a
+       concurrent deploy migrating at the same moment — was remembered for the
+       life of the process. On a laptop that is a restart. On a serverless
+       instance it is every request that instance goes on to serve, answering
+       500 long after the cause has gone, with nothing in the log at the time
+       it happens to explain why. */
+    migrated = migrate().catch((err) => {
+      migrated = null;
+      throw err;
+    });
+  }
   return migrated;
 }
 
@@ -292,20 +306,61 @@ export async function migrate() {
   const pending = readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()
     .filter((f) => !done.has(f));
 
+  let applied = 0;
   for (const file of pending) {
-    const sql = readFileSync(join(dir, file), "utf8");
-    // Postgres runs a whole file in one implicit transaction when sent as a
-    // single simple query, so a failed migration leaves nothing behind.
-    await db.unsafe(sql);
-    await run("INSERT INTO schema_migration (name, applied_at) VALUES (?, ?)", file, new Date().toISOString());
-    console.log(`[db] applied ${file}`);
+    if (await applyOne(file, readFileSync(join(dir, file), "utf8"))) applied += 1;
   }
 
   /* A migration that adds a table would otherwise leave it exposed to the
      REST API until someone remembered. Idempotent, and only runs when the
      schema actually changed. */
-  if (pending.length) await enforceRowLevelSecurity();
-  return pending.length;
+  if (applied) await enforceRowLevelSecurity();
+  return applied;
+}
+
+/* An arbitrary fixed number. Only its constancy matters: every process that
+   migrates this database has to ask for the same lock. */
+const MIGRATION_LOCK = 41_209_937;
+
+/* One migration, atomically and alone.
+
+   Two faults are being closed here, and both of them are permanent rather
+   than transient, which is why they are worth the transaction.
+
+   The DDL and the row that records it were two separate statements. Postgres
+   wraps a multi-statement file in an implicit transaction, so the *schema*
+   change was atomic — but the bookkeeping INSERT that followed was not part of
+   it. Anything between the two (a killed function, a dropped connection, and
+   on Vercel a 15-second wall clock while eight migrations run against a
+   database on another continent) left the migration applied and unrecorded.
+   Every run afterwards then tried it again and failed on "already exists",
+   forever. Not a transient failure: a database that can never migrate again
+   without somebody editing the migration table by hand.
+
+   And nothing serialised two processes migrating at once. A deploy is not one
+   process — it is as many concurrent instances as there are requests, each
+   with a cold module and an empty cache, all reading the same pending list and
+   all running it. The advisory lock is taken *inside* the transaction
+   (`pg_advisory_xact_lock`, not the session-level form) because the transaction
+   pooler only guarantees a single backend for the length of a transaction; a
+   session lock taken through it may be released on a connection nobody is
+   looking at. Whoever waits re-reads the table after acquiring it and finds
+   the work already done. */
+async function applyOne(file, sql) {
+  return tx(async () => {
+    await run("SELECT pg_advisory_xact_lock(?)", MIGRATION_LOCK);
+
+    /* Re-read under the lock. The pending list was computed before it. */
+    if (await get("SELECT 1 AS yes FROM schema_migration WHERE name = ?", file)) {
+      return false;
+    }
+
+    await conn().unsafe(sql);
+    await run("INSERT INTO schema_migration (name, applied_at) VALUES (?, ?)",
+      file, new Date().toISOString());
+    console.log(`[db] applied ${file}`);
+    return true;
+  });
 }
 
 async function enforceRowLevelSecurity() {

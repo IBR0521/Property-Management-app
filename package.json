@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node server/index.js",
     "seed": "node server/seed.js",
+    "migrate": "node scripts/migrate.js",
     "reset": "rm -rf data/app.db data/app.db-wal data/app.db-shm && npm run seed",
     "cron": "node -e \"import('./server/lib/scheduler.js').then(m=>m.tick('manual')).then(r=>console.log(r))\"",
     "test": "node --env-file=.env.test --test --test-concurrency=1 test/*.test.js",
