@@ -1,11 +1,9 @@
 {
   "version": "0.0.1",
   "configurations": [
-    {
-      "name": "propops-test",
-      "runtimeExecutable": "node",
-      "runtimeArgs": ["--env-file=.env.test", "server/index.js"],
-      "port": 4300
-    }
+    { "name": "propops-test", "runtimeExecutable": "node",
+      "runtimeArgs": ["--env-file=.env.test", "server/index.js"], "port": 4300 },
+    { "name": "propops-ux", "runtimeExecutable": "node",
+      "runtimeArgs": ["--env-file=.env.ux", "server/index.js"], "port": 4301 }
   ]
 }
