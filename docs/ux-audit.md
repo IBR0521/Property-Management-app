@@ -234,19 +234,90 @@ voices.
 
 ---
 
-## Still not covered
+## Everything else — the third pass
 
-Honest about the remaining gaps rather than leaving them implied:
+The remaining 79 back-office detail pages, the owner portal, the public pages
+and the four main journeys. **129 pages audited in total: 96 back office, 20
+public, 13 portal.** Nothing is now unopened except the API, which has no
+screens.
 
-- **79 back-office detail pages** — the unit, work order, lease, owner and
-  turn screens. Only their structure was checked, not their use.
-- **The owner portal** (`/portal/owning`) — opened, not audited.
-- **26 of 28 public pages** — the application flow, the pay page, the
-  signature flow.
-- **Multi-step flows end to end** — moving a tenant in, closing a job,
-  running a payout. These are where a product is actually used, and a page-at-
-  a-time audit cannot see them.
-- **Anything about how it looks**, deliberately.
+Thirty findings, all medium. Nothing in the detail pages is broken and nothing
+is dangerous — the problems are the same three habits repeated.
+
+### The journeys work
+
+This is the important negative result, and it took walking them to know it:
+
+| Journey | Reaches | Heading |
+|---|---|---|
+| Moving a tenant in | Properties → move-in form | "Move someone in" |
+| Recording a payment | Rent → record | "Record a payment" |
+| Closing a repair | Queue → the job | "WO-LX8N · Test issue" |
+| Paying an owner | Payments out | "Payments out" |
+
+Every one arrives where it should, with a heading that names it. **No journey
+dead-ends and none loses the thread.** The structure underneath is sound; what
+is wrong is on the surface of it.
+
+### One verb, no object — 12 pages
+
+    "Open"  ×7   /app/maintenance, /app/owners, /app/rent, /app/leases,
+                 /app/vendors, /app/applications, /app/accounting/journals
+    "Edit"  ×4   /app/portfolio/u/:id, /app/listings, /app/vendors/:id,
+                 /app/leases/templates
+    "View"  ×1   /app/owners/:id
+
+The same habit as the tenant portal's "Open", right through the back office.
+Every one of these is a row in a table where the object *is* implied by the
+row — so it reads fine when you already know the product and not at all when
+you are reading it aloud to someone, or hearing it read to you.
+
+### Empty states that stop halfway — 10 pages
+
+`/app/compliance`, `/app/messages`, `/app/messages/sent`, `/app/messages/dead`,
+`/app/rent/ladder`, `/app/rent/:id`, `/app/listings/new`, and three more. Each
+says there is nothing here. None says what would put something here.
+
+### Forms that explain nothing — 3 pages
+
+| | Fields | With help |
+|---|---:|---:|
+| `/app/accounting/new` | 22 | **0** |
+| `/app/vendors/invoices/new` | 6 | **0** |
+| `/app/portfolio/u/:id` | 4 | **0** |
+
+`/app/accounting/new` is a hand-written journal entry — 22 fields, 484 words,
+the most text on any page in the product — and not one field says what it is
+for. Posting a journal by hand is the single most consequential thing a
+manager can do in this application.
+
+### Irreversible things with nothing in between — 3
+
+    "Void"                 /app/leases/d/:id   a signed lease document
+    "Revoke"               /app/staff          somebody's access
+    "Cancel this request"  /app/maintenance/:id
+
+No confirmation and no sentence about whether it can be undone. The deposit
+conversion and the trust sweep both demand a typed phrase; these do not.
+
+### Two headings on one page — 2
+
+`/app/leases/d/:id` and `/sign/:tok` each have two `h1`s, so neither page has
+a single name.
+
+---
+
+## The shape of it
+
+Thirty of the thirty findings in this pass are one of three habits:
+
+1. **A control named by its verb** — "Open", "Edit", "View"
+2. **An absence stated without a remedy** — "nothing here", full stop
+3. **A field named without a purpose** — a label and no help
+
+None is a design problem. All three are writing, and all three have a good
+example already in the product to copy: the public repair form does the
+opposite of all of them.
 
 ---
 

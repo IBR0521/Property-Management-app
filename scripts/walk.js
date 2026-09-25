@@ -31,7 +31,7 @@ const SLOW_MS = Number(process.env.WALK_SLOW_MS || 1000);
 
 /* --- fixture ---------------------------------------------------------------- */
 
-async function buildFixture() {
+export async function buildFixture() {
   const { ready, all, get, run, insert } = await import("../server/lib/db.js");
   await ready();
 
@@ -227,7 +227,7 @@ async function buildFixture() {
 }
 
 /* Resolve a route parameter to something real, by what the route is about. */
-async function resolver(fx) {
+export async function resolver(fx) {
   const { world, wo, vendorId, rows, get } = fx;
   const lease = await get("SELECT * FROM lease WHERE id = ?", world.leaseId);
   const company = await get("SELECT * FROM company WHERE id = ?", world.companyId);
@@ -309,7 +309,7 @@ const QUERY = {
   "/app/reports/:key": () => "from=2026-01-01&to=2026-12-31",
 };
 
-function fill(pattern, keys, res) {
+export function fill(pattern, keys, res) {
   let out = pattern;
   for (const k of keys) {
     const v = typeof res[k] === "function" ? res[k](pattern) : res[k];
