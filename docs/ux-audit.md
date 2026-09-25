@@ -24,13 +24,17 @@ recommendation below uses components that already exist.
 | Scrolling before you see anything | **1.6 screens** |
 
 The sidebar is a fixed column on a desktop. At phone width it simply stacks,
-so all 21 menu items render above the content. A technician opening a repair
-on site scrolls past Accounting, Banking, Deposits, Payments out and Lease
-documents — none of which they can even open — to reach the job they came for.
+so every menu item that person can open renders above the content.
 
-This is the user the accessibility work was written for: *"a maintenance
-technician using the mobile screens one-handed in bad light."* They currently
-cannot use the first screen at all.
+**Corrected after a second pass.** The first version of this said a technician
+was the victim. That was wrong, and the check is worth recording: the
+navigation already hides what a role cannot reach, so a technician sees
+**one** item — `/app/jobs` — and lands on it directly from sign-in. Their
+phone experience is fine.
+
+The 21-item wall is what an **administrator or manager** gets, and they are on
+a phone during a site visit, a viewing, or a call they took in the car. The
+measurement above is theirs.
 
 **The fix needs no new design.** The nav already knows which items a person
 can open — it hides what their role cannot reach. What is missing is a phone
@@ -144,8 +148,8 @@ also alphanumeric.
 
 ## What I would do, in this order
 
-1. **A phone navigation.** Nothing else on this list matters to a technician
-   who cannot get past the menu.
+1. **A phone navigation.** For managers and administrators, who have 21 items
+   above the content.
 2. **Name things once.** Rename one of the two "People", and make each menu
    item and the page it opens agree. This is wording, not design.
 3. **Give the queue a first thing to do.** 2,200 is a wall; the page already
@@ -155,6 +159,94 @@ also alphanumeric.
 
 Everything here is structure and language. None of it needs a new visual idea,
 and I have not proposed one.
+
+---
+
+# Second pass — the surfaces the first one missed
+
+The audit above covered 20 of 99 back-office pages, as one role, against one
+seeded company. It did not open the tenant portal, the owner portal, any
+public page, any detail screen, or a company on its first day. Those are below.
+
+---
+
+## 9. Every refusal says "Expired"
+
+`app.js:454` renders one page for every 403, headed **"Expired"**:
+
+    status === 403 ? "Expired"
+
+That is the right word for a stale form token and the wrong word for
+everything else. A person who may not open a page is told their session ran
+out, so they sign in again — and get the same page. The cause they are given
+does not match the cause, and the remedy it implies does not work.
+
+A technician hitting `/app` directly sees exactly this.
+
+## 10. The tenant's home screen has the figures and none of the actions
+
+The portal is the best-built part of the product, and this is its one
+structural mistake.
+
+`/portal/home/renting` shows rent, paid, and what is owing — and **one primary
+button labelled "Open"**. Open what? It leads to `/portal/renting/<id>`, which
+is where everything a tenant can actually do lives:
+
+    Pay rent · Report a repair · Renters insurance · Your details
+
+So a tenant with a single tenancy — the ordinary case — passes through a
+summary screen with no actions in order to reach the screen with all of them.
+**"Report a repair" is not on their home screen at all**, and it is one of the
+two things a tenant ever needs.
+
+## 11. What a new company sees on its first day
+
+Ten first screens, opened on a company with nothing in it:
+
+| | Empty state | Tells you what to do next |
+|---|---|---|
+| `/app` | yes | **yes** |
+| `/app/owners` | yes | **yes** |
+| `/app/vendors` | yes | **yes** |
+| `/app/listings` | yes | **yes** |
+| `/app/portfolio` | yes | no |
+| `/app/inbox` | yes | no |
+| `/app/deposits` | yes | no |
+| `/app/payments` | yes | no |
+| `/app/reports` | no | no |
+| `/app/accounting` | **no — a table of 20 accounts, all zero** | no |
+
+Six of ten say "there is nothing here" without saying what puts something in
+it. **Accounting does not even do that**: on day one it renders the full chart
+of accounts at $0.00, which is the least useful possible answer to "what does
+this part of the product do".
+
+## 12. The public pages are the best work in the product
+
+Worth saying plainly, because it shows the standard is reachable and the
+problem is not skill. `/report` — the form a tenant fills in from a QR sticker
+— states how long it will take, puts the emergency case in a red panel above
+everything with a phone number, asks one question at a time, explains what the
+QR code would have saved them, and tells them what happens next.
+
+Nothing in the back office is written that way. The same product has two
+voices.
+
+---
+
+## Still not covered
+
+Honest about the remaining gaps rather than leaving them implied:
+
+- **79 back-office detail pages** — the unit, work order, lease, owner and
+  turn screens. Only their structure was checked, not their use.
+- **The owner portal** (`/portal/owning`) — opened, not audited.
+- **26 of 28 public pages** — the application flow, the pay page, the
+  signature flow.
+- **Multi-step flows end to end** — moving a tenant in, closing a job,
+  running a payout. These are where a product is actually used, and a page-at-
+  a-time audit cannot see them.
+- **Anything about how it looks**, deliberately.
 
 ---
 

@@ -47,6 +47,13 @@ export async function audit() {
   const { NAV } = await import("../server/views/layout.js");
   const navHrefs = NAV.flatMap((g) => g.items.map((i) => i.href));
 
+  /* Every page, not only the twenty in the menu. The detail screens are where
+     somebody spends their day, and the first audit never opened one. */
+  const { registeredRoutes } = await import("../server/app.js");
+  const deep = registeredRoutes()
+    .filter((r) => r.method === "GET" && r.pattern.startsWith("/app"))
+    .map((r) => r.pattern);
+
   const findings = [];
   const say = (severity, area, what, where, detail) =>
     findings.push({ severity, area, what, where, detail });
