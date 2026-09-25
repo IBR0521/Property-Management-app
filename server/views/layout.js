@@ -320,7 +320,16 @@ export function signInPage({ error, company, csrf, next }) {
         <button class="pill solid" type="submit">Sign in</button>
       </form>
     </div>
+    <!-- Both of these existed and neither was reachable. Signup was built,
+         tested and linked from nowhere: you could only arrive by typing the
+         URL. Forgetting a password had no route at all. -->
+    <div class="panel__foot">
+      <a href="/app/forgot">Forgotten your password?</a>
+    </div>
   </div>
+  <p style="margin-top:1.25rem;font-size:0.875rem;color:var(--ink-soft)">
+    No account yet? <a href="/signup">Set your company up</a>.
+  </p>
 </div>
 </body>
 </html>`);

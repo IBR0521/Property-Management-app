@@ -117,7 +117,12 @@ registerPublicListings(router);
 
 /* Routes that need a signed-in staff member. Everything under /app except the
    sign-in pages, which register themselves as public. */
-const PUBLIC_APP_PATHS = new Set(["/app/sign-in", "/app/sign-out"]);
+/* The pages under /app that a person who cannot sign in has to be able to
+   reach. Forgetting a password and following the link that fixes it are both
+   done by somebody with no session, so gating them behind one would be a
+   locked door with the key inside. */
+const PUBLIC_APP_PATHS = new Set(["/app/sign-in", "/app/sign-out", "/app/forgot"]);
+const PUBLIC_APP_PREFIXES = ["/app/reset/"];
 
 /* Reachable without a portal session: the sign-in form itself, the page that
    confirms a link was sent, and signing out. `/portal/enter/:token` is public
@@ -274,7 +279,9 @@ async function handleRequest(req, res) {
        authenticates through the one door in features/api.js. */
     const isApiRoute = path === "/api" || path.startsWith("/api/");
 
-    if (isAppRoute && !PUBLIC_APP_PATHS.has(path)) {
+    const publicApp = PUBLIC_APP_PATHS.has(path)
+      || PUBLIC_APP_PREFIXES.some((prefix) => path.startsWith(prefix));
+    if (isAppRoute && !publicApp) {
       ctx.staff = await currentStaff(req);
       if (!ctx.staff) {
         const back = encodeURIComponent(url.pathname + url.search);

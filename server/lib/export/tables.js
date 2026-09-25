@@ -196,6 +196,11 @@ export const TABLES = {
 
   /* --- not theirs to take ------------------------------------------------- */
   session: { skip: "Sign-in sessions. A session is a credential, not a record." },
+  /* A live key to somebody's account, for an hour. An export is a file that
+     gets emailed, copied to a laptop and kept — exactly the places a password
+     reset token must never reach. Nothing is lost by leaving it out: it is
+     transient by design and worthless an hour later. */
+  password_reset: { skip: "live password reset tokens; an export is the wrong place for a key" },
   portal_session: { skip: "Portal sign-in sessions, for the same reason." },
   portal_login_token: { skip: "One-time sign-in links, live or spent." },
   email_verification: { skip: "One-time verification tokens." },

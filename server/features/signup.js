@@ -31,6 +31,9 @@ import { check, clientIp } from "../lib/ratelimit.js";
 import { uniqueSlug, slugProblem } from "../lib/slug.js";
 import { companyCount } from "../lib/tenancy.js";
 import { queueMessage } from "../lib/outbox.js";
+import {
+  request as requestReset, check as checkReset, complete as completeReset, ResetRefused,
+} from "../lib/passwordreset.js";
 import { log } from "../lib/logger.js";
 
 const MIN_PASSWORD = 12;
@@ -208,6 +211,78 @@ export function registerSignup(router) {
   /* Verification. A GET, because it is a link in an email and email clients
      cannot POST. That makes it safe to prefetch, which is why the token is
      single-use and says so rather than erroring on the second visit. */
+
+/* --- forgetting a password --------------------------------------------------
+
+   The route that did not exist. A person could change their password from
+   inside their account and had no way in from outside it, so the first time
+   anybody forgot one the only remedy was editing the database by hand. */
+
+  router.get("/app/forgot", async (ctx) => {
+    if (ctx.staff) return redirect(ctx.res, "/app");
+    sendHtml(ctx.res, forgotPage({ csrf: ctx.csrf, sent: ctx.query.sent === "1" }));
+  });
+
+  router.post("/app/forgot", async (ctx) => {
+    /* Rate limited on the sign-in bucket: this is a way of asking the server
+       about an address, and a burst of it is the same shape of abuse. */
+    const gate = await check("signin", clientIp(ctx.req));
+    if (!gate.allowed) {
+      return sendHtml(ctx.res, "Too many attempts from this connection. Try again later.", 429);
+    }
+
+    const base = `${ctx.url.protocol}//${ctx.url.host}`;
+    const asked = await requestReset({
+      email: ctx.fields.email, ip: clientIp(ctx.req), baseUrl: base,
+    });
+
+    if (asked.sent) {
+      await queueMessage({
+        companyId: asked.staff.company_id, channel: "email", to: asked.staff.email,
+        subject: "Setting a new password",
+        body: `${asked.staff.name || "Hello"},\n\n`
+          + `Somebody asked to set a new password for your ${asked.staff.company_name} account. `
+          + `If that was you, follow this link within the hour:\n\n${asked.link}\n\n`
+          + `It works once. If it was not you, nothing has changed and you can ignore this — `
+          + `but tell somebody, because it means your address is known to whoever asked.\n`,
+        kind: "transactional",
+        aboutType: "password_reset", aboutId: asked.staff.id,
+        allowUnverified: true,
+      });
+    }
+
+    /* The same answer either way. A form that said "no account with that
+       email" would be a way of asking which addresses work at a company. */
+    redirect(ctx.res, "/app/forgot?sent=1");
+  });
+
+  router.get("/app/reset/:tok", async (ctx) => {
+    const found = await checkReset(ctx.params.tok);
+    sendHtml(ctx.res, resetPage({
+      csrf: ctx.csrf, token: ctx.params.tok,
+      problem: found.ok ? null : found.why,
+      error: ctx.query.e ? decodeURIComponent(ctx.query.e) : null,
+    }), found.ok ? 200 : 410);
+  });
+
+  router.post("/app/reset/:tok", async (ctx) => {
+    try {
+      await completeReset({
+        secret: ctx.params.tok,
+        password: ctx.fields.password,
+        confirm: ctx.fields.confirm,
+      });
+    } catch (err) {
+      if (err instanceof ResetRefused) {
+        return redirect(ctx.res,
+          `/app/reset/${ctx.params.tok}?e=${encodeURIComponent(err.message)}`);
+      }
+      throw err;
+    }
+    redirect(ctx.res, "/app/sign-in?m=" + encodeURIComponent(
+      "Your password is set. Sign in with it."));
+  });
+
   router.get("/verify/:tok", async (ctx) => {
     const row = await get(
       "SELECT * FROM email_verification WHERE token = ?", ctx.params.tok);
@@ -364,5 +439,76 @@ function verifyResultPage({ ok, title, detail, cta }) {
     body: html`
       ${notice(ok ? "ok" : "warn", null, detail)}
       ${cta ? html`<p style="margin-top:1.5rem"><a class="pill solid" href="${cta}">Go to your dashboard</a></p>` : ""}`,
+  });
+}
+
+/* --- the two screens a forgotten password needs ----------------------------- */
+
+function forgotPage({ csrf, sent }) {
+  return publicPage({
+    title: "Set a new password",
+    heading: "Set a new password",
+    lede: "We will send you a link.",
+    body: html`
+      ${sent
+        ? notice("ok", "Check your email",
+            html`If that address belongs to an account, a link is on its way. It works
+                 once and for an hour. Nothing has changed until you use it.
+                 <br /><br />
+                 Nothing arrived? Check the address, and check your spam folder — the
+                 message comes from your own company's sending address.`)
+        : html`
+        <div class="panel">
+          <div class="panel__body">
+            <form method="post" action="/app/forgot" class="formgrid">
+              <input type="hidden" name="_csrf" value="${csrf}" />
+              <div class="field">
+                <label for="email">Your email</label>
+                <input id="email" name="email" type="email" autocomplete="username" required />
+                <span class="field__help">The address you sign in with. We answer the same
+                  way whether or not it belongs to an account.</span>
+              </div>
+              <button class="pill solid" type="submit">Send the link</button>
+            </form>
+          </div>
+        </div>`}
+      <p style="margin-top:1.5rem"><a href="/app/sign-in">Back to signing in</a></p>`,
+  });
+}
+
+function resetPage({ csrf, token: tok, problem, error }) {
+  return publicPage({
+    title: "Set a new password",
+    heading: problem ? "That link will not work" : "Set a new password",
+    lede: problem ? null : "Choose one you have not used here before.",
+    body: problem
+      ? html`
+        ${notice("warn", null, problem)}
+        <p style="margin-top:1.5rem"><a class="pill solid" href="/app/forgot">Ask for a new link</a></p>`
+      : html`
+        ${error ? notice("danger", null, error) : ""}
+        <div class="panel">
+          <div class="panel__body">
+            <form method="post" action="/app/reset/${tok}" class="formgrid">
+              <input type="hidden" name="_csrf" value="${csrf}" />
+              <div class="field">
+                <label for="password">New password</label>
+                <input id="password" name="password" type="password"
+                       autocomplete="new-password" required minlength="12" />
+                <span class="field__help">At least twelve characters. Length is what makes
+                  a password hard to guess — three or four unrelated words beat a short one
+                  with symbols in it.</span>
+              </div>
+              <div class="field">
+                <label for="confirm">New password again</label>
+                <input id="confirm" name="confirm" type="password"
+                       autocomplete="new-password" required minlength="12" />
+              </div>
+              <button class="pill solid" type="submit">Set it</button>
+              <span class="field__help">Setting a new password signs you out everywhere
+                else, on every device.</span>
+            </form>
+          </div>
+        </div>`,
   });
 }
