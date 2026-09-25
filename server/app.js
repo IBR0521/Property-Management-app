@@ -124,6 +124,16 @@ registerPublicListings(router);
 const PUBLIC_APP_PATHS = new Set(["/app/sign-in", "/app/sign-out", "/app/forgot"]);
 const PUBLIC_APP_PREFIXES = ["/app/reset/"];
 
+/* Routes that read nothing, and so must not start depending on the database
+   being reachable just because everything around them does.
+
+   `/offline` is the page a handset falls back to when it has no connection.
+   Making the page that exists for a broken state require a working database
+   would be a fine joke and a real regression. `/sw.js` is the service worker,
+   which is also the only way to *remove* a service worker from a device
+   nobody is holding — it has to be servable when the rest is not. */
+const NO_DATABASE_PATHS = new Set(["/offline", "/sw.js"]);
+
 /* Reachable without a portal session: the sign-in form itself, the page that
    confirms a link was sent, and signing out. `/portal/enter/:token` is public
    too and handled by prefix, because the token in it is the credential. */
@@ -216,6 +226,27 @@ async function handleRequest(req, res) {
         }, dbOk ? 200 : 503);
       }
     }
+
+    /* The schema is brought up to date before anything reads it.
+
+       Every other deployed entry point does this — the cron, the five
+       webhooks, the listings feed — and this one, which serves every page a
+       person will ever open, did not. It was the only one that mattered: on
+       Vercel nothing else runs, so a deploy that added migrations left the
+       application answering from an old schema until the 09:00 cron happened
+       to fire. Not a crash, which is the worrying part. Queries that still
+       parse against the old columns simply return the old answers.
+
+       It sits after the static branch and after /health deliberately. An asset
+       needs no database, and /health has to be able to report an unreachable
+       one rather than fail trying to migrate it — which is the moment you most
+       want to read it. And it is inside the try, so a database that cannot be
+       reached is rendered by the handler below rather than escaping as a bare
+       stack trace with no request id in it.
+
+       Cheap once there is nothing to do: one SELECT against schema_migration,
+       cached per instance thereafter. */
+    if (!NO_DATABASE_PATHS.has(path)) await ready();
 
     /* --- routing --------------------------------------------------------- */
     const hit = router.match(req.method, path);
@@ -423,6 +454,10 @@ async function handleRequest(req, res) {
       ? err.message
       : status === 404
       ? "We could not find that. The link may be old, or the record may have been removed."
+      : unreachableDatabase(err)
+      ? "This deployment cannot reach its database, so no page that needs one can " +
+        "load. Nothing you did caused it and nothing you typed was saved. " +
+        "Whoever administers it can see the exact reason at /health."
       : "Something went wrong at our end. Try again, or call us if it keeps happening.";
 
     /* Under /api the answer is JSON whatever the request asked for, and in
@@ -450,6 +485,38 @@ async function handleRequest(req, res) {
   }
 }
 
+/* Is this the database being unreachable, rather than a fault in a page?
+
+   Worth telling apart, because the two need opposite things from the reader.
+   A broken page is ours to fix and there is nothing they can do. A database
+   the deployment cannot reach is almost always one wrong environment variable,
+   and the person looking at the screen is very often the only person who can
+   change it — so "Something went wrong at our end" is the one answer that
+   helps nobody.
+
+   The cost of not doing this was measured: a connection string pasted with
+   Supabase's `[YOUR-PASSWORD]` placeholder still in it produced "Something
+   broke" on every page, while /health had the exact reason all along. Nothing
+   led from one to the other.
+
+   Matched on the driver's own vocabulary. It does not use error codes for the
+   pre-authentication failures — ENOTFOUND, a refused port, a rejected
+   password all arrive as a PostgresError carrying text — so the text is what
+   there is to match on. A false negative just falls back to the generic line,
+   which is what happens today. */
+function unreachableDatabase(err) {
+  const name = err && err.name ? String(err.name) : "";
+  if (!/^(Postgres|Connection)/.test(name) && err?.code === undefined) return false;
+  const text = `${err?.code || ""} ${err?.message || ""}`;
+  /* `database "x" does not exist` is spelled out rather than matching a bare
+     "does not exist", which is also how Postgres reports a missing column or
+     table — and that is a fault in our SQL, not an unreachable database.
+     Labelling a code bug as an outage would send the reader to check
+     environment variables that are perfectly fine. */
+  return /ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|CONNECT_TIMEOUT|CONNECTION_(CLOSED|ENDED|DESTROYED|REFUSED)|password authentication failed|no pg_hba\.conf entry|too many clients|role .* does not exist|database .* does not exist|SASL|Tenant or user not found|tenant\/user/i
+    .test(text);
+}
+
 /* What actually went wrong, rather than one word for every 403.
 
    Every refusal used to be headed "Expired". That is right for a form whose
@@ -461,6 +528,9 @@ async function handleRequest(req, res) {
    The message already says which it is; this only has to agree with it. */
 function headingFor(status, message) {
   if (status === 404) return "Not found";
+  if (/cannot reach its database/.test(String(message || ""))) {
+    return "The database is not reachable";
+  }
   if (status !== 403) return "Something broke";
   const m = String(message || "").toLowerCase();
   if (/expired|reload|go back/.test(m)) return "This form expired";
