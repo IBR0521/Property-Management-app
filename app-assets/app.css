@@ -258,6 +258,11 @@ table.data a:hover{ text-decoration:underline; }
 /* --- forms (extends .field from styles.css) -------------------------------- */
 .formgrid{ display:grid; gap:1rem; }
 .formgrid--2{ grid-template-columns:repeat(auto-fit,minmax(min(14rem,100%),1fr)); }
+/* A grid stretches every child to the panel. A secret and a Save button do
+   not need the whole row; the button stays the width of its label. */
+.field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.field select{ max-width:28rem; }
+.formgrid > .pill{ justify-self:start; }
 .field select{
   width:100%; border-radius:var(--radius-xl); border:1px solid var(--control-edge);
   background:var(--background); padding:0.75rem 1rem; font-size:0.875rem;

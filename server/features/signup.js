@@ -31,6 +31,7 @@ import { check, clientIp } from "../lib/ratelimit.js";
 import { uniqueSlug, slugProblem } from "../lib/slug.js";
 import { companyCount } from "../lib/tenancy.js";
 import { queueMessage } from "../lib/outbox.js";
+import { deliverQueued } from "../lib/scheduler.js";
 import {
   request as requestReset, check as checkReset, complete as completeReset, ResetRefused,
 } from "../lib/passwordreset.js";
@@ -194,7 +195,7 @@ export function registerSignup(router) {
        signup look broken, and the address is unverified by definition — this
        is the message that verifies it. */
     const base = `${ctx.url.protocol}//${ctx.url.host}`;
-    await queueMessage({
+    const queued = await queueMessage({
       companyId, channel: "email", to: email,
       subject: "Confirm your email address",
       body: `${name},\n\nConfirm this address to finish setting up ${companyName}:\n\n`
@@ -208,10 +209,12 @@ export function registerSignup(router) {
          verify — the classic deadlock. */
       allowUnverified: true,
     });
+    const sent = queued ? await deliverQueued(queued) : { ok: false, reason: "not queued" };
 
     await startSession(ctx.res, staffId, { secure: isHttps(ctx.req) });
-    redirect(ctx.res, "/app?m=" + encodeURIComponent(
-      `Welcome. We have sent a confirmation link to ${email}.`));
+    redirect(ctx.res, "/app?m=" + encodeURIComponent(sent.ok
+      ? `Welcome. We have sent a confirmation link to ${email}.`
+      : `Welcome. The confirmation to ${email} did not go out — ${sent.reason}. Use Send it again on Company.`));
   });
 
   /* Verification. A GET, because it is a link in an email and email clients
@@ -243,7 +246,7 @@ export function registerSignup(router) {
     });
 
     if (asked.sent) {
-      await queueMessage({
+      const queued = await queueMessage({
         companyId: asked.staff.company_id, channel: "email", to: asked.staff.email,
         subject: "Setting a new password",
         body: `${asked.staff.name || "Hello"},\n\n`
@@ -255,6 +258,7 @@ export function registerSignup(router) {
         aboutType: "password_reset", aboutId: asked.staff.id,
         allowUnverified: true,
       });
+      if (queued) await deliverQueued(queued);
     }
 
     /* The same answer either way. A form that said "no account with that
@@ -356,15 +360,18 @@ export function registerSignup(router) {
     });
 
     const base = `${ctx.url.protocol}//${ctx.url.host}`;
-    await queueMessage({
+    const queued = await queueMessage({
       companyId: cid, channel: "email", to: ctx.staff.email,
       subject: "Confirm your email address",
       body: `Confirm this address for ${company.name}:\n\n${base}/verify/${fresh}\n`,
       kind: "transactional", aboutType: "email_verification", aboutId: ctx.staff.id,
       allowUnverified: true,
     });
+    const sent = queued ? await deliverQueued(queued) : { ok: false, reason: "not queued" };
 
-    redirect(ctx.res, "/app/setup?m=" + encodeURIComponent(`Sent to ${ctx.staff.email}.`));
+    redirect(ctx.res, "/app/setup?m=" + encodeURIComponent(sent.ok
+      ? `Sent to ${ctx.staff.email}.`
+      : `The confirmation to ${ctx.staff.email} did not go out — ${sent.reason}.`));
   });
 
   /* Ticking a step that only a person can assert. */

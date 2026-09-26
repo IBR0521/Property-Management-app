@@ -244,9 +244,9 @@ if (DELIVERY_MODE === "live") {
     problems.push("DELIVERY_MODE=live but EMAIL_FROM is not set.");
   }
   if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
-    problems.push(
-      "DELIVERY_MODE=live but Twilio is not configured.\n" +
-      "    The emergency on-call alert is SMS; without it that path is silent.");
+    warnings.push(
+      "DELIVERY_MODE=live and Twilio is not configured. Email still sends. " +
+      "An emergency text does not; the tenant is told to phone.");
   }
   if (!APP_BASE_URL) {
     problems.push(

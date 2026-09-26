@@ -184,6 +184,28 @@ describe("config accepts a usable environment", () => {
     assert.equal(r.summary.nodeEnv, "test");
   });
 
+  test("live email does not require Twilio", () => {
+    const r = load({
+      DATABASE_URL: "postgresql://localhost:5432/dev",
+      DELIVERY_MODE: "live",
+      RESEND_API_KEY: "re_test",
+      EMAIL_FROM: "notices@example.test",
+      APP_BASE_URL: "https://example.test",
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.summary.delivery, "live");
+  });
+
+  test("live email still requires the Resend key and a from address", () => {
+    const r = load({
+      DATABASE_URL: "postgresql://localhost:5432/dev",
+      DELIVERY_MODE: "live",
+    });
+    assert.equal(r.ok, false);
+    assert.match(r.message, /RESEND_API_KEY/);
+    assert.match(r.message, /EMAIL_FROM/);
+  });
+
   test("a deployed setup", () => {
     const r = load({
       VERCEL: "1", CRON_SECRET: "x".repeat(32),

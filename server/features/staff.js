@@ -20,9 +20,19 @@ import { html, attr } from "../lib/render.js";
 import { appPage, publicPage, notice, empty, tabs } from "../views/layout.js";
 import { navCounts } from "../lib/counts.js";
 import { queueMessage } from "../lib/outbox.js";
+import { deliverQueued } from "../lib/scheduler.js";
 import { check, clientIp } from "../lib/ratelimit.js";
 
 const INVITE_VALID_DAYS = 14;
+
+async function inviteResult(queued, email) {
+  if (!queued) {
+    return `Invitation saved for ${email}. Confirm this company's email on Company before mail can leave. The link is in the list below.`;
+  }
+  const sent = await deliverQueued(queued);
+  if (sent.ok) return `Invitation sent to ${email}.`;
+  return `Invitation saved for ${email}, but it did not go out — ${sent.reason}. The link is in the list below.`;
+}
 const MIN_PASSWORD = 12;
 
 const ROLES = ["admin", "manager", "accountant", "leasing", "maintenance", "technician"];
@@ -255,9 +265,7 @@ export function registerStaff(router) {
       kind: "transactional", aboutType: "staff_invite", aboutId: tok,
     });
 
-    back(queued
-      ? `Invitation sent to ${email}.`
-      : `Invitation created for ${email}, but email is not being sent yet — copy the link from the list below.`);
+    back(await inviteResult(queued, email));
   });
 
   router.post("/app/staff/invite/:id/resend", async (ctx) => {
@@ -276,13 +284,13 @@ export function registerStaff(router) {
 
     const origin = `${ctx.url.protocol}//${ctx.url.host}`;
     const company = await one("SELECT name FROM company WHERE id = ?", cid);
-    await queueMessage({
+    const queued = await queueMessage({
       companyId: cid, channel: "email", to: invite.email,
       subject: `Reminder: join ${company.name}`,
       body: `Your invitation to ${company.name} is still open:\n\n${origin}/join/${invite.token}\n`,
       kind: "transactional", aboutType: "staff_invite", aboutId: invite.token,
     });
-    redirect(ctx.res, `/app/staff?m=${encodeURIComponent(`Resent to ${invite.email}.`)}`);
+    redirect(ctx.res, `/app/staff?m=${encodeURIComponent(await inviteResult(queued, invite.email))}`);
   });
 
   router.post("/app/staff/invite/:id/revoke", async (ctx) => {

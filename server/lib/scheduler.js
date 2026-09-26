@@ -537,62 +537,78 @@ export async function drainOutbox({ send = deliver, now = () => new Date(), mode
 
   const out = { sent: 0, failed: 0, dead: 0, suppressed: 0 };
 
-  for (const m of due) {
-    /* Resolved per message: mail leaves as the company, not as the platform.
-       Without this every customer's notices would come from one address. */
-    const sender = await senderFor(m.company_id, m.channel);
-
-    const result = await send({
-      channel: m.channel, to: m.to_contact, subject: m.subject,
-      body: m.body, companyId: m.company_id, kind: m.kind || "transactional",
-      from: sender.from, replyTo: sender.replyTo,
-    });
-
-    const attempts = Number(m.attempts || 0) + 1;
-
-    if (result.suppressed) {
-      /* Not a failure. The recipient said no and the system listened, which is
-         a different fact from "we could not reach them" and is recorded as
-         one. */
-      await run(
-        `UPDATE outbox SET status = 'suppressed', attempts = ?, last_error = ?,
-                failed_at = ?, provider = ? WHERE id = ?`,
-        attempts, result.error, nowIso, result.provider, m.id);
-      out.suppressed++;
-      continue;
-    }
-
-    const outcome = outcomeFor(result, attempts, now());
-
-    if (outcome.status === "sent") {
-      await run(
-        `UPDATE outbox SET status = 'sent', sent_at = ?, attempts = ?,
-                provider = ?, provider_message_id = ?, last_error = NULL,
-                next_attempt_at = NULL WHERE id = ?`,
-        nowIso, attempts, result.provider, result.providerMessageId || null, m.id);
-      out.sent++;
-    } else if (outcome.status === "dead") {
-      await run(
-        `UPDATE outbox SET status = 'dead', attempts = ?, last_error = ?,
-                failed_at = ?, provider = ?, next_attempt_at = NULL WHERE id = ?`,
-        attempts, String(result.error || "send failed").slice(0, 300),
-        nowIso, result.provider, m.id);
-      out.dead++;
-      log.error("message dead-lettered", {
-        outboxId: m.id, channel: m.channel, attempts,
-        reason: outcome.permanent ? "permanent rejection" : "attempts exhausted",
-        error: String(result.error || "").slice(0, 200),
-      });
-    } else {
-      await run(
-        `UPDATE outbox SET attempts = ?, last_error = ?, next_attempt_at = ?,
-                provider = ? WHERE id = ?`,
-        attempts, String(result.error || "send failed").slice(0, 300),
-        outcome.nextAttemptAt, result.provider, m.id);
-      out.failed++;
-    }
-  }
+  for (const m of due) await dispatchOutbox(m, { send, now, counts: out });
   return out;
+}
+
+/* One queued row, sent during the request that created it. The daily cron
+   still retries whatever this attempt leaves behind. */
+export async function deliverQueued(outboxId, { send = deliver, now = () => new Date(), mode = DELIVERY.mode } = {}) {
+  if (!drains(mode)) return { ok: false, reason: "delivery is off" };
+  const m = await get("SELECT * FROM outbox WHERE id = ?", outboxId);
+  if (!m || m.status !== "queued") return { ok: false, reason: "nothing waiting to send" };
+  const counts = { sent: 0, failed: 0, dead: 0, suppressed: 0 };
+  await dispatchOutbox(m, { send, now, counts });
+  if (counts.sent) return { ok: true };
+  const row = await get("SELECT last_error FROM outbox WHERE id = ?", outboxId);
+  return { ok: false, reason: row?.last_error || "it did not send" };
+}
+
+async function dispatchOutbox(m, { send, now, counts }) {
+  const nowIso = now().toISOString();
+  /* Resolved per message: mail leaves as the company, not as the platform.
+     Without this every customer's notices would come from one address. */
+  const sender = await senderFor(m.company_id, m.channel);
+
+  const result = await send({
+    channel: m.channel, to: m.to_contact, subject: m.subject,
+    body: m.body, companyId: m.company_id, kind: m.kind || "transactional",
+    from: sender.from, replyTo: sender.replyTo,
+  });
+
+  const attempts = Number(m.attempts || 0) + 1;
+
+  if (result.suppressed) {
+    /* Not a failure. The recipient said no and the system listened, which is
+       a different fact from "we could not reach them" and is recorded as
+       one. */
+    await run(
+      `UPDATE outbox SET status = 'suppressed', attempts = ?, last_error = ?,
+              failed_at = ?, provider = ? WHERE id = ?`,
+      attempts, result.error, nowIso, result.provider, m.id);
+    counts.suppressed++;
+    return;
+  }
+
+  const outcome = outcomeFor(result, attempts, now());
+
+  if (outcome.status === "sent") {
+    await run(
+      `UPDATE outbox SET status = 'sent', sent_at = ?, attempts = ?,
+              provider = ?, provider_message_id = ?, last_error = NULL,
+              next_attempt_at = NULL WHERE id = ?`,
+      nowIso, attempts, result.provider, result.providerMessageId || null, m.id);
+    counts.sent++;
+  } else if (outcome.status === "dead") {
+    await run(
+      `UPDATE outbox SET status = 'dead', attempts = ?, last_error = ?,
+              failed_at = ?, provider = ?, next_attempt_at = NULL WHERE id = ?`,
+      attempts, String(result.error || "send failed").slice(0, 300),
+      nowIso, result.provider, m.id);
+    counts.dead++;
+    log.error("message dead-lettered", {
+      outboxId: m.id, channel: m.channel, attempts,
+      reason: outcome.permanent ? "permanent rejection" : "attempts exhausted",
+      error: String(result.error || "").slice(0, 200),
+    });
+  } else {
+    await run(
+      `UPDATE outbox SET attempts = ?, last_error = ?, next_attempt_at = ?,
+              provider = ? WHERE id = ?`,
+      attempts, String(result.error || "send failed").slice(0, 300),
+      outcome.nextAttemptAt, result.provider, m.id);
+    counts.failed++;
+  }
 }
 
 
