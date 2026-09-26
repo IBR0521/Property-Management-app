@@ -337,8 +337,8 @@ export function registerSignup(router) {
     }));
   });
 
-  /* Ask for another one. Rate limited on the same bucket as signup, because
-     it sends mail to an address somebody typed. */
+  /* Ask for another one. A signed-in person confirming their own address,
+     counted apart from the public signup form. */
   router.post("/app/verify/resend", async (ctx) => {
     const cid = ctx.staff.company_id;
     const company = await one("SELECT * FROM company WHERE id = ?", cid);
@@ -346,7 +346,7 @@ export function registerSignup(router) {
       return redirect(ctx.res, "/app/setup?m=" + encodeURIComponent("That address is already confirmed."));
     }
 
-    const gate = await check("signup", `${clientIp(ctx.req)}|resend`);
+    const gate = await check("confirm", ctx.staff.id);
     if (!gate.allowed) {
       return redirect(ctx.res, "/app/setup?m=" + encodeURIComponent("Too many requests. Try again shortly."));
     }
