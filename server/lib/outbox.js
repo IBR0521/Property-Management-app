@@ -24,7 +24,28 @@ import { get, insert } from "./db.js";
 import { id } from "./ids.js";
 import { stamp } from "./dates.js";
 import { EMAIL_FROM } from "./config.js";
+import { isGoogleMailbox, asDeliverable } from "./delivery/gmail.js";
 import { log } from "./logger.js";
+
+/* The address a company types is where a reply should land. A Gmail address
+   cannot be the envelope sender: Google will not let this app stamp
+   gmail.com, and asking the company for an app password is a ritual standing
+   between "paste the address" and "press send". The message goes out, and
+   the reply goes to the address they typed. */
+export function buildFrom({ name, fromName, fromEmail, replyTo, emailFrom = EMAIL_FROM } = {}) {
+  const label = fromName || name || "";
+  const chosen = fromEmail || null;
+
+  if (isGoogleMailbox(chosen)) {
+    const wrapped = label ? `${label} <${chosen}>` : chosen;
+    return asDeliverable(wrapped, replyTo, emailFrom);
+  }
+
+  const address = chosen || emailFrom;
+  if (!address) return { from: null, replyTo: replyTo || null };
+  const from = label && !address.includes("<") ? `${label} <${address}>` : address;
+  return { from, replyTo: replyTo || null };
+}
 
 /* Resolved per message rather than cached, because a company changing its
    from-address should affect the next message and not the next restart. */
@@ -40,12 +61,12 @@ export async function senderFor(companyId, channel) {
   /* A display name makes the difference between "notices@…" and "Leafridge
      Property Management" in a tenant's inbox, which is the difference between
      mail that gets opened and mail that gets reported. */
-  const address = company.from_email || EMAIL_FROM;
-  if (!address) return { from: null, replyTo: company.reply_to || null };
-
-  const label = company.from_name || company.name;
-  const from = label && !address.includes("<") ? `${label} <${address}>` : address;
-  return { from, replyTo: company.reply_to || null };
+  return buildFrom({
+    name: company.name,
+    fromName: company.from_name,
+    fromEmail: company.from_email,
+    replyTo: company.reply_to,
+  });
 }
 
 /* Whether this company may send at all, and why not when it may not. */

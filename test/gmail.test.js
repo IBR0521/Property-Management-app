@@ -6,9 +6,10 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import {
-  bareAddress, isGoogleMailbox, takeReply, composeMessage, send, MISSING_PASSWORD,
+  bareAddress, isGoogleMailbox, asDeliverable, takeReply, composeMessage, send, MISSING_PASSWORD,
 } from "../server/lib/delivery/gmail.js";
 import { emailRoute } from "../server/lib/delivery/index.js";
+import { buildFrom } from "../server/lib/outbox.js";
 
 describe("gmail sender", () => {
   test("a gmail address is the company's mailbox, and any other domain is not", () => {
@@ -18,11 +19,20 @@ describe("gmail sender", () => {
     assert.equal(bareAddress("Property Pro <office@gmail.com>"), "office@gmail.com");
   });
 
-  test("live mail from a gmail address is handed to that mailbox", () => {
-    assert.equal(emailRoute("Property Pro <office@gmail.com>", "live"), "gmail");
+  test("pasting a gmail address still sends, and replies go to that address", () => {
+    assert.equal(emailRoute("Property Pro <office@gmail.com>", "live"), "resend");
     assert.equal(emailRoute("notices@ownerslease.com", "live"), "resend");
     assert.equal(emailRoute("office@gmail.com", "log"), "log");
     assert.equal(emailRoute("office@gmail.com", "off"), "off");
+
+    const sent = buildFrom({
+      name: "Property Pro",
+      fromEmail: "office@gmail.com",
+      emailFrom: "notices@ownerslease.com",
+    });
+    assert.equal(sent.from, "Property Pro <notices@ownerslease.com>");
+    assert.equal(sent.replyTo, "office@gmail.com");
+    assert.equal(asDeliverable("Property Pro <office@gmail.com>", null, "notices@ownerslease.com").replyTo, "office@gmail.com");
   });
 
   test("the message the recipient gets is from the gmail address", () => {

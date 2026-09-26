@@ -14,12 +14,12 @@
    retrying it five times is how a queue fills with noise that hides the real
    failures. Only a provider's own adapter knows which of its codes mean
    which, so each one decides for itself. */
-import { DELIVERY_MODE } from "../config.js";
+import { DELIVERY_MODE, EMAIL_FROM } from "../config.js";
 import { drains, reachesRecipients, describe } from "./mode.js";
 import * as logProvider from "./log.js";
 import * as resend from "./resend.js";
 import * as gmail from "./gmail.js";
-import { isGoogleMailbox } from "./gmail.js";
+import { asDeliverable } from "./gmail.js";
 import * as twilio from "./twilio.js";
 import { blockedReason } from "./consent.js";
 
@@ -30,13 +30,12 @@ export { drains, reachesRecipients, describe };
    sending — where the failure is attributable to a message — rather than at
    boot.
 
-   A Gmail address is sent by Google as that mailbox. Everything else on the
-   email channel stays with Resend, which can only stamp a domain it holds
-   DNS for. Log mode never opens either connection. */
-export function emailRoute(from, forMode = DELIVERY_MODE) {
+   Log mode never opens a connection. A Gmail address in the From line is
+   rewritten before this runs, so pressing send does not stop to ask Google
+   for a password. */
+export function emailRoute(_from, forMode = DELIVERY_MODE) {
   if (!drains(forMode)) return "off";
   if (forMode === "log") return "log";
-  if (isGoogleMailbox(from)) return "gmail";
   return "resend";
 }
 
@@ -77,7 +76,8 @@ export async function deliver(
     }
   }
 
-  const route = channel === "email" ? emailRoute(from, forMode) : null;
+  const mail = channel === "email" ? asDeliverable(from, replyTo, EMAIL_FROM) : { from, replyTo };
+  const route = channel === "email" ? emailRoute(mail.from, forMode) : null;
   const provider = route === "gmail" ? gmail
     : route === "log" ? logProvider
     : route === "off" ? null
@@ -86,7 +86,10 @@ export async function deliver(
     return { ok: false, providerMessageId: null, error: "delivery is off", retryable: true, provider: null };
   }
   try {
-    const result = await provider.send({ channel, to, subject, body, from, replyTo, companyId, mode: forMode });
+    const result = await provider.send({
+      channel, to, subject, body, companyId, mode: forMode,
+      from: mail.from, replyTo: mail.replyTo,
+    });
     return { ...result, provider: provider.name };
   } catch (err) {
     return {

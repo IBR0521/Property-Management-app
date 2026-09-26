@@ -31,6 +31,17 @@ export function isGoogleMailbox(value) {
   return domain === "gmail.com" || domain === "googlemail.com";
 }
 
+/* Google will not let another server stamp a Gmail address. The message still
+   goes out, and a reply still lands on the address the company typed. */
+export function asDeliverable(from, replyTo, emailFrom) {
+  if (!isGoogleMailbox(from)) return { from, replyTo: replyTo || null };
+  const fallback = emailFrom && !isGoogleMailbox(emailFrom) ? emailFrom : "notices@ownerslease.com";
+  const match = String(from || "").match(/^\s*([^<]+)</);
+  const label = match ? match[1].trim() : "";
+  const next = label && !String(fallback).includes("<") ? `${label} <${fallback}>` : fallback;
+  return { from: next, replyTo: replyTo || bareAddress(from) };
+}
+
 export function takeReply(buffer) {
   let start = 0;
   const text = String(buffer);
