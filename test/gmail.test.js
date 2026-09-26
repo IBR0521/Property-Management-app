@@ -32,7 +32,20 @@ describe("gmail sender", () => {
     });
     assert.equal(sent.from, "Property Pro <notices@ownerslease.com>");
     assert.equal(sent.replyTo, "office@gmail.com");
-    assert.equal(asDeliverable("Property Pro <office@gmail.com>", null, "notices@ownerslease.com").replyTo, "office@gmail.com");
+    assert.match(sent.from, /^(?:[^<>]+ <)?[^\s<>]+@[^\s<>]+>?$/);
+
+    const messy = buildFrom({
+      name: "Property Pro",
+      fromEmail: "office@gmail.com",
+      emailFrom: "Property Pro notices@ownerslease.com",
+    });
+    assert.equal(messy.from, "Property Pro <notices@ownerslease.com>");
+    assert.equal(messy.replyTo, "office@gmail.com");
+
+    const quoted = asDeliverable(
+      "Property Pro <office@gmail.com>", null, '"Desk" <notices@ownerslease.com>'
+    );
+    assert.equal(quoted.from, "Property Pro <notices@ownerslease.com>");
   });
 
   test("the message the recipient gets is from the gmail address", () => {

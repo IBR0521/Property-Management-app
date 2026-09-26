@@ -24,7 +24,7 @@ import { get, insert } from "./db.js";
 import { id } from "./ids.js";
 import { stamp } from "./dates.js";
 import { EMAIL_FROM } from "./config.js";
-import { isGoogleMailbox, asDeliverable } from "./delivery/gmail.js";
+import { asDeliverable } from "./delivery/gmail.js";
 import { log } from "./logger.js";
 
 /* The address a company types is where a reply should land. A Gmail address
@@ -33,18 +33,11 @@ import { log } from "./logger.js";
    between "paste the address" and "press send". The message goes out, and
    the reply goes to the address they typed. */
 export function buildFrom({ name, fromName, fromEmail, replyTo, emailFrom = EMAIL_FROM } = {}) {
-  const label = fromName || name || "";
-  const chosen = fromEmail || null;
-
-  if (isGoogleMailbox(chosen)) {
-    const wrapped = label ? `${label} <${chosen}>` : chosen;
-    return asDeliverable(wrapped, replyTo, emailFrom);
-  }
-
-  const address = chosen || emailFrom;
-  if (!address) return { from: null, replyTo: replyTo || null };
-  const from = label && !address.includes("<") ? `${label} <${address}>` : address;
-  return { from, replyTo: replyTo || null };
+  const label = String(fromName || name || "").replace(/[<>"\r\n]/g, "").trim();
+  const chosen = fromEmail || emailFrom || "";
+  const wrapped = label && chosen ? `${label} <${chosen}>` : chosen;
+  if (!chosen) return { from: null, replyTo: replyTo || null };
+  return asDeliverable(wrapped, replyTo, emailFrom || chosen);
 }
 
 /* Resolved per message rather than cached, because a company changing its

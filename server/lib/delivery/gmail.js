@@ -31,15 +31,35 @@ export function isGoogleMailbox(value) {
   return domain === "gmail.com" || domain === "googlemail.com";
 }
 
+const ADDRESS = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i;
+
+/* One email address, nothing else. A saved value can be `Name <a@b.com>`,
+   `Name a@b.com`, or just the address. Resend rejects anything that is not
+   exactly `a@b.com` or `Name <a@b.com>`. */
+export function cleanAddress(value) {
+  const bare = bareAddress(value);
+  if (ADDRESS.test(bare)) return bare.toLowerCase();
+  const found = String(value || "").match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+  return found && ADDRESS.test(found[0]) ? found[0].toLowerCase() : "";
+}
+
+function cleanLabel(from) {
+  const raw = String(from || "");
+  const head = raw.includes("<") ? raw.slice(0, raw.indexOf("<")) : "";
+  return head.replace(/[<>"\r\n]/g, "").trim();
+}
+
 /* Google will not let another server stamp a Gmail address. The message still
-   goes out, and a reply still lands on the address the company typed. */
+   goes out. The From line is always one clean address, and a reply still
+   lands on the Gmail address the company typed. */
 export function asDeliverable(from, replyTo, emailFrom) {
-  if (!isGoogleMailbox(from)) return { from, replyTo: replyTo || null };
-  const fallback = emailFrom && !isGoogleMailbox(emailFrom) ? emailFrom : "notices@ownerslease.com";
-  const match = String(from || "").match(/^\s*([^<]+)</);
-  const label = match ? match[1].trim() : "";
-  const next = label && !String(fallback).includes("<") ? `${label} <${fallback}>` : fallback;
-  return { from: next, replyTo: replyTo || bareAddress(from) };
+  const own = cleanAddress(from);
+  const configured = cleanAddress(emailFrom);
+  const platform = configured && !isGoogleMailbox(configured) ? configured : "notices@ownerslease.com";
+  const address = own && !isGoogleMailbox(own) ? own : platform;
+  const label = cleanLabel(from);
+  const reply = cleanAddress(replyTo) || (isGoogleMailbox(own) ? own : "");
+  return { from: label ? `${label} <${address}>` : address, replyTo: reply || null };
 }
 
 export function takeReply(buffer) {
