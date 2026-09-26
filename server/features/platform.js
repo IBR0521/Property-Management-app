@@ -26,7 +26,7 @@ import { navCounts } from "../lib/counts.js";
 import { PLATFORM_OPERATOR_EMAIL } from "../lib/config.js";
 import { clientIp } from "../lib/ratelimit.js";
 import { log } from "../lib/logger.js";
-import { describeStatus, planByKey } from "../lib/plans.js";
+import { describeStatus, monthlyCents, PER_DOOR_CENTS } from "../lib/plans.js";
 
 /* A session may borrow a company's view for this long. Support conversations
    are minutes; anything still open after an hour is forgotten rather than
@@ -115,7 +115,7 @@ export function registerPlatform(router) {
               const status = describeStatus({
                 status: c.sub_status || "none", trial_ends_at: c.trial_ends_at,
               });
-              const plan = planByKey(c.plan_key);
+              const bill = monthlyCents(c.units);
               return html`
               <tr>
                 <td><b>${c.name}</b>
@@ -124,7 +124,7 @@ export function registerPlatform(router) {
                 <td class="num">${c.units}</td>
                 <td class="num">${c.staff}</td>
                 <td><span class="chip"${attr("data-tone", status.tone)}>${c.sub_status || "none"}</span>
-                  ${plan ? html`<span class="cellsub">${plan.name} · ${usd(plan.monthlyCents)}</span>` : ""}</td>
+                  ${c.units ? html`<span class="cellsub">${usd(PER_DOOR_CENTS)} × ${c.units} · ${usd(bill)} a month</span>` : ""}</td>
                 <td class="shrink">
                   <a class="pill outline sm" href="/app/platform/c/${c.id}"
                   ${attr("aria-label", `Open ${c.name}`)}>Open</a>

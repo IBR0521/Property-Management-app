@@ -16,10 +16,12 @@ export function configured() {
 }
 
 export async function createCheckout({
-  productId, email, name, companyId, planKey, returnUrl, trialDays = 0,
+  productId, email, name, companyId, planKey, returnUrl, trialDays = 0, quantity = 1,
 }) {
+  const doors = Math.floor(Number(quantity) || 0);
+  if (doors < 1) throw new Error("A subscription needs at least one door.");
   const body = {
-    product_cart: [{ product_id: productId, quantity: 1 }],
+    product_cart: [{ product_id: productId, quantity: doors }],
     customer: { email, name },
     return_url: returnUrl,
     metadata: { company_id: companyId, plan_key: planKey },
@@ -31,6 +33,21 @@ export async function createCheckout({
     throw new Error("Dodo Payments did not return a checkout page.");
   }
   return { url: session.checkout_url, sessionId: session.session_id || null };
+}
+
+/* The next invoice uses the current door count. The period already paid
+   stays as it is. */
+export async function changeQuantity({ subscriptionId, productId, quantity }) {
+  const doors = Math.floor(Number(quantity) || 0);
+  if (doors < 1) throw new Error("A subscription needs at least one door.");
+  return call(`/subscriptions/${encodeURIComponent(subscriptionId)}/change-plan`, {
+    body: {
+      product_id: productId,
+      quantity: doors,
+      proration_billing_mode: "do_not_bill",
+      effective_at: "next_billing_date",
+    },
+  });
 }
 
 /* The portal is where a card, an invoice and a cancellation live. Sending

@@ -190,6 +190,10 @@ async function handleRequest(req, res) {
         if (serveFromRoot(res, "index.html")) return;
         return redirect(res, "/app");
       }
+      if (path === "/privacy" || path === "/terms") {
+        if (serveFromRoot(res, path.slice(1) + ".html")) return;
+        return sendText(res, "Not found", 404);
+      }
       if (path.startsWith("/assets/") || path.startsWith("/app-assets/")) {
         if (serveFromRoot(res, path)) return;
         return sendText(res, "Not found", 404);

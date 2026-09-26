@@ -70,20 +70,19 @@ export function registerQueue(router) {
     const onboarding = await onboardingState(cid);
     const lastRun = await lastTickAt();
     const schedulerStale = tickIsStale(lastRun);
+    const mailWaiting = !DELIVERY.reaching && queued > 0;
+    const subtitle = items.length
+      ? `${items.length} thing${items.length === 1 ? "" : "s"} to deal with · ${human(today())}`
+      : !onboarding.complete
+        ? `Finish setup · ${human(today())}`
+        : mailWaiting
+          ? `Mail is waiting to go out · ${human(today())}`
+          : `Nothing to deal with · ${human(today())}`;
 
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "queue", counts: await navCounts(cid),
-      /* The page is called Queue, because that is what the menu calls it and
-         a screen whose name changes with its contents has no name. What is on
-         it goes in the subtitle, where a count belongs.
-
-         The old heading also read "1 thing need you": the noun was pluralised
-         and the verb was not. */
-      title: "Queue",
-      subtitle: items.length
-        ? `${items.length} thing${items.length === 1 ? "" : "s"} ${
-          items.length === 1 ? "needs" : "need"} you · ${human(today())}`
-        : `Nothing needs you · ${human(today())}`,
+      title: "Today",
+      subtitle,
       actions: html`
         <a class="pill outline" href="${publicPath({ slug: ctx.staff.company_slug }, "/report")}" target="_blank">Tenant form</a>
         <a class="pill solid" href="/app/maintenance/new">Log a repair</a>`,
@@ -103,11 +102,11 @@ export function registerQueue(router) {
                   </div>
                   ${step.done
                     ? html`<span class="chip" data-tone="ok">done</span>`
-                    : html`<a class="pill outline sm" href="${step.href}">Do it</a>`}
+                    : html`<a class="pill outline sm" href="${step.href}">${step.action}</a>`}
                 </div>`)}
             </div>
             <div class="panel__foot">
-              This disappears once everything is ticked. Nothing here blocks you from working.
+              You can use the rest of the app while this list is open. It goes away when every step is done.
             </div>
           </div>`}
 
@@ -132,7 +131,7 @@ export function registerQueue(router) {
             })()
           : ""}
 
-        ${!items.length
+        ${!items.length && onboarding.complete && !mailWaiting && !schedulerStale
           ? html`<div class="panel"><div class="panel__body">
               ${empty("All clear", "No emergencies, no overdue deadlines, no rent past grace and nobody waiting on an answer.")}
             </div></div>`

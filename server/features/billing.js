@@ -18,13 +18,13 @@ import { all, get, one, insert, update, run, tx } from "../lib/db.js";
 import { id } from "../lib/ids.js";
 import { stamp, human, humanStamp } from "../lib/dates.js";
 import { usd } from "../lib/money.js";
-import { sendHtml, redirect, BadRequest } from "../lib/http.js";
+import { sendHtml, redirect } from "../lib/http.js";
 import { html, attr } from "../lib/render.js";
 import { appPage, notice } from "../views/layout.js";
 import { navCounts } from "../lib/counts.js";
 import { log } from "../lib/logger.js";
 import {
-  PLANS, TRIAL_DAYS, planByKey, planForUnits, outgrown, isWorking, describeStatus,
+  TRIAL_DAYS, PLAN_KEY, PER_DOOR_CENTS, billableDoors, monthlyCents, isWorking, describeStatus,
 } from "../lib/plans.js";
 import { DODO_PAYMENTS_API_KEY, DODO_PRODUCTS, APP_BASE_URL } from "../lib/config.js";
 import * as dodo from "../lib/dodo.js";
@@ -76,63 +76,44 @@ export function registerBilling(router) {
     const company = await one("SELECT * FROM company WHERE id = ?", cid);
     const sub = await subscriptionFor(cid);
     const units = await unitCount(cid);
+    const doors = billableDoors(units);
     const status = describeStatus(sub);
-    const suggested = planForUnits(units);
-    const over = sub.plan_key ? outgrown(sub.plan_key, units) : null;
     const configured = Boolean(DODO_PAYMENTS_API_KEY);
+    const productReady = Boolean(DODO_PRODUCTS.door);
+    const bill = monthlyCents(doors);
+    const subscribed = Boolean(sub.dodo_subscription_id);
 
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "billing", counts: await navCounts(cid),
-      title: "Billing", subtitle: `${units} unit${units === 1 ? "" : "s"} under management`,
+      title: "Your plan", subtitle: `${doors} door${doors === 1 ? "" : "s"} under management. This is what you pay for the software.`,
       body: html`
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
         ${notice(status.tone, status.title, status.detail)}
 
-        ${over ? notice("warn", `You have outgrown ${over.plan.name}`,
-          html`${over.units} units is past the ${over.plan.maxUnits} this plan covers.
-               Nothing stops working — move to ${over.suggested.name} when it suits you.`) : ""}
-
         ${configured ? "" : notice("warn", "Billing is not connected yet",
-          "Plans cannot be started from here yet. The prices below are what this installation would charge once billing is turned on.")}
+          "A subscription cannot be started from here yet. The price below is what this installation would charge once billing is turned on.")}
 
         <div class="panel">
           <div class="panel__head"><h2>What you pay</h2></div>
           <div class="panel__body">
             <p class="lede" style="margin:0 0 1rem">
-              A flat monthly price for the band your portfolio falls into. No fee per
-              payment, no percentage of rent collected, nothing that grows with how much
-              money moves through the system. Collect more rent this month and you owe us
-              exactly the same.
+              ${usd(PER_DOOR_CENTS)} a month for each door.
+              ${doors
+                ? html`You have ${doors}, so the bill is ${usd(bill)} a month.`
+                : html`Add a door and the bill is ${usd(PER_DOOR_CENTS)} for that one.`}
+              Adding a door changes the next bill. Collecting more rent does not.
+              There is no fee on a tenant payment.
             </p>
-
-            <div class="tablewrap tablewrap--narrow"><table class="data">
-              <thead><tr><th>Plan</th><th>Units</th><th class="num">Monthly</th><th class="shrink"></th></tr></thead>
-              <tbody>${PLANS.map((plan) => {
-                const current = sub.plan_key === plan.key;
-                const fits = plan.maxUnits === null || units <= plan.maxUnits;
-                const productReady = Boolean(DODO_PRODUCTS[plan.key]);
-                return html`
-                <tr>
-                  <td><b>${plan.name}</b>${current ? html` <span class="chip" data-tone="ok">current</span>` : ""}
-                    <span class="cellsub">${plan.blurb}</span></td>
-                  <td>${plan.maxUnits === null ? "No limit" : `Up to ${plan.maxUnits}`}
-                    ${suggested.key === plan.key ? html`<span class="cellsub">your size</span>` : ""}</td>
-                  <td class="num">${usd(plan.monthlyCents)}</td>
-                  <td class="shrink">
-                    ${current ? "" : productReady ? html`
-                      <form method="post" action="/app/billing/choose">
-                        <input type="hidden" name="_csrf" value="${ctx.csrf}" />
-                        <input type="hidden" name="plan" value="${plan.key}" />
-                        <button class="pill ${fits ? "solid" : "outline"} sm" type="submit"
-                                ${attr("disabled", !configured)}>Choose</button>
-                      </form>` : html`<span class="cellsub">Not set up yet</span>`}
-                  </td>
-                </tr>`;
-              })}</tbody>
-            </table></div>
+            ${productReady ? html`
+              <form method="post" action="/app/billing/choose">
+                <input type="hidden" name="_csrf" value="${ctx.csrf}" />
+                <button class="pill solid" type="submit" ${attr("disabled", !configured || doors < 1)}>
+                  ${subscribed ? `Set the next bill to ${doors} door${doors === 1 ? "" : "s"}` : "Subscribe"}
+                </button>
+              </form>` : html`<p class="lede" style="margin:0">The subscription product is not set up yet.</p>`}
           </div>
           <div class="panel__foot">
-            Prices are per company, not per user. Add as many staff as you need.
+            The price is per door, not per person. Add as many staff as you need.
           </div>
         </div>
 
@@ -174,14 +155,17 @@ export function registerBilling(router) {
 
   router.post("/app/billing/choose", async (ctx) => {
     const cid = ctx.staff.company_id;
-    const plan = planByKey(String(ctx.fields.plan || ""));
-    if (!plan) throw new BadRequest("That is not a plan.");
+    const doors = billableDoors(await unitCount(cid));
+    if (doors < 1) {
+      return redirect(ctx.res, `/app/billing?m=${encodeURIComponent(
+        "Add a door before subscribing. The price is per door.")}`);
+    }
 
-    const productId = DODO_PRODUCTS[plan.key];
+    const productId = DODO_PRODUCTS.door;
     if (!DODO_PAYMENTS_API_KEY || !productId) {
       return redirect(ctx.res, `/app/billing?m=${encodeURIComponent(
         DODO_PAYMENTS_API_KEY
-          ? `${plan.name} is not set up for checkout yet.`
+          ? "The subscription is not set up for checkout yet."
           : "Billing is not connected yet.")}`);
     }
 
@@ -190,18 +174,26 @@ export function registerBilling(router) {
     const base = APP_BASE_URL || `${ctx.url.protocol}//${ctx.url.host}`;
 
     try {
+      if (sub.dodo_subscription_id && ["active", "past_due", "trialing"].includes(sub.status)) {
+        await dodo.changeQuantity({
+          subscriptionId: sub.dodo_subscription_id, productId, quantity: doors,
+        });
+        return redirect(ctx.res, `/app/billing?m=${encodeURIComponent(
+          `The next bill is ${doors} door${doors === 1 ? "" : "s"}.`)}`);
+      }
       const session = await dodo.createCheckout({
         productId,
+        quantity: doors,
         email: ctx.staff.email,
         name: company.legal_name || company.name,
         companyId: cid,
-        planKey: plan.key,
+        planKey: PLAN_KEY,
         returnUrl: `${base}/app/billing?m=${encodeURIComponent("Thank you. Your subscription is starting.")}`,
         trialDays: remainingTrialDays(sub),
       });
       return redirect(ctx.res, session.url);
     } catch (err) {
-      log.error("checkout session failed", { err, companyId: cid, plan: plan.key });
+      log.error("checkout session failed", { err, companyId: cid, doors });
       return redirect(ctx.res, `/app/billing?m=${encodeURIComponent(
         "We could not start the subscription. Nothing was charged.")}`);
     }

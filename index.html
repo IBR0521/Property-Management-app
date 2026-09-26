@@ -3,18 +3,20 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Quick Property Buyer | Real Estate Listings</title>
-<meta name="description" content="Quick Property Buyer connects local buyers and sellers with current listings, market expertise, and hands-on support from search to closing.">
-<meta name="robots" content="noindex, nofollow">
+<title>Property operations</title>
+<meta name="description" content="Software for a US property company. Tenants pay on the company's own Stripe or PayPal. The books record it. The subscription is a monthly price by the number of doors.">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://ownerslease.com/">
 
 <meta property="og:type" content="website">
-<meta property="og:title" content="Quick Property Buyer | Real Estate Listings">
-<meta property="og:description" content="Quick Property Buyer connects local buyers and sellers with current listings, market expertise, and hands-on support from search to closing.">
-<meta property="og:image" content="https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=1600&q=70">
+<meta property="og:title" content="Property operations">
+<meta property="og:description" content="Software for a US property company. Rent is charged on the company's own Stripe or PayPal. The platform does not hold that money.">
+<meta property="og:url" content="https://ownerslease.com/">
+<meta property="og:image" content="https://ownerslease.com/assets/img/building.png">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Quick Property Buyer | Real Estate Listings">
-<meta name="twitter:description" content="Quick Property Buyer connects local buyers and sellers with current listings, market expertise, and hands-on support from search to closing.">
-<meta name="twitter:image" content="https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=1600&q=70">
+<meta name="twitter:title" content="Property operations">
+<meta name="twitter:description" content="Software for a US property company. Rent is charged on the company's own Stripe or PayPal. The platform does not hold that money.">
+<meta name="twitter:image" content="https://ownerslease.com/assets/img/building.png">
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -25,208 +27,144 @@
 { "imports": { "lenis": "https://cdn.jsdelivr.net/npm/lenis@1.1.18/+esm" } }
 </script>
 
-<script type="application/ld+json">{"@context":"https://schema.org","@type":"LocalBusiness","name":"Quick Property Buyer","description":"Quick Property Buyer connects local buyers and sellers with current listings, market expertise, and hands-on support from search to closing.","image":"https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=1600&q=70","telephone":"+16146558240","address":"5952 Leafridge Ln, Columbus, OH 43232-7735","areaServed":"Columbus","geo":{"@type":"GeoCoordinates","latitude":39.922037,"longitude":-82.839119}}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Property operations","applicationCategory":"BusinessApplication","operatingSystem":"Web","url":"https://ownerslease.com/","description":"Software for a US property company. Tenants pay on the company's own Stripe or PayPal. The books record the payment. The platform does not hold the rent.","offers":[{"@type":"Offer","name":"Per door","price":"2","priceCurrency":"USD","description":"$2 per door, billed monthly"}]}</script>
 </head>
 <body class="antialiased">
 <main>
 
   <!-- ===================== Hero ===================== -->
-  <section class="hero" id="hero" data-parallax-section>
-    <div class="plate">
-      <div class="mv" data-hero-plate>
-        <img src="https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=1600&q=70" alt="Quick Property Buyer" fetchpriority="high" />
-        <div class="grad"></div>
-      </div>
-    </div>
-
+  <section class="hero hero--plain" id="hero">
     <header class="hdr">
       <nav class="nav-l">
-        <a href="#facilities" data-scroll>Club</a>
+        <a href="#services" data-scroll>Product</a>
+        <a href="#stats" data-scroll>Pricing</a>
       </nav>
       <div class="brand-c">
         <span class="brand fm uc">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg>
-          Quick Property Buyer
+          Property operations
         </span>
       </div>
       <div class="nav-r">
-        <button class="book-txt uc" data-open-modal>Book a Visit</button>
+        <a class="book-txt uc" href="/app/sign-in">Sign in</a>
+        <button class="book-txt uc" data-open-modal>Start</button>
         <button class="burger" data-open-menu aria-label="Open menu"><span></span><span></span></button>
       </div>
     </header>
 
-    <h1 class="hero-title" id="hero-title" data-words data-gate data-stagger="140" data-dur="1100">Columbus homes bought and sold, on your timeline.</h1>
-
-    <div class="hero-bottom">
-      <p class="tagline lines" id="hero-tagline" data-lines data-gate data-basedelay="350" data-stagger="110" data-dur="900"><span class="line"><span>Come In,</span></span><span class="line"><span>Stay Awhile</span></span></p>
-
-      <div class="hero-cluster">
-        <div class="coll iv" data-iv data-delay="650" id="coll">
-          <div class="coll-card glass coll-fade" data-coll-card>
-            <img data-coll-img src="https://images.unsplash.com/photo-1568605114967-8130f3a36994?auto=format&fit=crop&w=1600&q=70" alt="" loading="lazy" />
-            <div>
-              <div class="coll-brand" data-coll-brand>This Week</div>
-              <div class="coll-title" data-coll-title>What&#39;s On</div>
-              <a class="coll-cta" href="#contact" data-coll-cta>See more &rarr;</a>
-            </div>
-          </div>
-          <div class="cdots light" data-coll-dots></div>
+    <div class="stage">
+      <div>
+        <h1 class="hero-title" id="hero-title" data-words data-gate data-stagger="140" data-dur="1100">Software for the company that runs the houses.</h1>
+        <p class="tagline lines" id="hero-tagline" data-lines data-gate data-basedelay="350" data-stagger="110" data-dur="900"><span class="line"><span>The rent</span></span><span class="line"><span>stays theirs.</span></span></p>
+        <div class="stage-actions">
+          <button class="pill light" data-open-modal>Start</button>
+          <a class="pill on-navy" href="#stats" data-scroll>Pricing</a>
         </div>
-
-        <article class="membership glass iv" data-iv data-delay="780">
-          <div class="col">
-            <div class="dots-av">
-              <span style="background:var(--brand-light)"></span>
-              <span style="background:var(--brand)"></span>
-              <span style="background:var(--accent-teal)"></span>
-              <span style="background:#ffffff"></span>
-            </div>
-            <div class="cap">Happy clients</div>
-          </div>
-          <img src="https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=1600&q=70" alt="" loading="lazy" />
-        </article>
       </div>
-    </div>
-  </section>
-
-  <!-- ===================== Trust ===================== -->
-  <section class="trust" id="trust" data-parallax-section>
-    <div class="trust-badges">
-      <div class="pctbadge iv" data-iv>
-        <div class="n">100%</div>
-        <div class="c">Built around what you need</div>
-      </div>
-      <article class="badgecard iv" data-iv data-delay="120">
-        <div class="chip">#01</div>
-        <div>
-          <div class="t">Trusted by clients</div>
-          <div class="b">From first visit to regular, clients keep coming back because the experience shows.</div>
-        </div>
-      </article>
-    </div>
-
-    <h2 class="ghost-h" id="trust-title">
-      <div class="ghost-row"><span class="clip gword" data-gx="-3,3"><span>People</span></span><span class="clip gword" data-gx="3,-3"><span>Care</span></span></div>
-      <div class="ghost-row"><span class="clip gword ink" data-gx="-2,4"><span>First</span></span><span class="clip gword" data-gx="4,-3"><span>Always</span></span></div>
-    </h2>
-
-    <div class="coach" data-iv id="coach">
-      <figure>
-        <img data-coach-img src="https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=1600&q=70" alt="" loading="lazy" />
-        <div class="cap">
-          <div class="nm" data-coach-nm>Our Team</div>
-          <div class="rl" data-coach-rl>Here to Help</div>
-        </div>
+      <figure class="stage-photo">
+        <img src="/assets/img/building.png" alt="A brick apartment building at dusk" fetchpriority="high" />
       </figure>
-    </div>
-
-    <div class="trust-ctrl">
-      <button class="arrowbtn outline prev" data-coach-prev aria-label="Previous"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
-      <div class="cdots dark" data-coach-dots></div>
-      <button class="arrowbtn solid" data-coach-next aria-label="Next"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
     </div>
   </section>
 
   <!-- ===================== Services ===================== -->
   <section id="services" class="svsp">
     <div class="svsp-inner">
-      <p class="svsp-eyebrow">What we do</p>
-      <h2 class="svsp-heading">What we offer</h2>
+      <p class="svsp-eyebrow">The work</p>
+      <h2 class="svsp-heading">What the staff open</h2>
       <div class="svsp-rows">
         <div class="svsp-row">
           <span class="svsp-num">01</span>
           <div class="svsp-main">
-            <h3 class="svsp-title">Home Listings</h3>
-            <p class="svsp-desc">Your property listed accurately, priced to the Columbus market, and visible to serious buyers.</p>
+            <h3 class="svsp-title">Today</h3>
+            <p class="svsp-desc">The list of what needs a person: setup, mail that is waiting, and the day's decisions.</p>
           </div>
         </div>
         <div class="svsp-row">
           <span class="svsp-num">02</span>
           <div class="svsp-main">
-            <h3 class="svsp-title">Seller Representation</h3>
-            <p class="svsp-desc">We negotiate on your behalf from offer through closing, keeping your interests at the center.</p>
+            <h3 class="svsp-title">Properties</h3>
+            <p class="svsp-desc">The buildings and the apartments. Repairs, inspections, and the rent roll are opened from the building.</p>
           </div>
         </div>
         <div class="svsp-row">
           <span class="svsp-num">03</span>
           <div class="svsp-main">
-            <h3 class="svsp-title">Buyer Representation</h3>
-            <p class="svsp-desc">We help buyers find the right property, understand the offer, and move through the process with confidence.</p>
+            <h3 class="svsp-title">Rent in</h3>
+            <p class="svsp-desc">A pay link on the notice you already send. Card or bank through the company's Stripe, or PayPal beside it.</p>
           </div>
         </div>
         <div class="svsp-row">
           <span class="svsp-num">04</span>
           <div class="svsp-main">
-            <h3 class="svsp-title">Market Analysis</h3>
-            <p class="svsp-desc">A clear-eyed look at comparable sales and current Columbus market conditions before you commit.</p>
+            <h3 class="svsp-title">Books</h3>
+            <p class="svsp-desc">The trial balance. A paid rent is written on the lease. Paying an owner is a separate step, and a person starts it.</p>
           </div>
         </div>
         <div class="svsp-row">
           <span class="svsp-num">05</span>
           <div class="svsp-main">
-            <h3 class="svsp-title">Lead Matching</h3>
-            <p class="svsp-desc">Connecting motivated sellers with ready buyers already in our network.</p>
+            <h3 class="svsp-title">Pay owners</h3>
+            <p class="svsp-desc">What the company owes, sent from the company's own account. Spend over an owner's line waits for approval.</p>
           </div>
         </div>
         <div class="svsp-row">
           <span class="svsp-num">06</span>
           <div class="svsp-main">
-            <h3 class="svsp-title">Closing Support</h3>
-            <p class="svsp-desc">We stay involved through paperwork, title, and the final walk-through so nothing falls through at the end.</p>
+            <h3 class="svsp-title">Notices</h3>
+            <p class="svsp-desc">The mail the company sends. An unapproved template cannot go out. A published vacancy is the page a search engine may find.</p>
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ===================== Facilities ===================== -->
-  <section class="facilities" id="facilities">
-    <div class="fac-grid">
-      <div class="fac-intro">
-        <img class="fac-icon iv" data-iv src="https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1600&q=70" alt="" loading="lazy" />
-        <h2 class="h2big lines" data-lines data-stagger="120" style="margin-top:1.5rem"><span class="line"><span>Step</span></span><span class="line"><span>Inside Our</span></span><span class="line"><span>Space</span></span></h2>
-        <p class="fac-body" data-wordfade data-stagger="28" data-delay="250">Take a look around before you visit and picture yourself right at home, in a space built for the way you actually use it.</p>
-      </div>
-      <div class="fac-cards">
-        <figure class="fac-tile iv" data-iv data-delay="0">
-          <img src="https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=1600&q=70" alt="" loading="lazy" />
-          <div class="fac-cap clay"><div class="nm">The Space</div><div class="ds">Warm, welcoming, and made to feel like yours.</div></div>
-        </figure>
-        <figure class="fac-tile mb iv" data-iv data-delay="140">
-          <img src="https://images.unsplash.com/photo-1568605114967-8130f3a36994?auto=format&fit=crop&w=1600&q=70" alt="" loading="lazy" />
-          <div class="fac-cap blue"><div class="nm">The Details</div><div class="ds">Every corner considered, down to the finish.</div></div>
-        </figure>
-      </div>
+  <section class="blk" id="places" aria-label="The buildings and the books">
+    <div class="shot-row">
+      <figure class="shot iv" data-iv>
+        <img src="/assets/img/hallway.png" alt="Apartment doors along a hallway, one of them open" loading="lazy" />
+        <figcaption><b>The doors</b><span>Each one is a unit the company already counts. The monthly price is that count, times two dollars.</span></figcaption>
+      </figure>
+      <figure class="shot iv" data-iv data-delay="140">
+        <img src="/assets/img/desk.png" alt="A brass key and a closed notebook on a desk" loading="lazy" />
+        <figcaption><b>The record</b><span>A paid rent is written on the lease. The money settles in the company's own account.</span></figcaption>
+      </figure>
     </div>
   </section>
 
   <!-- ===================== Stats ===================== -->
   <section class="stats" id="stats">
-    <span class="eyebrow light"><span class="dot"></span>By the numbers</span>
-    <h2 class="h2big lines" data-lines data-stagger="120"><span class="line"><span>The numbers</span></span><span class="line"><span>speak</span></span></h2>
+    <span class="eyebrow light"><span class="dot"></span>Pricing</span>
+    <h2 class="h2big lines" data-lines data-stagger="120"><span class="line"><span>A monthly price,</span></span><span class="line"><span>by the doors.</span></span></h2>
+    <div class="stats-grid">
+      <div class="stat-cell"><div class="v">$2</div><div class="l">Per door, each month</div></div>
+      <div class="stat-cell"><div class="v">×</div><div class="l">The doors you have</div></div>
+      <div class="stat-cell"><div class="v">30</div><div class="l">Days before a plan is required</div></div>
+      <div class="stat-cell"><div class="v">$0</div><div class="l">Added to the rent</div></div>
+    </div>
   </section>
 
   <!-- ===================== Why us ===================== -->
   <section class="blk" id="why">
     <div class="blk-head">
-      <p class="blk-eyebrow">Why Quick Property Buyer</p>
-      <h2 class="blk-h2">A Columbus agent who moves listings, not just lists them</h2>
+      <p class="blk-eyebrow">Plain terms</p>
+      <h2 class="blk-h2">What the price does, and does not, buy</h2>
     </div>
     <div class="blk-grid cols-3">
       <div class="blk-card lift">
-        <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15"/><path d="M9 3.236v15"/></svg></span>
-        <h3 class="sz-xl">Deep Columbus roots</h3>
-        <p>We focus on Columbus and the surrounding neighborhoods we know block by block. That local knowledge shapes every price recommendation and every offer we review on your behalf.</p>
+        <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></span>
+        <h3 class="sz-xl">Thirty days, then a plan</h3>
+        <p>A new company works for 30 days. Choose a plan from Your plan before that ends. If it ends with no plan, the company can still be read. Nothing is deleted.</p>
       </div>
       <div class="blk-card lift">
-        <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg></span>
-        <h3 class="sz-xl">Fast decisions, real offers</h3>
-        <p>We buy and represent buyers who are ready to act. If you need to sell on your schedule, we skip the uncertainty that comes with long listing windows and repeated showings.</p>
+        <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg></span>
+        <h3 class="sz-xl">It renews until you cancel</h3>
+        <p>$2 a month for each door, billed until you cancel. Cancel it from Your plan. That opens the billing page, and the plan runs until the next bill.</p>
       </div>
       <div class="blk-card lift">
-        <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m11 17 2 2a1 1 0 1 0 3-3"/><path d="m14 14 2.5 2.5a1 1 0 1 0 3-3l-3.88-3.88a3 3 0 0 0-4.24 0l-.88.88a1 1 0 1 1-3-3l2.81-2.81a5.79 5.79 0 0 1 7.06-.87l.47.28a2 2 0 0 0 1.42.25L21 4"/><path d="m21 3 1 11h-2"/><path d="M3 3 2 14l6.5 6.5a1 1 0 1 0 3-3"/><path d="M3 4h8"/></svg></span>
-        <h3 class="sz-xl">One contact from start to close</h3>
-        <p>You work with the same person through valuation, negotiation, and closing. No hand-offs to a junior associate midway through your transaction.</p>
+        <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="5" rx="2"/><path d="M2 10h20"/></svg></span>
+        <h3 class="sz-xl">No cut of the rent</h3>
+        <p>Tenant rent is charged on the company's Stripe or PayPal and settles there. This software never holds client money, and it adds no fee of its own on that charge.</p>
       </div>
     </div>
   </section>
@@ -234,33 +172,33 @@
   <!-- ===================== Process ===================== -->
   <section class="blk" id="process">
     <div class="blk-head wide">
-      <p class="blk-eyebrow">The process</p>
-      <h2 class="blk-h2">How a sale or purchase comes together</h2>
+      <p class="blk-eyebrow">Getting started</p>
+      <h2 class="blk-h2">Four steps, then the day runs</h2>
     </div>
     <div class="blk-grid cols-4">
       <div class="blk-card lift">
         <p class="blk-step">01</p>
-        <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg></span>
-        <h3 class="sz-lg">Reach out</h3>
-        <p class="sm">Call us at <a href="tel:+16146558240" class="pd-cta u" rel="noopener noreferrer nofollow">(614) 655-8240</a> or submit your property details online. We respond the same business day.</p>
+        <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+        <h3 class="sz-lg">Start</h3>
+        <p class="sm">Name the company and the person who will run it. Confirm the email before mail can leave.</p>
       </div>
       <div class="blk-card lift">
         <p class="blk-step">02</p>
-        <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg></span>
-        <h3 class="sz-lg">Property review</h3>
-        <p class="sm">We walk the property or review the listing details and pull comparable sales in Columbus to set an accurate value, not a number designed to flatter you into signing.</p>
+        <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg></span>
+        <h3 class="sz-lg">Add the doors</h3>
+        <p class="sm">An owner, then a building, then its apartments. The monthly bill is $2 for each of those doors.</p>
       </div>
       <div class="blk-card lift">
         <p class="blk-step">03</p>
-        <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg></span>
-        <h3 class="sz-lg">Written offer</h3>
-        <p class="sm">You receive a clear, written offer or a listing strategy with a timeline. Everything is spelled out before you commit to anything.</p>
+        <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg></span>
+        <h3 class="sz-lg">Paste the key</h3>
+        <p class="sm">The company's own Stripe secret, or PayPal, on Rent in. Tenants then pay from the link on their notice.</p>
       </div>
       <div class="blk-card lift">
         <p class="blk-step">04</p>
-        <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg></span>
-        <h3 class="sz-lg">Close on schedule</h3>
-        <p class="sm">We coordinate title, inspections, and paperwork so the closing date you agreed to is the date it actually happens.</p>
+        <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg></span>
+        <h3 class="sz-lg">The books follow</h3>
+        <p class="sm">A paid rent is recorded on the lease. Bank statements still come in as a file you import. Paying an owner still needs a person.</p>
       </div>
     </div>
   </section>
@@ -268,25 +206,25 @@
   <!-- ===================== FAQ ===================== -->
   <section class="blk narrow" id="faq">
     <div class="blk-head wide">
-      <p class="blk-eyebrow">Common questions</p>
-      <h2 class="blk-h2">What sellers and buyers typically ask</h2>
+      <p class="blk-eyebrow">Questions</p>
+      <h2 class="blk-h2">Before you start</h2>
     </div>
     <div class="blk-grid cols-2">
       <div class="blk-card plain">
-        <h3 class="sz-lg">Do I need to repair the property before selling?</h3>
-        <p class="sm">No. We assess properties in their current condition and factor the state of the home into the offer. You do not need to renovate or stage before we talk.</p>
+        <h3 class="sz-lg">Does this software hold the rent?</h3>
+        <p class="sm">No. The pay button creates the charge with the company's own Stripe or PayPal key. The money settles in that processor account. The software records the payment on the lease.</p>
       </div>
       <div class="blk-card plain">
-        <h3 class="sz-lg">Which Columbus neighborhoods do you cover?</h3>
-        <p class="sm">We work throughout Columbus, OH and the broader Franklin County area. If you are unsure whether your address falls in our range, call us and we will confirm right away.</p>
+        <h3 class="sz-lg">What does a company pay?</h3>
+        <p class="sm">$2 a month for each door. Ten doors are $20. One door is $2. The first 30 days are a trial. After that it renews each month until you cancel it from Your plan. It then runs until the next bill.</p>
       </div>
       <div class="blk-card plain">
-        <h3 class="sz-lg">How quickly can you close?</h3>
-        <p class="sm">Timeline depends on the transaction type, but we work with buyers and title companies to keep things moving. If speed matters to you, say so up front and we will build the schedule around it.</p>
+        <h3 class="sz-lg">Can a tenant pay by bank?</h3>
+        <p class="sm">Yes, when the company has pasted a Stripe key. Card and bank run on Stripe's page. PayPal is a second button, and it needs the company's own PayPal key. Card numbers are typed on the processor's page.</p>
       </div>
       <div class="blk-card plain">
-        <h3 class="sz-lg">Can you help me find a property to buy, not just sell one?</h3>
-        <p class="sm">Yes. We carry active listings and work with buyers looking for homes in Columbus. Browse current listings on this site or call us to describe what you need.</p>
+        <h3 class="sz-lg">Do you score applicants?</h3>
+        <p class="sm">No. A person reads the application. The software does not rank people. Confirming the company email, pasting the processor key, importing a bank file, approving spend over an owner's line, and paying owners still need a person.</p>
       </div>
     </div>
   </section>
@@ -294,40 +232,40 @@
   <!-- ===================== Get in touch ===================== -->
   <section class="blk" id="get-in-touch">
     <div class="blk-head wide">
-      <p class="blk-eyebrow">Get in touch</p>
-      <h2 class="blk-h2">Talk to us about your Columbus property</h2>
+      <p class="blk-eyebrow">Contact</p>
+      <h2 class="blk-h2">Write, or start</h2>
     </div>
     <div class="blk-grid cols-2">
       <div class="blk-card tall">
         <div class="blk-row">
-          <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg></span>
+          <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg></span>
           <div>
-            <p class="lb">Phone</p>
-            <a href="tel:+16146558240" class="pd-cta" rel="noopener noreferrer nofollow">(614) 655-8240</a>
+            <p class="lb">Email</p>
+            <a href="mailto:notices@ownerslease.com">notices@ownerslease.com</a>
           </div>
         </div>
         <div class="blk-row">
-          <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg></span>
+          <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
           <div>
-            <p class="lb">Office address</p>
-            <p>5952 Leafridge Ln<br />Columbus, OH 43232-7735</p>
+            <p class="lb">Staff</p>
+            <p><a href="/app/sign-in">Sign in</a></p>
           </div>
         </div>
         <div class="blk-row">
-          <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15"/><path d="M9 3.236v15"/></svg></span>
+          <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg></span>
           <div>
-            <p class="lb">Service area</p>
-            <p>Columbus, OH and Franklin County</p>
+            <p class="lb">New company</p>
+            <p><a href="/signup">Start</a></p>
           </div>
         </div>
       </div>
       <div class="blk-card tall split">
         <div>
-          <h3>Ready to talk about a property?</h3>
-          <p>Whether you want to sell your home, get a valuation, or browse current listings in Columbus, a single call gets the conversation started. No obligation on first contact.</p>
+          <h3>Ready to run the company?</h3>
+          <p>Questions about the software go to notices@ownerslease.com. A tenant with a repair or a rent question writes the property company on their notice, not this address.</p>
         </div>
         <div>
-          <a href="tel:+16146558240" class="pd-cta blk-btn" rel="noopener noreferrer nofollow">Call (614) 655-8240</a>
+          <a href="/signup" class="pd-cta blk-btn">Start a company</a>
         </div>
       </div>
     </div>
@@ -336,24 +274,24 @@
   <!-- ===================== Service area ===================== -->
   <section class="blk area" id="area">
     <div class="blk-area-inner">
-      <p class="blk-kicker">Where we work</p>
-      <h2 class="blk-h2 sm">Serving Columbus and the surrounding area</h2>
-      <p class="blk-lede">Quick Property Buyer operates throughout Columbus. If you have a property to sell or are looking to buy in the metro area, reach out and we will tell you whether we can help.</p>
+      <p class="blk-kicker">Who it is for</p>
+      <h2 class="blk-h2 sm">A property company in the United States</h2>
+      <p class="blk-lede">Staff run the office. Owners read what they are owed. Tenants pay on a link. The rent settles in the company's own processor account.</p>
       <div class="blk-grid tiles">
         <div class="blk-card tile">
-          <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg></span>
-          <h3>Columbus</h3>
-          <p>Our primary market, from downtown neighborhoods to outer suburbs.</p>
+          <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg></span>
+          <h3>The office</h3>
+          <p>The people who already manage the doors. Today is the list they work.</p>
         </div>
         <div class="blk-card tile">
-          <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"/><path d="M15 5.764v15"/><path d="M9 3.236v15"/></svg></span>
-          <h3>Surrounding Counties</h3>
-          <p>We work with sellers and buyers throughout the greater Columbus metro.</p>
+          <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+          <h3>The owner</h3>
+          <p>Statements, and a payout that still waits for a person to send it.</p>
         </div>
         <div class="blk-card tile">
-          <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg></span>
-          <h3>Not sure?</h3>
-          <p>Call us and we will give you a straight answer about whether we serve your area.</p>
+          <span class="pd-ico"><svg class="pd-ico-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 4h3a2 2 0 0 1 2 2v14"/><path d="M2 20h3"/><path d="M13 20h9"/><path d="M10 12h.01"/><rect x="2" y="4" width="11" height="16" rx="2"/></svg></span>
+          <h3>The tenant</h3>
+          <p>Pays from the link on the notice. Card numbers stay on Stripe or PayPal.</p>
         </div>
       </div>
     </div>
@@ -366,26 +304,24 @@
         <span class="eyebrow light"><span class="dot"></span>Get started</span>
         <p class="big lines" data-lines data-stagger="120"><span class="line"><span>Ready when</span></span><span class="line"><span>you are</span></span></p>
       </div>
-      <button class="pill light iv" data-iv data-delay="150" data-open-modal>Book a Visit<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+      <button class="pill light iv" data-iv data-delay="150" data-open-modal>Start<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
     </div>
 
     <div class="ft-cols">
       <div class="ft-brand">
-        <span class="bl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg>Quick Property Buyer</span>
-        <p class="ft-blurb">Whether you need to sell fast or find the right property in Columbus, we handle the full transaction from first call to closing. No delays, no surprises.</p>
+        <span class="bl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg>Property operations</span>
+        <p class="ft-blurb">Software for a property company. The rent stays in the company's own account.</p>
         <address class="ft-addr">
-          <a href="mailto:hello@baseline.club">hello@baseline.club</a>
-          <a href="tel:+16146558240">+16146558240</a>
-          <span class="muted">5952 Leafridge Ln, Columbus, OH 43232-7735, Columbus</span>
+          <a href="mailto:notices@ownerslease.com">notices@ownerslease.com</a>
         </address>
       </div>
-      <nav class="ft-col"><h4>Explore</h4><ul><li><a href="#facilities" data-scroll>Our space</a></li><li><a href="#contact" data-scroll>Visit us</a></li></ul></nav>
-      <nav class="ft-col"><h4>Visit</h4><ul><li><a href="#facilities" data-scroll>Location</a></li><li><a href="#contact" data-scroll>Contact</a></li><li><button data-open-modal style="color:inherit">Book a Visit</button></li></ul></nav>
-      <nav class="ft-col"><h4>Company</h4><ul><li><a href="#facilities" data-scroll>Our space</a></li><li><a href="#contact" data-scroll>Contact</a></li></ul></nav>
+      <nav class="ft-col"><h4>Product</h4><ul><li><a href="#services" data-scroll>The work</a></li><li><a href="#stats" data-scroll>Pricing</a></li></ul></nav>
+      <nav class="ft-col"><h4>Company</h4><ul><li><a href="#get-in-touch" data-scroll>Contact</a></li><li><a href="/privacy">Privacy</a></li><li><a href="/terms">Terms</a></li></ul></nav>
+      <nav class="ft-col"><h4>Account</h4><ul><li><a href="/signup">Start</a></li><li><a href="/app/sign-in">Sign in</a></li></ul></nav>
     </div>
 
     <div class="ft-bottom">
-      <span>&copy; 2026 Quick Property Buyer. All rights reserved.</span>
+      <span>&copy; 2026 Property operations</span>
       <!-- Staff way in. Uses the empty slot the template already styled for
            social links, so it needs no new CSS. Discreet on purpose: this is
            for the people who work here, not for visitors. -->
@@ -397,28 +333,20 @@
 <!-- ===================== Booking modal ===================== -->
 <div class="modal-root" data-modal>
   <div class="modal-bk" data-modal-close></div>
-  <div class="modal-panel" role="dialog" aria-modal="true" aria-label="Book a visit">
+  <div class="modal-panel" role="dialog" aria-modal="true" aria-label="Start a company">
     <div class="modal-head">
       <div>
-        <span class="eyebrow dark"><span class="dot"></span>Book a visit</span>
-        <h2 class="modal-title lines" data-lines data-stagger="90" data-dur="800"><span class="line"><span>Come</span></span><span class="line"><span>say hello</span></span></h2>
+        <span class="eyebrow dark"><span class="dot"></span>Start</span>
+        <h2 class="modal-title lines" data-lines data-gate data-stagger="90" data-dur="800"><span class="line"><span>Name the</span></span><span class="line"><span>company.</span></span></h2>
       </div>
       <button class="iconbtn" data-modal-close aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
 
-    <form class="modal-form" data-modal-form method="POST" action="/quick-property-buyer/contact" novalidate>
-      <div class="field"><label for="mf-name">Full name</label><input id="mf-name" name="name" type="text" placeholder="Alex Rivera" /></div>
-      <div class="field"><label for="mf-email">Email</label><input id="mf-email" name="email" type="email" placeholder="you@email.com" /></div>
-      <div class="field"><label for="mf-msg">How can we help?</label><textarea id="mf-msg" name="message" rows="3" placeholder="Tell us what you're looking for..."></textarea></div>
-      <button class="modal-submit" type="submit" data-modal-submit>Request a visit</button>
+    <form class="modal-form" data-modal-form method="GET" action="/signup">
+      <div class="field"><label for="mf-name">Your name</label><input id="mf-name" name="name" type="text" autocomplete="name" required placeholder="Your name" /></div>
+      <div class="field"><label for="mf-email">Email</label><input id="mf-email" name="email" type="email" autocomplete="email" required placeholder="you@company.com" /></div>
+      <button class="modal-submit" type="submit" data-modal-submit>Continue</button>
     </form>
-
-    <div class="msuccess hide" data-modal-success>
-      <div class="ck"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg></div>
-      <h3>Request received</h3>
-      <p data-success-msg>Thanks! Our team will be in touch to lock in your visit.</p>
-      <button class="pill solid" data-modal-close>Done</button>
-    </div>
   </div>
 </div>
 
@@ -428,15 +356,17 @@
   <div class="menu-panel">
     <div class="menu-inner">
       <div class="menu-top">
-        <span class="brand fm uc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg>Quick Property Buyer</span>
+        <span class="brand fm uc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg>Property operations</span>
         <button class="iconbtn" data-menu-close aria-label="Close menu" style="background:rgba(255,255,255,.15)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       </div>
       <nav class="menu-nav">
-        <a href="#facilities" data-scroll data-menu-link style="transition-delay:.19s">Facilities</a>
-        <a href="#contact" data-scroll data-menu-link style="transition-delay:.33s">Contact</a>
+        <a href="#services" data-scroll data-menu-link style="transition-delay:.12s">Product</a>
+        <a href="#stats" data-scroll data-menu-link style="transition-delay:.22s">Pricing</a>
+        <a href="/privacy" data-menu-link style="transition-delay:.32s">Privacy</a>
+        <a href="/app/sign-in" data-menu-link style="transition-delay:.42s">Sign in</a>
       </nav>
       <div class="menu-bottom">
-        <button class="pill light" data-menu-book>Book a Visit<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+        <button class="pill light" data-menu-book>Start<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
         <nav class="menu-social"></nav>
       </div>
     </div>
@@ -445,10 +375,10 @@
 
 <!-- ===================== Loading curtain ===================== -->
 <div class="loader" data-loader>
-  <span class="wm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg>Quick Property Buyer</span>
+  <span class="wm"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg>Property operations</span>
   <div class="track"><div class="fill"></div></div>
 </div>
 
-<script type="module" src="assets/js/main.js"></script>
+<script type="module" src="assets/js/main.js?v=2"></script>
 </body>
 </html>

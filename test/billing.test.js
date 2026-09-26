@@ -23,7 +23,7 @@ const { applyStripeEvent, applyDodoEvent, subscriptionFor, companyIsReadOnly, re
   await import("../server/features/billing.js");
 const { verifyWebhookSignature: verifyDodo, signWebhook: signDodo } =
   await import("../server/lib/dodo.js");
-const { isWorking, planForUnits, outgrown, PLANS, describeStatus } =
+const { isWorking, monthlyCents, PER_DOOR_CENTS, describeStatus } =
   await import("../server/lib/plans.js");
 
 const SECRET = process.env.STRIPE_WEBHOOK_SECRET;
@@ -41,32 +41,19 @@ beforeEach(async () => {
   world = await f.makeWorld({ name: "Billing Co" });
 });
 
-describe("plans are knowable in advance", () => {
-  test("a band is chosen by unit count, not by a conversation", () => {
-    assert.equal(planForUnits(1).key, "starter");
-    assert.equal(planForUnits(25).key, "starter");
-    assert.equal(planForUnits(26).key, "growth");
-    assert.equal(planForUnits(100).key, "growth");
-    assert.equal(planForUnits(101).key, "professional");
-    assert.equal(planForUnits(5000).key, "scale", "the top band has no ceiling");
+describe("the bill is the door count", () => {
+  test("one door is the rate, and twenty-five doors are twenty-five times that", () => {
+    assert.equal(PER_DOOR_CENTS, 200);
+    assert.equal(monthlyCents(0), 0);
+    assert.equal(monthlyCents(1), 200);
+    assert.equal(monthlyCents(25), 25 * 200);
+    assert.equal(monthlyCents(26), 26 * 200);
   });
 
-  test("every plan has a price and no per-transaction component", () => {
-    for (const plan of PLANS) {
-      assert.ok(plan.monthlyCents > 0, `${plan.key} has a price`);
-      assert.ok(!("perUnitCents" in plan) && !("percentOfRent" in plan),
-        "collecting more rent must not cost more — that is the whole counter-position");
-    }
-  });
-
-  test("outgrowing a plan is reported, not enforced", () => {
-    const over = outgrown("starter", 40);
-    assert.ok(over);
-    assert.equal(over.suggested.key, "growth");
-    /* Nothing in the codebase blocks on this. Cutting somebody off mid-month
-       because they added a building is the behaviour this product exists to
-       be unlike. */
-    assert.equal(outgrown("scale", 100000), null);
+  test("the bill does not know how much rent was collected", () => {
+    /* The function takes a door count and nothing else. A busier month of
+       rent is the same bill as a quiet one. */
+    assert.equal(monthlyCents(10), 10 * PER_DOOR_CENTS);
   });
 });
 

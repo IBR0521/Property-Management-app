@@ -817,10 +817,10 @@ function registerPaymentSettings(router) {
 
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "payments", counts: await navCounts(cid),
-      title: "Tenant payments",
+      title: "Rent in",
       subtitle: company.stripe_account_id || company.paypal_client_id
-        ? "Rent paid online, into your own account"
-        : "Not connected yet",
+        ? "Tenants pay on your Stripe or PayPal. The money stays in that account."
+        : "Paste your Stripe or PayPal key. Tenants then pay from the link you already send.",
       body: html`
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}
         ${ctx.query.e ? notice("danger", null, ctx.query.e) : ""}

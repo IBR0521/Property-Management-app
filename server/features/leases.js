@@ -301,7 +301,7 @@ export function registerLeases(router) {
 
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "leases", counts: await navCounts(cid),
-      title: "Lease documents", subtitle: `${docs.length} document${docs.length === 1 ? "" : "s"}`,
+      title: "Leases", subtitle: `${docs.length} document${docs.length === 1 ? "" : "s"}`,
       actions: html`<a class="pill solid sm" href="/app/leases/new">New document</a>`,
       body: html`
         ${tabs(LEASE_TABS, "documents")}

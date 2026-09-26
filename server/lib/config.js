@@ -364,12 +364,10 @@ export const DODO_API_BASE = DODO_ENVIRONMENT === "live"
   ? "https://live.dodopayments.com"
   : "https://test.dodopayments.com";
 
-/* One product per plan band, created in the Dodo dashboard as a subscription. */
+/* One subscription product, priced per door. Checkout sends the door count
+   as the quantity, so the product price in Dodo has to be the per-door rate. */
 export const DODO_PRODUCTS = {
-  starter: raw("DODO_PRODUCT_STARTER"),
-  growth: raw("DODO_PRODUCT_GROWTH"),
-  professional: raw("DODO_PRODUCT_PROFESSIONAL"),
-  scale: raw("DODO_PRODUCT_SCALE"),
+  door: raw("DODO_PRODUCT_DOOR"),
 };
 
 /* A live secret key in a non-production environment is how a test run charges

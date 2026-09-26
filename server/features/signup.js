@@ -45,6 +45,7 @@ const VERIFY_VALID_HOURS = 72;
 export const ONBOARDING_STEPS = [
   {
     key: "company", label: "Confirm your company details",
+    action: "Confirm details",
     hint: "Legal name, address and the number tenants should call.",
     href: "/app/company",
     derive: async (cid) => {
@@ -54,31 +55,36 @@ export const ONBOARDING_STEPS = [
   },
   {
     key: "owner", label: "Add your first owner",
+    action: "Add an owner",
     hint: "A building has to belong to somebody.",
     href: "/app/owners/new",
     derive: async (cid) => Boolean(await get("SELECT id FROM owner WHERE company_id = ? LIMIT 1", cid)),
   },
   {
     key: "property", label: "Add your first building",
-    hint: "Then its apartments, and the QR codes print themselves.",
+    action: "Add a building",
+    hint: "Then its apartments.",
     href: "/app/portfolio/new",
     derive: async (cid) => Boolean(await get("SELECT id FROM unit WHERE company_id = ? LIMIT 1", cid)),
   },
   {
     key: "verify", label: "Verify your email address",
+    action: "Confirm email",
     hint: "Until this is done we will not send mail on your behalf.",
     href: "/app/company",
     derive: async (cid) => Boolean((await get("SELECT verified_at FROM company WHERE id = ?", cid))?.verified_at),
   },
   {
     key: "delivery", label: "Send yourself a test message",
+    action: "Send a test",
     hint: "So you find out delivery works before a tenant does.",
     href: "/app/setup",
     manual: true,
   },
   {
     key: "billing", label: "Start your subscription",
-    hint: "Your trial runs until then; nothing is charged before you choose a plan.",
+    action: "Choose a plan",
+    hint: "Nothing is charged before you choose a plan.",
     href: "/app/billing",
     manual: true,
   },
@@ -438,7 +444,7 @@ function verifyResultPage({ ok, title, detail, cta }) {
     heading: title,
     body: html`
       ${notice(ok ? "ok" : "warn", null, detail)}
-      ${cta ? html`<p style="margin-top:1.5rem"><a class="pill solid" href="${cta}">Go to your dashboard</a></p>` : ""}`,
+      ${cta ? html`<p style="margin-top:1.5rem"><a class="pill solid" href="${cta}">Open Today</a></p>` : ""}`,
   });
 }
 

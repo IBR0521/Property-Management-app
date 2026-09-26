@@ -85,7 +85,7 @@ describe("who can get to it", () => {
   test("an admin can", async () => {
     const res = await page("/app/payouts");
     assert.equal(res.status, 200);
-    assert.match(res.body, /Payments out/);
+    assert.match(res.body, /Pay owners/);
   });
 
   test("an accountant can, because this is the books", async () => {

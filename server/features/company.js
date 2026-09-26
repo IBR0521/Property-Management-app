@@ -239,6 +239,16 @@ export function registerCompany(router) {
                 next request. <a href="/app/account/2fa">Set it up first</a>.
               </span>`}
           </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel__head">
+            <h2>Let someone look</h2>
+            <p>A support session is read-only, and you can end it.</p>
+          </div>
+          <div class="panel__foot">
+            <a class="pill outline sm" href="/app/company/access">Support access</a>
+          </div>
         </div>`,
     }));
   });

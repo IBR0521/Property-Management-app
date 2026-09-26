@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Privacy · Property operations</title>
+<meta name="description" content="What Property operations stores about a property company, its staff, and the tenants that company records. Card numbers stay on Stripe or PayPal." />
+<meta name="robots" content="index, follow" />
+<link rel="canonical" href="https://ownerslease.com/privacy" />
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/assets/css/styles.css" />
+</head>
+<body>
+<main>
+  <div class="doc-bar">
+    <a class="uc" href="/">Property operations</a>
+    <nav>
+      <a href="/terms">Terms</a>
+      <a href="/signup">Start</a>
+    </nav>
+  </div>
+
+  <article class="blk doc">
+    <p class="blk-eyebrow">Privacy</p>
+    <h1>What is stored, and what is not.</h1>
+    <p>This page describes the software at ownerslease.com. A property company that uses it is the one that decides what to enter about its owners, tenants, and contractors. Questions go to <a href="mailto:notices@ownerslease.com">notices@ownerslease.com</a>.</p>
+
+    <h2>Staff</h2>
+    <p>A staff account stores a name, an email, a phone if one is given, a password that is stored as a hash, and the company that person belongs to. Signing in sets a session cookie so the next page knows who you are. That cookie is required for the app. This site does not run advertising or analytics cookies.</p>
+
+    <h2>The company</h2>
+    <p>The company record stores the legal name, the address the company enters, and the people, buildings, leases, notices, and books the staff record. A Stripe or PayPal secret is stored encrypted. The card or bank number a tenant types is entered on Stripe's or PayPal's page, and it is not stored here.</p>
+
+    <h2>Rent</h2>
+    <p>A tenant payment is created with the company's own processor key. The money settles in that processor account. This software records that the payment happened, the amount, and the fee the processor reported. It does not hold the rent.</p>
+
+    <h2>Mail</h2>
+    <p>Notices the company sends go out through the email service configured for this site. A bounce or a complaint is recorded so the same address is not mailed again. A tenant's reply belongs to the company.</p>
+
+    <h2>The subscription</h2>
+    <p>The monthly plan is billed by Dodo Payments. Their pages collect the card for that subscription. That card is for the software, and it is separate from tenant rent.</p>
+
+    <h2>Who can see it</h2>
+    <p>Staff see the company they belong to. A support session, if the company opens one, is read-only and the company can end it. We do not sell the records a company enters.</p>
+
+    <h2>How long</h2>
+    <p>The books are kept. A lapsed plan makes the company read-only. It does not delete the records. A company that wants something removed can write to the address above.</p>
+  </article>
+
+  <footer class="ft">
+    <div class="ft-bottom">
+      <span>&copy; 2026 Property operations</span>
+      <nav class="ft-links"><a href="/">Home</a><a href="/terms">Terms</a><a href="/app/sign-in">Sign in</a></nav>
+    </div>
+  </footer>
+</main>
+</body>
+</html>

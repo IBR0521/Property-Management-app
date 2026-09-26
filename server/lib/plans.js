@@ -7,80 +7,30 @@
    advance from something the customer already knows — and every property
    manager knows exactly how many doors they have.
 
-   So: a flat monthly price per band of units. No per-transaction fee, no
-   percentage of rent, nothing that grows with how much money moves through the
-   system. A company that collects more rent this month owes us the same as
-   last month.
+   So: one monthly price per door. A company with ten doors pays ten times
+   that price. A company with one door pays it once. No band that charges a
+   one-door firm for twenty-five, no per-payment fee, and no percentage of
+   rent. Collecting more rent does not change the bill. Adding a door does.
 
-   The prices here are the source of truth for what is *displayed*. What is
-   charged is the matching product in Dodo Payments. A missing product is a
-   configuration error the billing page names, rather than something to hide. */
+   The price here is the source of truth for what is *displayed*. What is
+   charged is the Dodo product, once per door. That product has to be priced
+   at the same rate, because checkout sends the door count as the quantity. */
 
-export const PLANS = [
-  {
-    key: "starter",
-    name: "Starter",
-    maxUnits: 25,
-    monthlyCents: 4900,
-    blurb: "For a small portfolio, or a manager just getting off spreadsheets.",
-  },
-  {
-    key: "growth",
-    name: "Growth",
-    maxUnits: 100,
-    monthlyCents: 14900,
-    blurb: "The usual size for a firm with a full-time maintenance coordinator.",
-  },
-  {
-    key: "professional",
-    name: "Professional",
-    maxUnits: 500,
-    monthlyCents: 39900,
-    blurb: "Several portfolios, several staff, owner reporting that has to be right.",
-  },
-  {
-    key: "scale",
-    name: "Scale",
-    maxUnits: null,                    // no ceiling
-    monthlyCents: 79900,
-    blurb: "Over five hundred doors. Everything, no per-unit escalation.",
-  },
-];
+/* $2.00 a door. $49 for a band of 25 doors was about this, and a band is
+   what a one-door company should not have to buy. */
+export const PER_DOOR_CENTS = 200;
+export const PLAN_KEY = "door";
 
 export const TRIAL_DAYS = 30;
 
-export function planByKey(key) {
-  return PLANS.find((p) => p.key === key) || null;
+/* Doors are units the company has added. An empty company is not billed. */
+export function billableDoors(units) {
+  const n = Math.floor(Number(units) || 0);
+  return n > 0 ? n : 0;
 }
 
-/* The band a portfolio of this size falls into. Chosen by unit count rather
-   than by sales conversation, so a customer can work out their own bill. */
-export function planForUnits(units) {
-  const n = Number(units) || 0;
-  return PLANS.find((p) => p.maxUnits === null || n <= p.maxUnits) || PLANS[PLANS.length - 1];
-}
-
-/* Whether a company on this plan has outgrown it. Reported rather than
-   enforced: a portfolio that grows past its band keeps working, and the
-   billing page says so. Cutting somebody off mid-month because they added a
-   building is the behaviour this product exists to be unlike. */
-export function outgrown(planKey, units) {
-  const plan = planByKey(planKey);
-  if (!plan || plan.maxUnits === null) return null;
-  const n = Number(units) || 0;
-  if (n <= plan.maxUnits) return null;
-  return { plan, units: n, suggested: planForUnits(n) };
-}
-
-/* The Stripe price id for a band. Kept for anything still reading the old name. */
-export function stripePriceEnvKey(planKey) {
-  return `STRIPE_PRICE_${String(planKey).toUpperCase()}`;
-}
-
-/* The Dodo Payments product for a band. One variable each, so a missing one
-   names itself. */
-export function dodoProductEnvKey(planKey) {
-  return `DODO_PRODUCT_${String(planKey).toUpperCase()}`;
+export function monthlyCents(units) {
+  return billableDoors(units) * PER_DOOR_CENTS;
 }
 
 /* States in which the company may keep working. Anything else is read-only.

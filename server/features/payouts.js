@@ -45,7 +45,7 @@ export function registerPayouts(router) {
 
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "payouts", counts: await navCounts(cid),
-      title: "Payments out", subtitle: "Owner distributions and contractor payments",
+      title: "Pay owners", subtitle: "What you owe owners and contractors, and paying it",
       body: html`
         ${tabs(PAYOUT_TABS, "runs")}
         ${ctx.flash ? notice("ok", null, ctx.flash) : ""}

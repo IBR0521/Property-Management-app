@@ -428,7 +428,7 @@ export function registerAccounting(router) {
 
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "accounting", counts: await navCounts(cid),
-      title: "Accounting",
+      title: "Books",
       subtitle: totalDr === totalCr
         ? `${usd(totalDr)} on each side — in balance`
         : `OUT OF BALANCE by ${usd(Math.abs(totalDr - totalCr))}`,
@@ -710,7 +710,7 @@ function journalForm({ csrf, accounts, error }) {
           <p>A journal posted here cannot be edited or deleted afterwards — the book is
             append-only. A mistake is corrected by posting its mirror, which leaves both
             entries visible for ever. Most money is better recorded on the screen it
-            belongs to: rent on Tenant payments, a bill on Contractors.</p>
+            belongs to: rent on Rent in, a bill on Contractors.</p>
         </div>
         <div class="panel__body">
           <div class="formgrid formgrid--2">

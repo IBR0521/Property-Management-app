@@ -139,8 +139,8 @@ async function renderList(ctx, view) {
 
   sendHtml(ctx.res, appPage({
     staff: ctx.staff, csrf: ctx.csrf, active: "messages", counts: await navCounts(cid),
-    title: "Messages",
-    subtitle: `${counts.queued} queued · ${counts.dead} not delivered · ${counts.sent} sent`,
+    title: "Notices",
+    subtitle: `${counts.queued} waiting · ${counts.dead} not delivered · ${counts.sent} sent`,
     body: html`
       ${tabs(TABS, view)}
       ${ctx.flash ? notice("ok", null, ctx.flash) : ""}

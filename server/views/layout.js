@@ -58,27 +58,27 @@ ${install ? html`<link rel="manifest" href="${install}" />
    silently stopped being true of three entries. */
 export const NAV = [
   { group: null, items: [
-    { href: "/app", key: "queue", icon: "inbox", label: "Queue", badge: "queue" },
+    { href: "/app", key: "queue", icon: "inbox", label: "Today", badge: "queue" },
     { href: "/app/portfolio", key: "properties", icon: "home", label: "Properties", badge: "properties" },
     { href: "/app/inbox", key: "inbox", icon: "send", label: "Inbox", badge: "inbox" },
     { href: "/app/owners", key: "people", icon: "users", label: "Owners", badge: "people", need: "money.view" },
   ] },
   { group: "Money", items: [
-    { href: "/app/accounting", key: "accounting", icon: "cash", label: "Accounting", need: "money.view" },
+    { href: "/app/accounting", key: "accounting", icon: "cash", label: "Books", need: "money.view" },
     { href: "/app/banking", key: "banking", icon: "loop", label: "Banking", need: "bank.link" },
-    { href: "/app/payments", key: "payments", icon: "cash", label: "Tenant payments", need: "money.view" },
-    { href: "/app/payouts", key: "payouts", icon: "send", label: "Payments out", need: "money.view" },
+    { href: "/app/payments", key: "payments", icon: "cash", label: "Rent in", need: "money.view" },
+    { href: "/app/payouts", key: "payouts", icon: "send", label: "Pay owners", need: "money.view" },
     { href: "/app/deposits", key: "deposits", icon: "cash", label: "Deposits", need: "money.view" },
     { href: "/app/vendors", key: "vendors", icon: "wrench", label: "Contractors", need: "vendor.manage" },
   ] },
   { group: "Leasing", items: [
     { href: "/app/listings", key: "listings", icon: "key", label: "Vacancies", need: "leasing.work" },
-    { href: "/app/leases", key: "leases", icon: "doc", label: "Lease documents", need: "leasing.work" },
+    { href: "/app/leases", key: "leases", icon: "doc", label: "Leases", need: "leasing.work" },
   ] },
   { group: null, items: [
     { href: "/app/reports", key: "reports", icon: "doc", label: "Reports", when: hasAnyReport },
     { href: "/app/jobs", key: "jobs", icon: "wrench", label: "Your jobs", need: "maintenance.own" },
-    { href: "/app/messages", key: "messages", icon: "send", label: "Messages" },
+    { href: "/app/messages", key: "messages", icon: "send", label: "Notices" },
   ] },
   /* The five settings pages, which were loose in the list above. "Where do I
      change the company address" was answered by reading all twenty items,
@@ -86,8 +86,7 @@ export const NAV = [
   { group: "Settings", items: [
     { href: "/app/staff", key: "staff", icon: "users", label: "Your team", need: "staff.manage" },
     { href: "/app/company", key: "company", icon: "home", label: "Company", need: "settings.manage" },
-    { href: "/app/billing", key: "billing", icon: "cash", label: "Billing", need: "settings.manage" },
-    { href: "/app/company/access", key: "access", icon: "shield", label: "Support access", need: "settings.manage" },
+    { href: "/app/billing", key: "billing", icon: "cash", label: "Your plan", need: "settings.manage" },
     { href: "/app/setup", key: "setup", icon: "cog", label: "Setup", need: "settings.manage" },
   ] },
 ];

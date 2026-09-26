@@ -140,7 +140,7 @@ export function registerPublicListings(router) {
               <div class="panel">
                 ${l.photo ? html`
                   <a href="${publicPath(company, `/listings/${l.id}`)}">
-                    <img src="${fileUrl(l.photo)}" alt=""
+                    <img src="${fileUrl(l.photo)}" alt="${l.headline}"
                          style="width:100%;height:11rem;object-fit:cover;border-radius:0.5rem 0.5rem 0 0" />
                   </a>` : ""}
                 <div class="panel__body">
@@ -216,7 +216,7 @@ export function registerPublicListings(router) {
             <div class="grid grid--2">
               ${photos.map((ph) => html`
                 <a href="${fileUrl(ph.path)}" target="_blank">
-                  <img src="${fileUrl(ph.path)}"${attr("alt", ph.caption || "")}
+                  <img src="${fileUrl(ph.path)}"${attr("alt", ph.caption || listing.headline)}
                        style="width:100%;height:12rem;object-fit:cover;border-radius:0.5rem" />
                 </a>`)}
             </div>

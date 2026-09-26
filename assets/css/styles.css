@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Quick Property Buyer — stylesheet
+   Property operations — stylesheet
    --------------------------------------------------------------------------
    Layout is driven off the root font size, which is a vw unit below 1920px.
    Every dimension is therefore in rem so the whole page scales as one piece
@@ -143,6 +143,30 @@ main{width:100%;overflow-x:clip;padding:0.5rem}
   text-transform:uppercase;line-height:0.85;letter-spacing:-0.02em;
   white-space:normal;overflow-wrap:break-word}
 @media (min-width:640px){.hero-title{padding-left:2.5rem;padding-right:2.5rem}}
+
+/* A split hero: the type on the navy ground, the photograph in its own
+   frame. The full-bleed plate and the glass widgets belonged to the
+   previous arrangement. */
+.hero.hero--plain{height:auto;min-height:calc(100svh - 1rem)}
+.stage{flex:1;display:grid;gap:1.75rem;padding:1.25rem 1.5rem 2.75rem;align-items:end}
+@media (min-width:900px){.stage{grid-template-columns:1.05fr .95fr;gap:2.5rem;padding:1rem 2.5rem 2.5rem}}
+.stage .hero-title{padding:0}
+.stage .tagline{margin-top:1.25rem;font-size:clamp(1.6rem,3vw,2.4rem)}
+.hero--plain .hero-title{font-size:clamp(2.6rem,6.2vw,5.75rem)}
+.stage-actions{display:flex;flex-wrap:wrap;gap:.75rem;margin-top:1.75rem}
+.pill.on-navy{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4)}
+.pill.on-navy:hover{background:#fff;color:var(--brand-deep)}
+.stage-photo{margin:0;border-radius:var(--radius-card);overflow:hidden;min-height:16rem;
+  box-shadow:0 0 0 1px rgba(255,255,255,.14)}
+.stage-photo img{width:100%;height:100%;min-height:16rem;max-height:32rem;object-fit:cover;object-position:center}
+
+.shot-row{display:grid;gap:1.25rem}
+@media (min-width:768px){.shot-row{grid-template-columns:1.15fr .85fr;align-items:start}}
+.shot{margin:0}
+.shot img{width:100%;height:24rem;object-fit:cover;border-radius:var(--radius-card-lg);display:block}
+.shot figcaption{margin-top:1rem;display:flex;flex-direction:column;gap:.3rem;max-width:36rem}
+.shot figcaption b{font-weight:500;font-size:1.05rem}
+.shot figcaption span{color:var(--ink-soft);line-height:1.5}
 
 .hero-bottom{margin-top:auto;padding:0 1.5rem 2rem;display:flex;flex-direction:column;gap:1.5rem}
 @media (min-width:640px){.hero-bottom{padding:0 2.5rem 2.5rem;flex-direction:row;
@@ -582,6 +606,22 @@ main{width:100%;overflow-x:clip;padding:0.5rem}
   :where(header,nav,[class*="nav"],[class*="header"]) :where([class*="brand"],[class*="logo"],[class*="wordmark"],[class*="title"]){font-size:min(1em,17px)!important}
   :where(header,nav,[class*="nav"]) :where(a,button){font-size:min(1em,14px)!important}
 }
+
+/* ==========================================================================
+   Privacy and terms
+   --------------------------------------------------------------------------
+   The same type and page ground as the landing. These pages do not load the
+   landing motion, so the type is set here rather than by the word-split.
+   ========================================================================== */
+.doc-bar{display:flex;align-items:center;justify-content:space-between;gap:1rem;
+  padding:.25rem .25rem 0;font-size:.75rem;letter-spacing:.06em}
+.doc-bar nav{display:flex;gap:1rem}
+.doc-bar a:hover{text-decoration:underline}
+.doc h1{font-size:3rem;font-weight:500;line-height:1.05;letter-spacing:-.02em}
+.doc h2{font-size:1.15rem;font-weight:500;margin:2rem 0 .35rem}
+.doc p,.doc li{margin:.65rem 0}
+.doc ul{padding-left:1.15rem}
+.doc a{text-decoration:underline;text-underline-offset:2px}
 
 /* ==========================================================================
    Reduced motion
