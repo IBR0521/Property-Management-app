@@ -18,6 +18,8 @@ import { DELIVERY_MODE } from "../config.js";
 import { drains, reachesRecipients, describe } from "./mode.js";
 import * as logProvider from "./log.js";
 import * as resend from "./resend.js";
+import * as gmail from "./gmail.js";
+import { isGoogleMailbox } from "./gmail.js";
 import * as twilio from "./twilio.js";
 import { blockedReason } from "./consent.js";
 
@@ -26,7 +28,18 @@ export { drains, reachesRecipients, describe };
 /* Resolved per call rather than at import, so a test can hand in a fake
    without reloading the module, and so an unknown mode fails at the moment of
    sending — where the failure is attributable to a message — rather than at
-   boot. */
+   boot.
+
+   A Gmail address is sent by Google as that mailbox. Everything else on the
+   email channel stays with Resend, which can only stamp a domain it holds
+   DNS for. Log mode never opens either connection. */
+export function emailRoute(from, forMode = DELIVERY_MODE) {
+  if (!drains(forMode)) return "off";
+  if (forMode === "log") return "log";
+  if (isGoogleMailbox(from)) return "gmail";
+  return "resend";
+}
+
 export function providerFor(channel, forMode = DELIVERY_MODE) {
   if (!drains(forMode)) return null;
   if (forMode === "log") return logProvider;
@@ -64,12 +77,16 @@ export async function deliver(
     }
   }
 
-  const provider = providerFor(channel, forMode);
+  const route = channel === "email" ? emailRoute(from, forMode) : null;
+  const provider = route === "gmail" ? gmail
+    : route === "log" ? logProvider
+    : route === "off" ? null
+    : providerFor(channel, forMode);
   if (!provider) {
     return { ok: false, providerMessageId: null, error: "delivery is off", retryable: true, provider: null };
   }
   try {
-    const result = await provider.send({ channel, to, subject, body, from, replyTo, companyId });
+    const result = await provider.send({ channel, to, subject, body, from, replyTo, companyId, mode: forMode });
     return { ...result, provider: provider.name };
   } catch (err) {
     return {

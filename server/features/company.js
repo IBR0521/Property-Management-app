@@ -20,6 +20,8 @@ import { navCounts } from "../lib/counts.js";
 import { slugProblem, uniqueSlug } from "../lib/slug.js";
 import { storeUpload, fileUrl, IMAGE_TYPES } from "../lib/files.js";
 import { senderFor } from "../lib/outbox.js";
+import { isGoogleMailbox } from "../lib/delivery/gmail.js";
+import { seal } from "../lib/crypto.js";
 import { hasSecondFactor } from "../lib/auth.js";
 import { COMMON_ZONES, isValidZone, nowInZone } from "../lib/timezone.js";
 
@@ -129,8 +131,8 @@ export function registerCompany(router) {
             <div class="panel__head"><h2>Where your mail comes from</h2></div>
             <div class="panel__body">
               <p class="lede" style="margin:0 0 1rem">
-                Mail goes out as you, not as the platform. Set an address on a domain you
-                control and authenticate it with SPF and DKIM, or notices land in spam.
+                Recipients see the sender address you type here. A Gmail address is sent
+                by that mailbox, so the inbox shows that Gmail address.
               </p>
               <div class="formgrid formgrid--2">
                 <div class="field">
@@ -141,8 +143,18 @@ export function registerCompany(router) {
                 <div class="field">
                   <label for="from_email">Sender address</label>
                   <input id="from_email" name="from_email" type="email" maxlength="160"
-                         value="${company.from_email || ""}" placeholder="notices@yourdomain.com" />
+                         value="${company.from_email || ""}" placeholder="name@gmail.com" />
                 </div>
+              </div>
+              <div class="field">
+                <label for="mailbox_secret">Gmail app password</label>
+                <input id="mailbox_secret" name="mailbox_secret" type="password" maxlength="64"
+                       autocomplete="new-password"
+                       placeholder="${company.mailbox_secret_sealed ? "Saved — leave blank to keep it" : "16 letters from Google"}" />
+                <span class="field__help">
+                  Google Account, then Security, then App passwords. Google sends as the
+                  address above once this is saved. Leave it blank to keep the one already saved.
+                </span>
               </div>
               <div class="formgrid formgrid--2">
                 <div class="field">
@@ -286,6 +298,18 @@ export function registerCompany(router) {
       logoPath = stored.path;
     }
 
+    const fromEmail = String(f.from_email || "").trim().toLowerCase() || null;
+    const typedSecret = String(f.mailbox_secret || "").replace(/\s+/g, "");
+    let mailboxSecret = company.mailbox_secret_sealed || null;
+    if (!isGoogleMailbox(fromEmail)) {
+      mailboxSecret = null;
+    } else if (typedSecret) {
+      if (typedSecret.length < 16) {
+        return back("That Gmail app password is too short. Google shows 16 letters.");
+      }
+      mailboxSecret = seal(typedSecret);
+    }
+
     await update("company", cid, {
       name,
       legal_name: String(f.legal_name || "").trim() || null,
@@ -296,7 +320,8 @@ export function registerCompany(router) {
       slug,
       logo_path: logoPath,
       from_name: String(f.from_name || "").trim() || null,
-      from_email: String(f.from_email || "").trim().toLowerCase() || null,
+      from_email: fromEmail,
+      mailbox_secret_sealed: mailboxSecret,
       reply_to: String(f.reply_to || "").trim().toLowerCase() || null,
       sms_from: String(f.sms_from || "").trim() || null,
       timezone,
