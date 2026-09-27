@@ -93,12 +93,12 @@ export function registerListings(router) {
           AND NOT EXISTS (SELECT 1 FROM listing l WHERE l.unit_id = u.id)
         ORDER BY p.line1, u.label`, cid);
 
-    const live = rows.filter((r) => r.status === "active" && r.syndicate).length;
+    const live = rows.filter((r) => r.status === "active").length;
 
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "listings", counts: await navCounts(cid),
       title: "Vacancies",
-      subtitle: `${rows.length} listing${rows.length === 1 ? "" : "s"} · ${live} syndicated`,
+      subtitle: `${rows.length} listing${rows.length === 1 ? "" : "s"} · ${live} on your page`,
       actions: html`<a class="pill outline sm" href="${publicPath(company, "/listings")}"
         target="_blank">Your public page</a>`,
       body: html`
@@ -108,37 +108,17 @@ export function registerListings(router) {
 
         <div class="panel">
           <div class="panel__head"><h2>Where these appear</h2>
-            <p>One page that works today, one feed that needs somebody's approval first</p>
+            <p>Your own page. Send somebody the link.</p>
           </div>
           <div class="panel__body panel__body--flush">
-            <!-- Two labelled rows, not tabular data. The presentation role
-                 stops a screen reader announcing "table, 2 columns, row 1 of 2"
-                 before every line of what is really a short list. -->
             <div class="tablewrap"><table class="data" role="presentation"><tbody>
               <tr>
                 <td class="shrink"><b>Your page</b></td>
                 <td><a href="${publicPath(company, "/listings")}" target="_blank">${publicPath(company, "/listings")}</a>
                   <span class="cellsub">Every active listing, with an enquiry form that lands in
-                    your inbox. Needs nobody's permission — send somebody the link.</span></td>
-              </tr>
-              <tr>
-                <td class="shrink"><b>Your feed</b></td>
-                <td><code>/feeds/${company.slug || "\u2014"}/listings.xml</code>
-                  <span class="cellsub">MITS, which is what both Zillow and Apartments.com read.
-                    <b>Only the listings you ticked for syndication.</b> Give a network
-                    <em>this</em> address — the one without your name in it carries no
-                    listings on purpose, because a shared feed would publish other
-                    companies' properties under yours.</span></td>
+                    your inbox.</span></td>
               </tr>
             </tbody></table></div>
-            <div class="panel__body">
-              ${notice("info", "Before a feed does anything",
-                html`Zillow wants an integration request approved by their Rentals Integrations
-                  team <b>before</b> a feed is worth pointing at them, then four to six weeks of
-                  their own feed testing. Apartments.com will send you their guide and take the
-                  XML by URL. Both are free. Neither will look at a feed from somebody who has
-                  not asked, so that is an email you send rather than a setting here.`)}
-            </div>
           </div>
         </div>
 
@@ -160,21 +140,17 @@ export function registerListings(router) {
           </div>` : ""}
 
         <div class="panel">
-          <div class="panel__head"><h2>Listings</h2>
-            <a class="pill outline sm" href="/feeds/listings.xml">View the feed</a></div>
+          <div class="panel__head"><h2>Listings</h2></div>
           <div class="panel__body panel__body--flush">
             ${rows.length ? html`<div class="tablewrap tablewrap--narrow"><table class="data">
               <thead><tr><th>Unit</th><th>Headline</th><th class="num">Rent</th>
-                <th>Status</th><th>Syndicated</th><th class="shrink"></th></tr></thead>
+                <th>Status</th><th class="shrink"></th></tr></thead>
               <tbody>${rows.map((l) => html`
                 <tr>
                   <td>${l.line1}${l.label ? ` · ${l.label}` : ""}</td>
                   <td>${l.headline}<span class="cellsub">${l.photos} photo(s)</span></td>
                   <td class="num">${usd(l.rent_cents)}</td>
                   <td><span class="chip"${attr("data-tone", l.status === "active" ? "ok" : null)}>${l.status}</span></td>
-                  <td>${l.syndicate
-                    ? html`<span class="chip" data-tone="brand">live</span>`
-                    : html`<span class="chip">private</span>`}</td>
                   <td class="shrink"><a class="pill outline sm" href="/app/listings/${l.id}"
                   ${attr("aria-label", `Edit the listing ${l.headline || ""}`)}>Edit</a></td>
                 </tr>`)}</tbody></table></div>`
@@ -196,7 +172,7 @@ export function registerListings(router) {
 
     sendHtml(ctx.res, appPage({
       staff: ctx.staff, csrf: ctx.csrf, active: "listings", counts: await navCounts(cid),
-      title: "Advertise a unit", subtitle: "Copy, price, and whether it goes out to the networks",
+      title: "Advertise a unit", subtitle: "Copy and price for your own page",
       body: units.length
         ? listingForm({ csrf: ctx.csrf, listing: null, units, chosen, error: ctx.query.e })
         : empty("Every unit already has a listing.", "Edit an existing one instead."),
@@ -323,7 +299,7 @@ function listingForm({ csrf, listing, units, chosen, error }) {
           <div class="field">
             <label for="description">Description</label>
             <textarea id="description" name="description" rows="6" maxlength="4000">${val("description")}</textarea>
-            <span class="field__help">Plain text. This goes out to the networks exactly as typed.</span>
+            <span class="field__help">Plain text. This is what a renter reads on your page.</span>
           </div>
           <div class="formgrid formgrid--2">
             <div class="field"><label for="rent">Asking rent</label>
@@ -400,20 +376,11 @@ function listingForm({ csrf, listing, units, chosen, error }) {
                   <input type="radio" name="status" value="${s}"${attr("checked",
                     listing ? listing.status === s : s === "draft")} />
                   <span>${s === "draft" ? "Draft" : s === "active" ? "Active" : s === "paused" ? "Paused" : "Leased"}
-                    <small>${s === "draft" ? "Not visible anywhere"
-                      : s === "active" ? "Ready to be advertised"
-                      : s === "paused" ? "Held back for now" : "Taken — drops out of the feed"}</small></span>
+                    <small>${s === "draft" ? "Not on your page"
+                      : s === "active" ? "On your public page"
+                      : s === "paused" ? "Held back for now" : "Taken — leaves your page"}</small></span>
                 </label>`)}
             </div>
-          </div>
-          <div class="field">
-            <label class="consent">
-              <input type="checkbox" name="syndicate" value="yes"${attr("checked", listing && listing.syndicate)} />
-              <span>Publish to the syndication feed (Zillow, Apartments.com and other networks)</span>
-            </label>
-            <span class="field__help">
-              Only active listings with this ticked appear in the feed. Everything else stays private to this app.
-            </span>
           </div>
         </div>
       </div>
