@@ -77,9 +77,9 @@ describe("rate limiting", () => {
     await run("DELETE FROM rate_hit");     // leave the table clean for other tests
   });
 
-  test("the limiter fails open when its own table is unusable", async () => {
-    /* A database problem must not lock everybody out of their own sign-in
-       page. Asserted on the module rather than by breaking the table. */
+  test("the limiter answers with an allow or a refusal", async () => {
+    /* Public forms refuse when the counter itself is broken. This call is
+       the ordinary path: it has to come back as a yes or a no, not throw. */
     const { check } = await import("../server/lib/ratelimit.js");
     const res = await check("signin", "1.2.3.4");
     assert.equal(typeof res.allowed, "boolean");

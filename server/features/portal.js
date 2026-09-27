@@ -11,7 +11,7 @@
    The existing tokenised links are untouched and keep working. A tenant who
    has a bookmarked `/pay/:token` never has to see this page at all. */
 import { all, get, one } from "../lib/db.js";
-import { sendHtml, redirect } from "../lib/http.js";
+import { sendHtml, redirect, sameOriginPath } from "../lib/http.js";
 import { html, attr } from "../lib/render.js";
 import { portalPage, publicPage, notice, empty, PORTAL_MANIFEST } from "../views/layout.js";
 import { check, clientIp } from "../lib/ratelimit.js";
@@ -51,7 +51,9 @@ export function registerPortal(router) {
           <div class="panel__body">
             <form method="post" action="/portal/sign-in" class="formgrid">
               <input type="hidden" name="_csrf" value="${ctx.csrf}" />
-              ${ctx.query.next ? html`<input type="hidden" name="next" value="${ctx.query.next}" />` : ""}
+              ${sameOriginPath(ctx.query.next, "/portal")
+                ? html`<input type="hidden" name="next" value="${sameOriginPath(ctx.query.next, "/portal")}" />`
+                : ""}
               <div class="field">
                 <label for="email">Your email address</label>
                 <input id="email" name="email" type="email" autocomplete="email"

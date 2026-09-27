@@ -14,7 +14,7 @@
 import { all, get, one, insert, update, run, tx } from "../lib/db.js";
 import { id } from "../lib/ids.js";
 import { stamp, humanStamp } from "../lib/dates.js";
-import { sendHtml, redirect, BadRequest } from "../lib/http.js";
+import { sendHtml, redirect, BadRequest, sameOriginPath } from "../lib/http.js";
 import { html, raw, attr } from "../lib/render.js";
 import { appPage, publicPage, notice } from "../views/layout.js";
 import { navCounts } from "../lib/counts.js";
@@ -260,9 +260,7 @@ async function countRecoveryCodes(staffId) {
    is the company's queue and a technician has no capability for it, so the
    default used to answer a correct 2FA code with a 403. */
 function safeNext(value, staff = null) {
-  const v = String(value || "");
-  if (v.startsWith("/app") && !v.startsWith("//")) return v;
-  return staff ? landingFor(staff) : "/app";
+  return sameOriginPath(value, "/app") || (staff ? landingFor(staff) : "/app");
 }
 
 /* --- views ---------------------------------------------------------------- */

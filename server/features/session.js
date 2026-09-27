@@ -1,7 +1,7 @@
 /* Staff sign-in. */
 import { get } from "../lib/db.js";
 import { verifyPassword, startSession, endSession, staffByEmail, hasSecondFactor, landingFor } from "../lib/auth.js";
-import { sendHtml, redirect } from "../lib/http.js";
+import { sendHtml, redirect, sameOriginPath } from "../lib/http.js";
 import { check, clear, clientIp } from "../lib/ratelimit.js";
 import { signInPage, publicPage, notice } from "../views/layout.js";
 import { html, attr } from "../lib/render.js";
@@ -17,7 +17,7 @@ export function registerAuthRoutes(router) {
     sendHtml(ctx.res, signInPage({
       company,
       csrf: ctx.csrf,
-      next: typeof ctx.query.next === "string" && ctx.query.next.startsWith("/app") ? ctx.query.next : null,
+      next: sameOriginPath(ctx.query.next, "/app"),
       error: ctx.query.e ? decodeURIComponent(ctx.query.e) : null,
     }));
   });
@@ -76,9 +76,7 @@ export function registerAuthRoutes(router) {
 
     await startSession(ctx.res, staff.id, { secure: ctx.url.protocol === "https:" });
 
-    const next = typeof ctx.fields.next === "string" && ctx.fields.next.startsWith("/app")
-      ? ctx.fields.next
-      : landingFor(staff);
+    const next = sameOriginPath(ctx.fields.next, "/app") || landingFor(staff);
     /* The session exists but is only half authenticated. The gate in app.js
        sends them to the challenge; passing `next` through means they land
        where they were going once it is answered. */

@@ -4,9 +4,10 @@
    because a serverless process does not survive between requests and an
    in-memory counter would enforce nothing.
 
-   Deliberately fail-open: if the limiter itself errors, the request proceeds.
-   A database hiccup should not lock everyone out of their own sign-in page,
-   and the failure is logged rather than swallowed. */
+   Public doors fail closed. If the limiter itself errors, sign-in, signup,
+   portal, pay and the other stranger-facing forms are refused. A broken
+   counter must not become an open password guess. Anything that is not in
+   that set still proceeds, and the failure is logged rather than swallowed. */
 import { all, run, get } from "./db.js";
 import { id } from "./ids.js";
 
@@ -42,6 +43,12 @@ export const LIMITS = {
   portal: { max: 30, windowMinutes: 60 },
 };
 
+/* Buckets a stranger can hit. A fault in the counter refuses these rather
+   than letting the attempt through. */
+const FAIL_CLOSED = new Set([
+  "signin", "portal", "signup", "confirm", "pay", "apply", "enquiry", "report",
+]);
+
 /* Best-effort client address. Vercel and most proxies set x-forwarded-for;
    the first entry is the client, the rest are proxies. */
 export function clientIp(req) {
@@ -73,7 +80,10 @@ export async function check(bucket, subject) {
     );
     return { allowed: true, remaining: limit.max - used - 1 };
   } catch (err) {
-    console.error("[ratelimit] check failed, allowing request", err.message);
+    console.error("[ratelimit] check failed", err.message);
+    if (FAIL_CLOSED.has(bucket)) {
+      return { allowed: false, remaining: 0, retryAfterMinutes: 1 };
+    }
     return { allowed: true, remaining: Infinity };
   }
 }

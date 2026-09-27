@@ -208,11 +208,16 @@ export function isHttps(req) {
   return Boolean(req.socket && req.socket.encrypted);
 }
 
+/* Pages carry tenant names, rent figures and session-shaped HTML. A shared
+   cache must not keep a copy. Static files set their own cache header. */
+const NO_STORE = { "Cache-Control": "private, no-store" };
+
 export function sendHtml(res, html, status = 200, extra = {}) {
   res.writeHead(status, {
     "Content-Type": "text/html; charset=utf-8",
     "Content-Length": Buffer.byteLength(html),
     ...(res.req ? securityHeaders(res.req) : SECURITY_HEADERS),
+    ...NO_STORE,
     ...extra,
   });
   res.end(html);
@@ -224,12 +229,15 @@ export function sendJson(res, data, status = 200) {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": Buffer.byteLength(body),
     ...(res.req ? securityHeaders(res.req) : SECURITY_HEADERS),
+    ...NO_STORE,
   });
   res.end(body);
 }
 
 export function redirect(res, location, status = 303) {
-  res.writeHead(status, { Location: location, ...SECURITY_HEADERS });
+  res.writeHead(status, {
+    Location: location, ...SECURITY_HEADERS, "Cache-Control": "private, no-store",
+  });
   res.end();
 }
 
@@ -264,6 +272,19 @@ export function timingSafeCompare(a, b) {
   const y = Buffer.from(String(b));
   if (x.length !== y.length) return false;
   return timingSafeEqual(x, y);
+}
+
+/* A path we are willing to redirect to after sign-in.
+
+   `startsWith("/app")` is not enough: it also matches `/application`, and a
+   value like `/app\\evil.example` or `/app//evil.example` is how a browser
+   is walked off this site. The result is a path on this origin, or null. */
+export function sameOriginPath(value, prefix) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 2048) return null;
+  if (/[\u0000-\u001f\u007f\\]/.test(value)) return null;
+  if (value.includes("//") || value.includes("://") || value.includes("@")) return null;
+  if (value !== prefix && !value.startsWith(prefix + "/") && !value.startsWith(prefix + "?")) return null;
+  return value;
 }
 
 /* --- errors --------------------------------------------------------------- */

@@ -13,7 +13,14 @@ import { PORT, DATABASE_URL, assertConfig } from "./lib/config.js";
 
 assertConfig();
 
-createServer(handle).listen(PORT, async () => {
+const server = createServer({
+  requestTimeout: 60_000,
+  headersTimeout: 20_000,
+  keepAliveTimeout: 5_000,
+  maxHeaderSize: 16 * 1024,
+}, handle);
+
+server.listen(PORT, async () => {
   const company = await get("SELECT name FROM company LIMIT 1");
   console.log(`\n  Property operations`);
   console.log(`  ${company ? company.name : "no company yet — run: npm run seed"}`);

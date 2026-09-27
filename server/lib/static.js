@@ -4,7 +4,7 @@
    directory. Paths are resolved and then checked to be inside their root, so
    a traversal attempt lands outside and is refused rather than served. */
 import { createReadStream, statSync } from "node:fs";
-import { join, resolve, extname, normalize } from "node:path";
+import { join, resolve, extname, normalize, sep } from "node:path";
 import { ROOT } from "./db.js";
 import { UPLOAD_DIR } from "./files.js";
 
@@ -30,8 +30,13 @@ const TYPES = {
 };
 
 function within(root, candidate) {
-  const full = resolve(root, "." + normalize("/" + candidate));
-  return full.startsWith(resolve(root)) ? full : null;
+  const base = resolve(root);
+  const full = resolve(base, "." + normalize("/" + String(candidate || "")));
+  /* `startsWith(base)` alone treats `/data/uploads-secret` as inside
+     `/data/uploads`. The separator makes the boundary a directory. */
+  if (full !== base && !full.startsWith(base + sep)) return null;
+  if (full === base) return null;
+  return full;
 }
 
 export function serveFile(res, root, relPath, { download = null, cache = "no-cache" } = {}) {

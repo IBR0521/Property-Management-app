@@ -21,7 +21,7 @@ import { currentPerson } from "./lib/magiclink.js";
 import { currentStaff, can, requiredCapability, roleLabel, secondFactorRedirect, landingFor } from "./lib/auth.js";
 import {
   parseRequestBody, sendHtml, sendText, sendJson, redirect,
-  HttpError, csrfToken, checkCsrf, Forbidden, isHttps,
+  HttpError, csrfToken, checkCsrf, Forbidden, isHttps, LIMITS, PayloadTooLarge, BadRequest,
 } from "./lib/http.js";
 import { registerAuthRoutes } from "./features/session.js";
 import { registerQueue } from "./features/queue.js";
@@ -151,6 +151,9 @@ export function registeredRoutes() {
    and returns straight through otherwise. See lib/dev/querycount.js for why
    the load test measures queries rather than milliseconds. */
 export async function handle(req, res) {
+  /* A client that opens a connection and never finishes it must not hold
+     the process. The body reader already caps size; this caps time. */
+  req.setTimeout?.(60_000, () => req.destroy());
   /* The count cannot be a response header: by the time it is known the
      response has gone. So the counting context keeps the last one, and a
      load test running in the same process reads it after the fetch
@@ -177,11 +180,23 @@ async function handleRequest(req, res) {
      inside the try it would be out of scope exactly when it is wanted. */
   let ctx = null;
 
-  const scheme = isHttps(req) ? "https" : "http";
-  const url = new URL(req.url, `${scheme}://${req.headers.host || "localhost"}`);
-  const path = url.pathname.replace(/\/+$/, "") || "/";
+  let path = "";
 
   try {
+    /* A huge query string is a cheap way to spend memory before any route
+       runs. Reject it before the URL parser is asked to chew on it. */
+    if (typeof req.url !== "string" || req.url.length > 8192) {
+      return sendText(res, "Request too large", 414);
+    }
+    if (req.method !== "GET" && req.method !== "HEAD" && req.method !== "POST") {
+      res.writeHead(405, { Allow: "GET, HEAD, POST", "Content-Type": "text/plain; charset=utf-8" });
+      return res.end("Method not allowed");
+    }
+
+    const scheme = isHttps(req) ? "https" : "http";
+    const host = typeof req.headers.host === "string" ? req.headers.host : "localhost";
+    const url = new URL(req.url, `${scheme}://${host}`);
+    path = url.pathname.replace(/\/+$/, "") || "/";
     /* --- static ---------------------------------------------------------- */
     if (req.method === "GET") {
       if (path === "/") {
@@ -213,7 +228,9 @@ async function handleRequest(req, res) {
           const row = await get("SELECT 1 AS ok");
           dbOk = row?.ok === 1;
         } catch (err) {
-          dbError = err.message;
+          dbError = String(err?.message || err);
+          console.error("[health] database unreachable",
+            dbError.replace(/postgres(?:ql)?:\/\/\S+/gi, "postgresql://***"));
         }
         return sendJson(res, {
           ok: dbOk,
@@ -223,7 +240,7 @@ async function handleRequest(req, res) {
             remote: Boolean(DATABASE_URL),
             // encrypted always; verified only once a CA is supplied
             tls: DATABASE_CA_CERT ? "verified" : "encrypted-unverified",
-            error: dbError,
+            error: dbOk ? null : "unreachable",
           },
           blob: Boolean(BLOB_READ_WRITE_TOKEN),
           config: configSummary(),
@@ -411,6 +428,13 @@ async function handleRequest(req, res) {
     }
 
     if (req.method === "POST") {
+      const declared = req.headers["content-length"];
+      if (Array.isArray(declared) || (declared && !/^\d+$/.test(declared))) {
+        throw new BadRequest("That request did not say how large it was in a way we can trust.");
+      }
+      if (declared && Number(declared) > LIMITS.body) {
+        throw new PayloadTooLarge(`body over ${Math.round(LIMITS.body / 1048576)}MB`);
+      }
       const parsed = await parseRequestBody(req);
       ctx.fields = parsed.fields || {};
       ctx.files = parsed.files || [];
